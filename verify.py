@@ -12,7 +12,7 @@ from pathlib import Path
 import time
 import subprocess
 import socket
-from app.ai import build_context, _request_headers
+from app.ai import build_context, _request_headers, _sse_delta
 from app.providers.httpjson import courses_from_payload
 from app.browser_login import (
     build_candidate, pick_best, _headers_for_config, _parse_body, _public_candidates,
@@ -153,6 +153,17 @@ check("考试.快照落库", bool(esnap) and esnap["source"] == "test"
 ctx = build_context(load_config())
 check("考试.AI 上下文可回答教室座号",
       "高等数学" in ctx and "@1-201" in ctx and "座号 12" in ctx, ctx[-220:])
+
+# 流式回复的 SSE 行解析（OpenAI 兼容格式）
+check("流式.SSE 解析增量",
+      _sse_delta('data: {"choices":[{"delta":{"content":"你好"}}]}') == "你好")
+check("流式.忽略空增量与结束标记",
+      _sse_delta('data: {"choices":[{"delta":{"role":"assistant"}}]}') is None
+      and _sse_delta("data: [DONE]") is None)
+check("流式.兼容一次性 message",
+      _sse_delta('data: {"choices":[{"message":{"content":"完整"}}]}') == "完整")
+check("流式.坏行安全跳过",
+      _sse_delta("data: not-json") is None and _sse_delta("event: ping") is None)
 
 # 4. 明日课表筛选（2026-11-08 周日 → 无课；周一有课）
 cfg = load_config()
@@ -567,11 +578,66 @@ async def http_tests(port: int):
         check("考试.门户+正方凭证可用", ex_portal.get("supported") is True
               and ex_portal.get("provider") == "portal", str(ex_portal)[:180])
 
+        # AI 流式：未配置直接 400；上游不可达时用 SSE error 事件兜底
+        st = await ca.post(f"{base}/api/chat/stream", json={"message": "你好"})
+        check("流式.未配置被拒", st.status_code == 400, str(st.status_code))
+        await ca.post(f"{base}/api/settings", json={"ai": {
+            "enabled": True, "api_key": "dummy", "model": "x",
+            "base_url": "http://127.0.0.1:9/v1"}})
+        rr = await ca.post(f"{base}/api/chat/stream", json={"message": "你好"})
+        check("流式.返回事件流", rr.status_code == 200
+              and "text/event-stream" in rr.headers.get("content-type", ""),
+              str(rr.headers.get("content-type")))
+        check("流式.上游失败写入 error 事件", '"error"' in rr.text, rr.text[:200])
+
     async with _hx.AsyncClient(timeout=30, trust_env=False,
                                cookies={"qut_session": token_b}) as cb:
         await cb.post(f"{base}/api/auth/logout")
         check("鉴权.登出后失效",
               (await cb.get(f"{base}/api/status")).status_code == 401)
+
+    async with _hx.AsyncClient(timeout=30, trust_env=False,
+                               cookies={"qut_session": token_a}) as ca2, \
+            _hx.AsyncClient(timeout=30, trust_env=False) as cb2:
+        # 上一步已登出，重新登录拿到新会话再测注销
+        relogin = await cb2.post(f"{base}/api/auth/login",
+                                 json={"username": "bob", "password": "BobPass123"})
+        check("注销.重新登录成功", relogin.status_code == 200,
+              str(relogin.status_code))
+        # 注销账号：用户名 + 密码双重确认，删除后会话立即失效
+        bad = await cb2.post(f"{base}/api/auth/delete-account",
+                             json={"username": "bob", "password": "WrongPass123"})
+        check("注销.密码错误被拒", bad.status_code == 400, str(bad.status_code))
+        bad = await cb2.post(f"{base}/api/auth/delete-account",
+                             json={"username": "admin", "password": "BobPass123"})
+        check("注销.用户名不一致被拒", bad.status_code == 400, str(bad.status_code))
+        ok = await cb2.post(f"{base}/api/auth/delete-account",
+                            json={"username": "bob", "password": "BobPass123"})
+        check("注销.确认后删除账号",
+              ok.status_code == 200 and ok.json().get("ok") is True, str(ok.text)[:160])
+        check("注销.原会话立即失效",
+              (await cb2.get(f"{base}/api/status")).status_code == 401)
+        users = (await ca2.get(f"{base}/api/auth/users")).json().get("users", [])
+        check("注销.用户从列表移除",
+              all(u["username"] != "bob" for u in users), str(users)[:200])
+        # 管理员注销时把权限交给最早注册的其他账号
+        code2 = (await ca2.post(f"{base}/api/auth/invites")).json().get("code")
+        r = await ca2.post(f"{base}/api/auth/register", json={
+            "username": "carol", "password": "CarolPass123", "invite": code2})
+        check("注销.新账号可继续注册", r.status_code == 200, str(r.status_code))
+        token_c = r.cookies.get("qut_session")
+        ok = await ca2.post(f"{base}/api/auth/delete-account",
+                            json={"username": "admin", "password": "AdminPass123"})
+        check("注销.管理员注销并转让权限", ok.status_code == 200
+              and ok.json().get("promoted") == "carol", str(ok.text)[:160])
+        async with _hx.AsyncClient(timeout=30, trust_env=False,
+                                   cookies={"qut_session": token_c}) as cc:
+            st = (await cc.get(f"{base}/api/auth/status")).json()
+            check("注销.接任管理员生效",
+                  st.get("user", {}).get("role") == "admin"
+                  and bool(st.get("user", {}).get("created_at"))
+                  and (await cc.get(f"{base}/api/auth/users")).status_code == 200,
+                  str(st)[:160])
 
 
 server_proc = None

@@ -31,11 +31,9 @@ LOGIN_EXPIRED_MSG = "教务会话已过期或登录失败，请重新登录，�
 
 
 def zhengfang_configured(cfg: dict) -> bool:
-    """是否填了可用于拉考试的正方凭证（Cookie 或账号密码）。"""
-    p = cfg.get("provider", {})
-    return bool(p.get("zf_base") and (
-        p.get("zf_cookie") or (p.get("zf_username") and p.get("zf_password"))
-    ))
+    """是否填了可用于拉课表/考试的正方凭证（Cookie 或账号密码）。"""
+    from ..config import zhengfang_configured as _zc
+    return _zc(cfg)
 
 
 def rsa_encrypt(password: str, modulus_b64: str, exponent_b64: str) -> str:
@@ -116,16 +114,19 @@ class ZhengfangProvider(TimetableProvider):
 
     def __init__(self, cfg: dict):
         p = cfg.get("provider", {})
-        self.base = (p.get("zf_base") or "").rstrip("/")
-        self.username = p.get("zf_username", "")
-        self.password = p.get("zf_password", "")
-        self.cookie = (p.get("zf_cookie") or "").strip()
+        zf = p.get("zhengfang") or {}
+        if not isinstance(zf, dict):
+            zf = {}
+        self.base = (zf.get("base") or p.get("zf_base") or "").rstrip("/")
+        self.username = zf.get("username") or p.get("zf_username") or ""
+        self.password = zf.get("password") or p.get("zf_password") or ""
+        self.cookie = (zf.get("cookie") or p.get("zf_cookie") or "").strip()
         if self.cookie.lower().startswith("cookie:"):
             self.cookie = self.cookie[7:].strip()
-        self.year = str(p.get("zf_year", "") or "")
-        self.term = str(p.get("zf_term", "3") or "3")
+        self.year = str(zf.get("year") or p.get("zf_year", "") or "")
+        self.term = str(zf.get("term") or p.get("zf_term", "3") or "3")
         if not self.base:
-            raise ValueError("未配置正方教务地址 zf_base")
+            raise ValueError("未配置正方教务地址（设置 → 课表来源 → 正方教务，填入学号密码）")
 
     @asynccontextmanager
     async def _session(self):

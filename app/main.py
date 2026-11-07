@@ -1,4 +1,4 @@
-"""青理课表助手 v1.0 — FastAPI 入口。"""
+"""Horarium 知序 v1.0 — FastAPI 入口。"""
 from __future__ import annotations
 
 import asyncio
@@ -12,7 +12,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -48,7 +48,7 @@ async def lifespan(app: FastAPI):
     shutdown_scheduler()
 
 
-app = FastAPI(title="青理课表助手", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Horarium 知序", version="1.0.0", lifespan=lifespan)
 
 # App 化时常见的 WebView / 本地来源
 ALLOWED_ORIGIN_RE = re.compile(
@@ -186,6 +186,11 @@ async def status():
                 upcoming_exams.append(e)
         upcoming_exams.sort(key=lambda e: (e.date or "9999-12-31", e.start or "23:59"))
     provider_type = cfg.get("provider", {}).get("type", "mock")
+    primary = cfg.get("provider", {}).get("primary", "auto")
+    from .config import resolve_course_source, portal_configured, zhengfang_configured
+    resolved = resolve_course_source(cfg)
+    portal_ok = portal_configured(cfg)
+    zf_ok = zhengfang_configured(cfg)
     push_cfg = cfg.get("push", {})
     return {
         "school": cfg.get("school", "青岛理工大学"),
@@ -194,8 +199,13 @@ async def status():
         "week": week,
         "semester_start": cfg.get("semester_start"),
         "total_weeks": cfg.get("total_weeks", 30),
-        "provider": provider_type,
-        "is_demo": provider_type == "mock",
+        "provider": resolved,
+        "provider_type": provider_type,
+        "primary": primary,
+        "portal_configured": portal_ok,
+        "zhengfang_configured": zf_ok,
+        "has_source": bool(portal_ok or zf_ok),
+        "is_demo": resolved == "mock",
         "course_count": len(all_courses),
         "exam_count": len(exam_snap["exams"]) if exam_snap else 0,
         "upcoming_exam_count": len(upcoming_exams),
@@ -205,7 +215,7 @@ async def status():
         "sync_time": cfg.get("sync_time", "12:00"),
         "next_sync": next_run_time(),
         "ai_enabled": bool(cfg.get("ai", {}).get("enabled") and cfg.get("ai", {}).get("api_key")),
-        "push_channels": [c for c, on in (("bark", push_cfg.get("bark_enabled")), ("email", push_cfg.get("smtp_enabled"))) if on],
+        "push_channels": [c for c, on in (("bark", push_cfg.get("bark_enabled")),) if on],
     }
 
 
@@ -562,11 +572,14 @@ async def import_curl(req: CurlImport):
         raise HTTPException(400, str(e))
     cfg = load_config()
     p = cfg["provider"]
+    portal = dict(p.get("portal") or {})
+    portal["url"] = parsed["url"]
+    portal["method"] = parsed["method"]
+    portal["headers"] = parsed["headers"]
+    portal["body"] = parsed["body"]
+    p["portal"] = portal
     p["type"] = "portal" if "qut.edu.cn" in parsed["url"] else "httpjson"
-    p["http_url"] = parsed["url"]
-    p["http_method"] = parsed["method"]
-    p["http_headers"] = parsed["headers"]
-    p["http_body"] = parsed["body"]
+    p["primary"] = p.get("primary") or "auto"
     warnings = diagnose_url(parsed["url"])
     lower_headers = {str(k).lower() for k in parsed["headers"]}
     if not lower_headers & {"cookie", "authorization", "x-token", "x-access-token", "token"}:
@@ -587,8 +600,8 @@ async def import_curl(req: CurlImport):
         result["error"] = f"试拉取失败：{e}"
         return result
     path, mapping = guess_mapping(payload)
-    p["http_list_path"] = path
-    p["http_mapping"] = mapping
+    p["portal"]["list_path"] = path
+    p["portal"]["mapping"] = mapping
     save_config(cfg)
     result.update({"list_path": path, "mapping": mapping,
                    "raw_preview": _json.dumps(payload, ensure_ascii=False)[:4000],
@@ -657,17 +670,17 @@ async def provider_preview():
     except ValueError as e:
         parsed = {"count": 0, "error": str(e)}
     return {"raw_preview": _json.dumps(payload, ensure_ascii=False)[:4000],
-            "current_list_path": cfg["provider"].get("http_list_path", ""),
-            "current_mapping": cfg["provider"].get("http_mapping", {}),
+            "current_list_path": cfg["provider"].get("portal", {}).get("list_path", ""),
+            "current_mapping": cfg["provider"].get("portal", {}).get("mapping", {}),
             "guessed_list_path": path, "guessed_mapping": mapping, "parsed": parsed,
             "analysis": analyze_payload(payload),
-            "warnings": diagnose_url(cfg["provider"].get("http_url", ""))}
+            "warnings": diagnose_url(cfg["provider"].get("portal", {}).get("url", ""))}
 
 
 @app.post("/api/push/test")
 async def push_test():
     cfg = load_config()
-    results = await push_all(cfg, "测试推送", "青理课表助手推送通道测试成功。\n每日 12:00 将自动同步课表并推送变更与次日课表。")
+    results = await push_all(cfg, "测试推送", "Horarium 推送通道测试成功。\n每日 12:00 将自动同步课表并推送变更与次日课表。")
     return {"results": results}
 
 
@@ -687,6 +700,30 @@ async def chat_endpoint(req: ChatRequest):
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"AI 请求失败: {e}")
     return {"reply": reply}
+
+
+@app.post("/api/chat/stream")
+async def chat_stream_endpoint(req: ChatRequest):
+    """SSE 流式回复：data: {"delta": "..."}，结束发 {"done": true}，失败发 {"error": "..."}。"""
+    if not req.message.strip():
+        raise HTTPException(400, "消息不能为空")
+    try:
+        ai.check_ready()
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    async def event_gen():
+        try:
+            async for chunk in ai.chat_stream(req.message, req.history):
+                yield "data: " + json.dumps({"delta": chunk}, ensure_ascii=False) + "\n\n"
+            yield 'data: {"done": true}\n\n'
+        except Exception as e:  # noqa: BLE001
+            yield "data: " + json.dumps({"error": f"AI 请求失败: {e}"}, ensure_ascii=False) + "\n\n"
+
+    return StreamingResponse(event_gen(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",   # 让 nginx 不缓冲，逐字下发
+    })
 
 
 @app.get("/api/ai/models")
@@ -716,7 +753,9 @@ async def generate_local_token():
 def _public_user(u: dict) -> dict:
     return {"id": u["id"], "username": u["username"],
             "display_name": u.get("display_name") or u["username"],
-            "student_id": u.get("student_id", ""), "role": u["role"]}
+            "student_id": u.get("student_id", ""), "role": u["role"],
+            "created_at": u.get("created_at", ""),
+            "last_login_at": u.get("last_login_at", "")}
 
 
 def _session_cookie(resp: JSONResponse, request: Request, token: str):
@@ -791,6 +830,7 @@ async def auth_login(req: LoginRequest, request: Request):
     if not user or not user["is_active"] or not auth.verify_password(req.password, user["password_hash"]):
         raise HTTPException(400, "用户名或密码错误")
     auth.clear_rate_limit(key)
+    db.set_last_login(user["id"])
     token = auth.new_token()
     db.create_session(user["id"], token, auth.SESSION_TTL_SECONDS)
     resp = JSONResponse({"ok": True, "user": _public_user(user)})
@@ -806,6 +846,35 @@ async def auth_logout(request: Request):
     return resp
 
 
+class DeleteAccountRequest(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/api/auth/delete-account")
+async def auth_delete_account(req: DeleteAccountRequest, request: Request):
+    """注销当前账号，需要同时核对用户名和密码，防止误操作或会话被盗用。"""
+    uid = get_current_user()
+    me = db.get_user_by_id(uid or 0)
+    if not me:
+        raise HTTPException(401, "请先登录")
+    if (req.username or "").strip() != me["username"]:
+        raise HTTPException(400, "用户名与当前账号不一致")
+    if not auth.verify_password(req.password or "", me["password_hash"]):
+        raise HTTPException(400, "密码错误")
+    promoted = ""
+    if me["role"] == "admin":
+        # 管理员注销后把权限交给最早注册的其他活跃账号，避免没人能生成邀请码
+        others = [u for u in db.list_users() if u["id"] != uid and u["is_active"]]
+        if others:
+            db.set_user_role(others[0]["id"], "admin")
+            promoted = others[0]["username"]
+    db.delete_user(uid)
+    resp = JSONResponse({"ok": True, "promoted": promoted})
+    resp.delete_cookie(auth.SESSION_COOKIE, path="/")
+    return resp
+
+
 def _require_admin() -> dict:
     me = db.get_user_by_id(get_current_user() or 0)
     if not me or me["role"] != "admin":
@@ -814,15 +883,20 @@ def _require_admin() -> dict:
 
 
 @app.get("/api/auth/users")
-async def auth_users():
+async def auth_users(q: str = "", sort: str = "id"):
     _require_admin()
-    return {"users": db.list_users()}
+    return {"users": db.list_users(q, sort)}
 
 
 @app.get("/api/auth/invites")
 async def auth_invites():
     _require_admin()
-    return {"invites": db.list_invites()}
+    invites = db.list_invites()
+    # 附上使用人用户名，方便管理员看清谁用了哪个码
+    id2name = {u["id"]: u["username"] for u in db.list_users()}
+    for inv in invites:
+        inv["used_by_name"] = id2name.get(inv.get("used_by"), "")
+    return {"invites": invites}
 
 
 @app.post("/api/auth/invites")
@@ -830,7 +904,305 @@ async def auth_new_invite():
     me = _require_admin()
     code = auth.new_invite()
     db.create_invite(code, me["id"], auth.INVITE_TTL_SECONDS)
+    db.add_admin_log(me["id"], me["username"], "create_invite", code)
     return {"ok": True, "code": code}
+
+
+@app.post("/api/auth/invites/batch")
+async def auth_new_invites_batch():
+    """批量生成邀请码，返回多个。"""
+    me = _require_admin()
+    count = 5
+    codes = []
+    for _ in range(count):
+        code = auth.new_invite()
+        db.create_invite(code, me["id"], auth.INVITE_TTL_SECONDS)
+        codes.append(code)
+    db.add_admin_log(me["id"], me["username"], "create_invite_batch",
+                     f"{count} 个", ", ".join(codes))
+    return {"ok": True, "codes": codes}
+
+
+@app.delete("/api/auth/invites/{code}")
+async def auth_delete_invite(code: str):
+    me = _require_admin()
+    db.delete_invite(code)
+    db.add_admin_log(me["id"], me["username"], "delete_invite", code)
+    return {"ok": True}
+
+
+# ---------- 用户管理（仅管理员） ----------
+
+class AdminUserAction(BaseModel):
+    role: str | None = None
+    active: bool | None = None
+
+
+@app.post("/api/auth/users/{user_id}/role")
+async def auth_set_role(user_id: int, req: AdminUserAction):
+    me = _require_admin()
+    if req.role not in ("admin", "user"):
+        raise HTTPException(400, "角色只能是 admin 或 user")
+    if user_id == me["id"] and req.role != "admin":
+        raise HTTPException(400, "不能取消自己的管理员身份")
+    target = db.get_user_by_id(user_id)
+    if not target:
+        raise HTTPException(404, "用户不存在")
+    db.set_user_role(user_id, req.role)
+    db.add_admin_log(me["id"], me["username"], "set_role", target["username"], req.role)
+    return {"ok": True, "user_id": user_id, "role": req.role}
+
+
+@app.post("/api/auth/users/{user_id}/active")
+async def auth_set_active(user_id: int, req: AdminUserAction):
+    me = _require_admin()
+    if user_id == me["id"] and req.active is False:
+        raise HTTPException(400, "不能停用自己")
+    target = db.get_user_by_id(user_id)
+    if not target:
+        raise HTTPException(404, "用户不存在")
+    db.set_user_active(user_id, bool(req.active))
+    if req.active is False:
+        db.delete_user_sessions(user_id)  # 停用即踢下线
+    db.add_admin_log(me["id"], me["username"], "set_active", target["username"],
+                     "启用" if req.active else "停用")
+    return {"ok": True, "user_id": user_id, "active": bool(req.active)}
+
+
+@app.delete("/api/auth/users/{user_id}")
+async def auth_delete_user(user_id: int):
+    me = _require_admin()
+    target = db.get_user_by_id(user_id)
+    if not target:
+        raise HTTPException(404, "用户不存在")
+    if user_id == me["id"]:
+        raise HTTPException(400, "不能删除自己，请先转让管理员或注册新管理员")
+    db.delete_user(user_id)
+    db.add_admin_log(me["id"], me["username"], "delete_user", target["username"])
+    return {"ok": True, "user_id": user_id}
+
+
+class AdminEditUserRequest(BaseModel):
+    display_name: str = ""
+    student_id: str = ""
+
+
+@app.post("/api/auth/users/{user_id}/info")
+async def auth_edit_user_info(user_id: int, req: AdminEditUserRequest):
+    me = _require_admin()
+    target = db.get_user_by_id(user_id)
+    if not target:
+        raise HTTPException(404, "用户不存在")
+    display_name = (req.display_name or "").strip()[:40]
+    student_id = (req.student_id or "").strip()[:32]
+    db.set_user_info(user_id, display_name, student_id)
+    db.add_admin_log(me["id"], me["username"], "edit_user", target["username"],
+                     f"昵称={display_name}, 学号={student_id}")
+    return {"ok": True, "user_id": user_id}
+
+
+class BatchUserAction(BaseModel):
+    ids: list[int]
+    active: bool
+
+
+@app.post("/api/auth/users/batch-active")
+async def auth_batch_active(req: BatchUserAction):
+    me = _require_admin()
+    ids = [i for i in req.ids if i != me["id"]]  # 保护自己
+    done = 0
+    for uid in ids:
+        if db.get_user_by_id(uid):
+            db.set_user_active(uid, req.active)
+            if not req.active:
+                db.delete_user_sessions(uid)
+            done += 1
+    db.add_admin_log(me["id"], me["username"], "batch_active",
+                     f"{done} 个用户", "启用" if req.active else "停用")
+    return {"ok": True, "count": done}
+
+
+class ResetPasswordRequest(BaseModel):
+    new_password: str
+
+
+@app.post("/api/auth/users/{user_id}/reset-password")
+async def auth_reset_password(user_id: int, req: ResetPasswordRequest):
+    me = _require_admin()
+    target = db.get_user_by_id(user_id)
+    if not target:
+        raise HTTPException(404, "用户不存在")
+    err = auth.validate_credentials(target["username"], req.new_password)
+    if err:
+        raise HTTPException(400, err)
+    db.set_user_password(user_id, auth.hash_password(req.new_password))
+    db.delete_user_sessions(user_id)  # 旧会话失效，强制重新登录
+    db.add_admin_log(me["id"], me["username"], "reset_password", target["username"])
+    return {"ok": True, "user_id": user_id}
+
+
+# ---------- 管理员：仪表盘 / 数据源总览 / 审计日志 ----------
+
+@app.get("/api/auth/admin-stats")
+async def admin_stats():
+    _require_admin()
+    from datetime import datetime, timedelta
+    week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+    users = db.list_users()
+    return {
+        "total": len(users),
+        "active": sum(1 for u in users if u.get("is_active")),
+        "inactive": sum(1 for u in users if not u.get("is_active")),
+        "admin": sum(1 for u in users if u.get("role") == "admin"),
+        "new_week": sum(1 for u in users if (u.get("created_at") or "") >= week_ago),
+    }
+
+
+@app.get("/api/auth/users/source-status")
+async def users_source_status():
+    """每个用户当前课表来源与最后同步时间，供管理员总览。"""
+    _require_admin()
+    from .config import portal_configured, zhengfang_configured, resolve_course_source
+    rows = []
+    for u in db.list_users():
+        cfg = db.get_user_config(u["id"])
+        try:
+            resolved = resolve_course_source(cfg)
+        except Exception:  # noqa: BLE001
+            resolved = "auto"
+        p_cfg = portal_configured(cfg)
+        z_cfg = zhengfang_configured(cfg)
+        snap = None
+        with db.get_conn() as conn:
+            r = conn.execute(
+                "SELECT source, fetched_at FROM snapshot WHERE user_id = ?",
+                (u["id"],)).fetchone()
+            if r:
+                snap = {"source": r["source"], "fetched_at": r["fetched_at"]}
+        rows.append({
+            "id": u["id"], "username": u["username"],
+            "display_name": u.get("display_name") or u["username"],
+            "portal_configured": p_cfg, "zhengfang_configured": z_cfg,
+            "resolved": resolved,
+            "snapshot_source": (snap or {}).get("source"),
+            "fetched_at": (snap or {}).get("fetched_at"),
+        })
+    return {"users": rows}
+
+
+@app.get("/api/auth/admin-log")
+async def admin_log(limit: int = 100):
+    _require_admin()
+    return {"logs": db.list_admin_log(min(limit, 500))}
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+
+@app.post("/api/auth/me/password")
+async def auth_change_password(req: ChangePasswordRequest, request: Request):
+    """用户自助修改自己的密码（需验证旧密码）。当前浏览器会话保持登录。"""
+    uid = get_current_user()
+    me = db.get_user_by_id(uid or 0)
+    if not me:
+        raise HTTPException(401, "请先登录")
+    if not auth.verify_password(req.old_password, me["password_hash"]):
+        raise HTTPException(400, "原密码错误")
+    err = auth.validate_credentials(me["username"], req.new_password)
+    if err:
+        raise HTTPException(400, err)
+    db.set_user_password(uid, auth.hash_password(req.new_password))
+    # 仅让其他设备 / 会话失效，当前浏览器不掉线
+    cur = _cookie_token(request.headers.get("cookie", ""))
+    db.delete_user_sessions(uid, except_token=cur)
+    return {"ok": True, "message": "密码已修改，其他设备已退出登录"}
+
+
+# ---------- 数据源状态与正方账号登录 ----------
+
+@app.get("/api/provider/sources")
+async def provider_sources():
+    """返回两套数据源的配置状态，供「课表来源」页展示与操作。"""
+    from .config import portal_configured, zhengfang_configured, resolve_course_source
+    cfg = load_config()
+    snap = db.get_snapshot()
+    return {
+        "primary": cfg["provider"].get("primary", "auto"),
+        "resolved": resolve_course_source(cfg),
+        "portal": {
+            "configured": portal_configured(cfg),
+            "url": (cfg["provider"].get("portal", {}).get("url") or "")[:80],
+            "has_login": bool(cfg["provider"].get("portal", {}).get("headers")),
+        },
+        "zhengfang": {
+            "configured": zhengfang_configured(cfg),
+            "base": cfg["provider"].get("zhengfang", {}).get("base", ""),
+            "username": cfg["provider"].get("zhengfang", {}).get("username", ""),
+            "year": cfg["provider"].get("zhengfang", {}).get("year", "2026"),
+            "term": str(cfg["provider"].get("zhengfang", {}).get("term", "3")),
+            "has_login": bool(cfg["provider"].get("zhengfang", {}).get("password")
+                             or cfg["provider"].get("zhengfang", {}).get("cookie")),
+        },
+        "snapshot_source": (snap or {}).get("source"),
+        "snapshot_fetched_at": (snap or {}).get("fetched_at"),
+    }
+
+
+class ZhengfangSaveRequest(BaseModel):
+    base: str = ""
+    username: str = ""
+    password: str = ""
+    year: str = "2026"
+    term: str = "3"
+    test: bool = True
+
+
+@app.post("/api/provider/zhengfang")
+async def save_zhengfang(req: ZhengfangSaveRequest):
+    """保存正方账号（学号+密码），可立即测试登录并拉一次课表，不破坏门户配置。
+
+    用户明确：正方登录只用账号密码，不暴露 Cookie 输入框。
+    """
+    cfg = load_config()
+    p = cfg["provider"]
+    zf = dict(p.get("zhengfang") or {})
+    zf["base"] = (req.base or "https://jxgl.qut.edu.cn/jwglxt").rstrip("/")
+    zf["username"] = req.username.strip()
+    zf["password"] = req.password
+    zf["year"] = req.year.strip() or "2026"
+    zf["term"] = str(req.term or "3")
+    zf["cookie"] = ""  # 账号密码模式：清空 Cookie，避免混用
+    p["zhengfang"] = zf
+    p["primary"] = p.get("primary") or "auto"
+    save_config(cfg)
+
+    if not req.test:
+        return {"ok": True, "message": "已保存正方账号（未测试）"}
+    # 立即试登录并拉课表，验证账号密码
+    from .providers.zhengfang import ZhengfangProvider
+    try:
+        provider = ZhengfangProvider(cfg)
+    except ValueError as e:
+        return {"ok": False, "message": str(e)}
+    try:
+        async with provider._session() as client:
+            courses = await provider._fetch_courses(client)
+            exams: list = []
+            exam_error = ""
+            try:
+                exams = await provider._fetch_exams(client)
+            except Exception as e:  # noqa: BLE001
+                exam_error = str(e)
+        message = f"登录成功：{len(courses)} 门课程"
+        message += f"，{len(exams)} 场考试" if not exam_error else "；考试接口失败"
+        snap = db.get_snapshot()
+        return {"ok": True, "message": message, "course_count": len(courses),
+                "exam_count": len(exams), "exam_error": exam_error,
+                "overwritten": (snap or {}).get("source") == "portal"}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "message": str(e)}
 
 
 @app.get("/api/health")

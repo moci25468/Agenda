@@ -1,1 +1,1 @@
-"""青理课表助手 backend package."""
+"""Horarium 知序 backend package."""

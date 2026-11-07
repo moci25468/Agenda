@@ -325,16 +325,24 @@ def _headers_for_config(cand: dict, cookie_str: str) -> dict:
 
 
 def apply_candidate(cand: dict, cookie_str: str = "") -> dict:
-    """把选中的接口写成 portal 数据源，并立即试同步一次（不推送）。"""
+    """把选中的接口写成 portal 数据源，并立即试同步一次（不推送）。
+
+    portal 与 zhengfang 并存：只写 provider.portal 子配置，并置 primary=auto
+    （门户优先），不清除已填的正方凭证。
+    """
     cfg = load_config()
     p = cfg["provider"]
+    # 保留已存在的子配置，只覆盖门户部分
+    portal = dict(p.get("portal") or {})
+    portal["url"] = cand["url"]
+    portal["method"] = cand["method"]
+    portal["headers"] = _headers_for_config(cand, cookie_str)
+    portal["body"] = _parse_body(cand.get("post_data")) or {}
+    portal["list_path"] = cand["list_path"]
+    portal["mapping"] = cand["mapping"]
+    p["portal"] = portal
     p["type"] = "portal"
-    p["http_url"] = cand["url"]
-    p["http_method"] = cand["method"]
-    p["http_headers"] = _headers_for_config(cand, cookie_str)
-    p["http_body"] = _parse_body(cand.get("post_data")) or {}
-    p["http_list_path"] = cand["list_path"]
-    p["http_mapping"] = cand["mapping"]
+    p["primary"] = p.get("primary") or "auto"
     save_config(cfg)
     warnings = diagnose_url(cand["url"])
     try:

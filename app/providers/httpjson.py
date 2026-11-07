@@ -141,14 +141,19 @@ class HttpJsonProvider(TimetableProvider):
 
     def __init__(self, cfg: dict):
         p = cfg.get("provider", {})
-        self.url = p.get("http_url", "")
-        self.method = (p.get("http_method") or "GET").upper()
-        self.headers = self._parse_json(p.get("http_headers"), {})
-        self.body = self._parse_json(p.get("http_body"), None)
-        self.list_path = p.get("http_list_path", "")
-        self.mapping = p.get("http_mapping", {})
+        portal = p.get("portal") or {}
+        self.url = (portal.get("url") or p.get("http_url") or "")
+        self.method = (portal.get("method") or p.get("http_method") or "GET").upper()
+        self.headers = self._parse_json(
+            portal.get("headers") if portal.get("headers") is not None
+            else p.get("http_headers"), {})
+        self.body = self._parse_json(
+            portal.get("body") if portal.get("body") is not None
+            else p.get("http_body"), None)
+        self.list_path = portal.get("list_path") or p.get("http_list_path") or ""
+        self.mapping = portal.get("mapping") or p.get("http_mapping") or {}
         if not self.url:
-            raise ValueError("未配置课表 API 地址 http_url")
+            raise ValueError("未配置课表 API 地址")
 
     @staticmethod
     def _parse_json(text, default):
@@ -196,4 +201,4 @@ class PortalProvider(HttpJsonProvider):
         ))
         if not (has_cookie or has_token):
             raise ValueError(
-                "门户模式需要登录态：请在门户课表页抓包，复制 cURL 到设置中导入（含 Cookie 或 Authorization）")
+                "门户模式需要登录态：请到「课表来源」用一键登录扫码，或粘贴含 Cookie 的 cURL 导入")

@@ -1,4 +1,10 @@
-"""配置管理：data/config.json，首次运行生成默认配置。"""
+"""配置管理：data/config.json，首次运行生成默认配置。
+
+多用户下每位用户一份完整 config（存在 user_config 表），无用户上下文时读全局模板。
+provider 同时支持「门户(portal)」与「正方教务(zhengfang)」两套独立凭证，由
+provider.primary 决定课表主数据源：auto = 门户优先，门户不在再用正方；后期接入门户
+后下次同步自动以门户整表覆盖。考试始终优先从正方拉取（门户只提供课表）。
+"""
 from __future__ import annotations
 
 import json
@@ -9,14 +15,17 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get("CAMPUS_DATA_DIR", BASE_DIR / "data"))
 CONFIG_PATH = DATA_DIR / "config.json"
 
-SECRET_FIELDS = [
-    ("provider", "zf_password"), ("provider", "zf_cookie"),
-    ("provider", "http_headers"),
-    ("push", "bark_key"), ("push", "smtp_pass"),
-    ("ai", "api_key"), ("ai", "headers"),
-    ("security", "token"),
-]
 MASK = "********"
+
+# 需要脱敏的字段（点路径）。课程接口 headers、正方密码/Cookie 等都不能回传前端。
+MASK_PATHS = [
+    ("ai", "api_key"), ("ai", "headers"),
+    ("push", "bark_key"),
+    ("security", "token"),
+    ("provider", "zhengfang", "password"),
+    ("provider", "zhengfang", "cookie"),
+    ("provider", "portal", "headers"),
+]
 
 DEFAULT_CONFIG = {
     "school": "青岛理工大学",
@@ -33,37 +42,34 @@ DEFAULT_CONFIG = {
         "edited": {},                 # uid → 覆盖字段
         "added": [],                  # 手动添加的课程
     },
+    # 数据源：门户与正方并存，primary 决定课表主来源
     "provider": {
-        "type": "mock",               # mock | zhengfang | httpjson
-        # --- 正方教务（jwglxt）---
-        "zf_base": "https://jxgl.qut.edu.cn/jwglxt",
-        "zf_username": "",
-        "zf_password": "",
-        "zf_cookie": "",              # 也可直填登录后的 Cookie，跳过账号登录
-        "zf_year": "2026",            # 学年
-        "zf_term": "3",               # 学期：3=第一学期(秋季) 12=第二学期(春季)
-        # --- 通用 HTTP JSON 接口 ---
-        "http_url": "",
-        "http_method": "GET",
-        "http_headers": "",           # JSON 字符串，如 {"Authorization": "Bearer xxx"}
-        "http_body": "",              # POST 时的 JSON body
-        "http_list_path": "data",     # 课程数组在响应 JSON 中的点路径
-        "http_mapping": {             # 响应字段 → 标准字段
-            "name": "name", "teacher": "teacher", "room": "room",
-            "day": "day", "start": "start", "end": "end", "weeks": "weeks",
+        "type": "mock",               # 展示用：portal / zhengfang / mock
+        "primary": "auto",            # auto | portal | zhengfang（课表主数据源）
+        "zhengfang": {                # 正方教务（jwglxt）
+            "base": "https://jxgl.qut.edu.cn/jwglxt",
+            "username": "",
+            "password": "",
+            "cookie": "",             # 也可直填登录后的 Cookie，跳过账号登录
+            "year": "2026",           # 学年
+            "term": "3",              # 学期：3=第一学期(秋季) 12=第二学期(春季)
+        },
+        "portal": {                   # 青岛理工融合门户（cURL / 一键登录写入）
+            "url": "",
+            "method": "GET",
+            "headers": "",            # JSON 字符串，如 {"Authorization": "Bearer xxx"}
+            "body": "",               # POST 时的 JSON body
+            "list_path": "data",      # 课程数组在响应 JSON 中的点路径
+            "mapping": {              # 响应字段 → 标准字段
+                "name": "name", "teacher": "teacher", "room": "room",
+                "day": "day", "start": "start", "end": "end", "weeks": "weeks",
+            },
         },
     },
     "push": {
         "bark_enabled": False,
         "bark_server": "https://api.day.app",
         "bark_key": "",
-        "smtp_enabled": False,
-        "smtp_host": "",
-        "smtp_port": 465,
-        "smtp_ssl": True,
-        "smtp_user": "",
-        "smtp_pass": "",
-        "smtp_to": "",
     },
     "ai": {
         "enabled": False,
@@ -93,6 +99,129 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return out
 
 
+def _get_path(obj, path):
+    cur = obj
+    for k in path:
+        if not isinstance(cur, dict) or k not in cur:
+            return None
+        cur = cur[k]
+    return cur
+
+
+def _set_path(obj, path, value):
+    cur = obj
+    for k in path[:-1]:
+        nxt = cur.get(k)
+        if not isinstance(nxt, dict):
+            nxt = {}
+            cur[k] = nxt
+        cur = nxt
+    cur[path[-1]] = value
+
+
+def normalize_provider(p: dict | None) -> dict:
+    """把 provider 整理成 canonical 结构（门户 / 正方 两套子配置 + primary）。
+
+    兼容旧版扁平字段（zf_*、http_*）：子配置优先，扁平键回退。注意 DEFAULT_CONFIG
+    的 portal 子配置带非空默认值（list_path=\"data\"、mapping={默认}），会干扰「扁平键
+    回退」，因此对带默认值的字段采用「扁平键非空则优先」的迁移规则（扁平键只在旧配置出现）。
+    """
+    p = p or {}
+    zf = p.get("zhengfang") or {}
+    portal = p.get("portal") or {}
+    if not isinstance(zf, dict):
+        zf = {}
+    if not isinstance(portal, dict):
+        portal = {}
+
+    def _truthy(v):
+        return v not in (None, "", {}, [])
+
+    zhengfang = {
+        "base": zf.get("base") or p.get("zf_base") or DEFAULT_CONFIG["provider"]["zhengfang"]["base"],
+        "username": zf.get("username") or p.get("zf_username") or "",
+        "password": zf.get("password") or p.get("zf_password") or "",
+        "cookie": zf.get("cookie") or p.get("zf_cookie") or "",
+        "year": zf.get("year") or p.get("zf_year") or "2026",
+        "term": str(zf.get("term") or p.get("zf_term") or "3"),
+    }
+    portal = {
+        "url": portal.get("url") or p.get("http_url") or "",
+        "method": (portal.get("method") or p.get("http_method") or "GET").upper(),
+        # 扁平键只在旧配置出现：旧配置迁移时优先，新配置直接走子配置。
+        "headers": p.get("http_headers") if _truthy(p.get("http_headers"))
+        else (portal.get("headers") if _truthy(portal.get("headers")) else ""),
+        "body": p.get("http_body") if _truthy(p.get("http_body"))
+        else (portal.get("body") if _truthy(portal.get("body")) else ""),
+        "list_path": p.get("http_list_path") or portal.get("list_path") or "",
+        "mapping": p.get("http_mapping") if _truthy(p.get("http_mapping"))
+        else (portal.get("mapping") or {}),
+    }
+    primary = p.get("primary") or "auto"
+    ptype = p.get("type") or (
+        "portal" if portal["url"] else ("zhengfang" if zhengfang["base"] else "mock")
+    )
+    return {"type": ptype, "primary": primary, "zhengfang": zhengfang, "portal": portal}
+
+
+def zhengfang_configured(cfg: dict) -> bool:
+    """是否填了可用于拉课表/考试的正方凭证（Cookie 或账号密码）。"""
+    p = (cfg.get("provider") or {}).get("zhengfang") or {}
+    if not p:
+        p = cfg.get("provider", {})
+    base = p.get("base") or p.get("zf_base")
+    cookie = p.get("cookie") or p.get("zf_cookie")
+    username = p.get("username") or p.get("zf_username")
+    password = p.get("password") or p.get("zf_password")
+    return bool(base and (cookie or (username and password)))
+
+
+def portal_configured(cfg: dict) -> bool:
+    """门户课表接口是否就绪（需 URL + 登录态 Cookie/Token）。"""
+    p = (cfg.get("provider") or {}).get("portal") or {}
+    if not p.get("url"):
+        # 兼容旧配置：http_url + http_headers
+        p = cfg.get("provider", {})
+    if not p.get("http_url" if "http_url" in p else "url"):
+        return False
+    headers = p.get("headers") or ""
+    if isinstance(headers, dict):
+        lower = {str(k).lower(): v for k, v in headers.items()}
+    else:
+        try:
+            lower = {str(k).lower(): v for k, v in json.loads(headers or "{}").items()}
+        except (ValueError, TypeError):
+            lower = {}
+    has_cookie = bool(lower.get("cookie"))
+    has_token = any(lower.get(k) for k in (
+        "authorization", "x-token", "x-access-token", "x-auth-token", "token"))
+    return bool(has_cookie or has_token)
+
+
+def resolve_course_source(cfg: dict) -> str:
+    """按 primary 决定课表主数据源：portal / zhengfang / mock。
+
+    auto：门户优先，门户不在配置则用正方；两者都没有回退 mock。
+    """
+    p = cfg.get("provider", {})
+    ptype = p.get("type") or "mock"
+    # 用户显式选择演示或通用 HTTP 时，不再被 auto 的门户优先策略抢回。
+    if ptype in ("mock", "httpjson"):
+        return ptype
+    primary = p.get("primary") or "auto"
+    zf_ok = zhengfang_configured(cfg)
+    portal_ok = portal_configured(cfg)
+    if primary == "zhengfang" and zf_ok:
+        return "zhengfang"
+    if primary == "portal" and portal_ok:
+        return "portal"
+    if portal_ok:
+        return "portal"
+    if zf_ok:
+        return "zhengfang"
+    return ptype
+
+
 def global_config() -> dict:
     """读磁盘上的全局模板配置（不受当前用户上下文影响，用于新用户初始化）。"""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -112,8 +241,11 @@ def load_config() -> dict:
     uid = current_user_id.get()
     if uid is not None:
         from . import db
-        return json.loads(json.dumps(_deep_merge(DEFAULT_CONFIG, db.get_user_config(uid))))
-    return global_config()
+        cfg = json.loads(json.dumps(_deep_merge(DEFAULT_CONFIG, db.get_user_config(uid))))
+    else:
+        cfg = global_config()
+    cfg["provider"] = normalize_provider(cfg.get("provider", {}))
+    return cfg
 
 
 def save_config(cfg: dict) -> dict:
@@ -122,9 +254,12 @@ def save_config(cfg: dict) -> dict:
 
     current = load_config()
     merged = _deep_merge(current, cfg)
-    for section, key in SECRET_FIELDS:
-        if merged.get(section, {}).get(key) == MASK:
-            merged[section][key] = current.get(section, {}).get(key, "")
+    # 掩码占位 → 沿用已保存的原值
+    for path in MASK_PATHS:
+        if _get_path(merged, path) == MASK:
+            old = _get_path(current, path)
+            if old:
+                _set_path(merged, path, old)
     uid = current_user_id.get()
     if uid is not None:
         from . import db
@@ -143,7 +278,7 @@ def save_config(cfg: dict) -> dict:
 
 def masked_config(cfg: dict) -> dict:
     out = json.loads(json.dumps(cfg))
-    for section, key in SECRET_FIELDS:
-        if out.get(section, {}).get(key):
-            out[section][key] = MASK
+    for path in MASK_PATHS:
+        if _get_path(out, path):
+            _set_path(out, path, MASK)
     return out

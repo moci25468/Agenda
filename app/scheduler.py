@@ -1,4 +1,4 @@
-"""定时同步：每日指定时间拉取课表 → 变更检测 → Bark/邮件推送。"""
+"""定时同步：每日指定时间拉取课表 → 变更检测 → Bark 推送。"""
 from __future__ import annotations
 
 import asyncio
@@ -113,7 +113,11 @@ async def apply_snapshot(cfg: dict, courses: list[Course], source: str,
 
 
 async def run_sync(push: bool = True) -> dict:
-    """按当前数据源拉取一次课表并应用快照。"""
+    """按当前数据源拉取一次课表并应用快照。
+
+    课表主数据源由 provider.primary 决定（门户优先、正方兜底）；考试始终优先从正方
+    拉取（门户只提供课表），门户存在时也不影响考试同步。
+    """
     cfg = load_config()
     try:
         provider = get_provider(cfg)
@@ -123,7 +127,7 @@ async def run_sync(push: bool = True) -> dict:
         db.add_sync_log("fail", msg)
         # 凭证过期等失败主动告警，避免静默停更
         if cfg.get("alert_on_fail", True) and ("过期" in str(e) or "Cookie" in str(e) or "cURL" in str(e)):
-            await push_all(cfg, "课表同步失败", f"{msg}\n\n请打开门户重新登录，并在助手设置中重新导入 cURL。")
+            await push_all(cfg, "课表同步失败", f"{msg}\n\n请打开门户重新登录，或在「课表来源」重新接入。")
         return {"ok": False, "message": msg, "changes": {}, "pushed": []}
 
     exam_payload = exams if provider.supports_exams else None

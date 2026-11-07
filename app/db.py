@@ -76,7 +76,17 @@ def init_db():
             student_id TEXT NOT NULL DEFAULT '',
             role TEXT NOT NULL DEFAULT 'user',
             is_active INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            last_login_at TEXT NOT NULL DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS admin_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            admin_id INTEGER NOT NULL,
+            admin_name TEXT NOT NULL DEFAULT '',
+            action TEXT NOT NULL,
+            target TEXT NOT NULL DEFAULT '',
+            detail TEXT NOT NULL DEFAULT '',
+            ts TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS sessions (
             token TEXT PRIMARY KEY,
@@ -111,6 +121,10 @@ def init_db():
             cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
             if cols and "user_id" not in cols:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1")
+        # 旧版本迁移：users 表补充 last_login_at 字段
+        ucols = {r[1] for r in conn.execute("PRAGMA table_info(users)")}
+        if ucols and "last_login_at" not in ucols:
+            conn.execute("ALTER TABLE users ADD COLUMN last_login_at TEXT NOT NULL DEFAULT ''")
 
 
 def now_str() -> str:
@@ -230,11 +244,50 @@ def list_user_ids(active_only: bool = True) -> list[int]:
         return [r[0] for r in conn.execute(sql).fetchall()]
 
 
-def list_users() -> list[dict]:
+def list_users(q: str = "", sort: str = "id") -> list[dict]:
+    q = (q or "").strip()
+    order = {"id": "id", "created": "created_at", "login": "last_login_at DESC",
+             "name": "username"}.get(sort, "id")
     with get_conn() as conn:
-        return [dict(r) for r in conn.execute(
-            "SELECT id, username, display_name, student_id, role, is_active, created_at FROM users ORDER BY id"
-        ).fetchall()]
+        if q:
+            like = f"%{q}%"
+            rows = conn.execute(
+                """SELECT id, username, display_name, student_id, role, is_active,
+                          created_at, last_login_at FROM users
+                   WHERE username LIKE ? OR display_name LIKE ? OR student_id LIKE ?
+                   ORDER BY {}""".format(order),
+                (like, like, like),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT id, username, display_name, student_id, role, is_active,
+                          created_at, last_login_at FROM users ORDER BY {}""".format(order),
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def set_user_info(user_id: int, display_name: str, student_id: str):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE users SET display_name = ?, student_id = ? WHERE id = ?",
+            (display_name, student_id, user_id),
+        )
+
+
+def set_last_login(user_id: int):
+    with get_conn() as conn:
+        conn.execute("UPDATE users SET last_login_at = ? WHERE id = ?",
+                     (now_str(), user_id))
+
+
+def count_active_users() -> int:
+    with get_conn() as conn:
+        return conn.execute("SELECT COUNT(*) FROM users WHERE is_active = 1").fetchone()[0]
+
+
+def count_new_users_since(ts: str) -> int:
+    with get_conn() as conn:
+        return conn.execute("SELECT COUNT(*) FROM users WHERE created_at >= ?", (ts,)).fetchone()[0]
 
 
 def get_user_by_username(username: str) -> dict | None:
@@ -263,6 +316,42 @@ def create_user(username: str, password_hash: str, display_name: str = "",
 def set_user_active(user_id: int, active: bool):
     with get_conn() as conn:
         conn.execute("UPDATE users SET is_active = ? WHERE id = ?", (1 if active else 0, user_id))
+
+
+def set_user_role(user_id: int, role: str):
+    with get_conn() as conn:
+        conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
+
+
+def set_user_password(user_id: int, password_hash: str):
+    """重置密码（管理员操作或用户自助改密）。"""
+    with get_conn() as conn:
+        conn.execute("UPDATE users SET password_hash = ? WHERE id = ?",
+                     (password_hash, user_id))
+
+
+def delete_user_sessions(user_id: int, except_token: str = ""):
+    """踢掉该用户所有已登录会话（改密 / 重置后强制重新登录）。
+
+    except_token 非空时保留该会话（用户自助改密后当前浏览器不掉线）。
+    """
+    with get_conn() as conn:
+        if except_token:
+            conn.execute(
+                "DELETE FROM sessions WHERE user_id = ? AND token != ?",
+                (user_id, except_token))
+        else:
+            conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+
+
+def delete_user(user_id: int):
+    """注销账号：用户行和各表里属于他的数据一起删除，避免留孤儿数据。"""
+    with get_conn() as conn:
+        for table in ("sessions", "snapshot", "exam_snapshot",
+                      "sync_log", "push_log", "user_config"):
+            conn.execute(f"DELETE FROM {table} WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM invites WHERE used_by = ?", (user_id,))
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
 
 
 # ---------- 会话 ----------
@@ -330,3 +419,21 @@ def consume_invite(code: str, user_id: int):
 def delete_invite(code: str):
     with get_conn() as conn:
         conn.execute("DELETE FROM invites WHERE code = ?", (code,))
+
+
+# ---------- 管理员审计日志 ----------
+
+def add_admin_log(admin_id: int, admin_name: str, action: str,
+                  target: str = "", detail: str = ""):
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO admin_log (admin_id, admin_name, action, target, detail, ts)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (admin_id, admin_name, action, target, detail, now_str()),
+        )
+
+
+def list_admin_log(limit: int = 100) -> list[dict]:
+    with get_conn() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM admin_log ORDER BY id DESC LIMIT ?", (limit,)).fetchall()]
