@@ -1,4 +1,4 @@
-"""Horarium 知序 v1.0 — FastAPI 入口。"""
+"""Horarium 知序 — FastAPI 入口。版本号由 app.version（git tag）动态提供。"""
 from __future__ import annotations
 
 import asyncio
@@ -32,6 +32,7 @@ from .scheduler import (
     WEEKDAY_CN, apply_snapshot, courses_on, next_run_time, reschedule, run_sync,
     section_time, shutdown_scheduler, start_scheduler,
 )
+from .version import get_version, get_full_version
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
@@ -48,7 +49,7 @@ async def lifespan(app: FastAPI):
     shutdown_scheduler()
 
 
-app = FastAPI(title="Horarium 知序", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Horarium 知序", version=get_version(), lifespan=lifespan)
 
 # App 化时常见的 WebView / 本地来源
 ALLOWED_ORIGIN_RE = re.compile(
@@ -1207,7 +1208,7 @@ async def save_zhengfang(req: ZhengfangSaveRequest):
 
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "version": "1.0.0"}
+    return {"ok": True, **get_full_version()}
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
