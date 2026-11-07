@@ -16,13 +16,12 @@ export GIT_ASKPASS=true
 REMOTE="origin"
 BRANCH="main"
 
-# 读取当前最新 tag（优先用远程，本地没有就取本地）
-latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || true)
+# 始终先读 GitHub 远程标签；远程无标签时才回落到本地标签
+latest_tag=$(git ls-remote --tags "$REMOTE" 2>/dev/null \
+  | sed 's#.*refs/tags/##' | grep -v '\^{}' | sort -V | tail -1 || true)
 
 if [ -z "$latest_tag" ]; then
-  # 没有任何 tag 时，从 remote 拉取
-  latest_tag=$(git ls-remote --tags "$REMOTE" 2>/dev/null \
-    | sed 's#.*refs/tags/##' | grep -v '\^{}' | sort -V | tail -1 || true)
+  latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || true)
 fi
 
 if [ -z "$latest_tag" ]; then
@@ -58,6 +57,26 @@ esac
 
 new_ver="v${major}.${minor}.${patch}"
 echo "版本号：$latest_tag -> $new_ver"
+
+# 容器部署通常没有 .git，发布时同步更新运行时的回落版本。
+python3 - "$new_ver" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+version = sys.argv[1].removeprefix("v")
+path = Path("app/version.py")
+source = path.read_text(encoding="utf-8")
+updated, count = re.subn(
+    r'FALLBACK_VERSION = "[^"]+"',
+    f'FALLBACK_VERSION = "{version}"',
+    source,
+    count=1,
+)
+if count != 1:
+    raise SystemExit("无法在 app/version.py 中更新 FALLBACK_VERSION")
+path.write_text(updated, encoding="utf-8")
+PY
 
 # 检查工作区是否有改动
 if [ -n "$(git status --porcelain)" ]; then
