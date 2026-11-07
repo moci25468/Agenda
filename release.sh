@@ -7,7 +7,7 @@
 #   ./release.sh patch          # 同上（显式）
 #   ./release.sh minor          # bump 次版本号（1.0.x -> 1.1.0）
 #   ./release.sh major          # bump 主版本号（1.x.x -> 2.0.0）
-#   ./release.sh -m "说明"      # 自定义提交信息
+#   ./release.sh -m "中文说明具体改动"  # 推荐：提交标题写清更改内容，版本号放在正文
 set -euo pipefail
 
 # 绕过 macOS 的 Xcode license 弹窗（否则 git 命令会卡死）
@@ -36,11 +36,16 @@ IFS='.' read -r major minor patch <<< "$ver"
 [ -z "$minor" ] && minor=0
 [ -z "$patch" ] && patch=0
 
-bump="${1:-patch}"
+bump="patch"
 msg_opt=""
-if [ "$bump" = "-m" ]; then
-  msg_opt="$2"
-  bump="patch"
+if [ "${1:-}" = "-m" ]; then
+  msg_opt="${2:-}"
+  bump="${3:-patch}"
+else
+  bump="${1:-patch}"
+  if [ "${2:-}" = "-m" ]; then
+    msg_opt="${3:-}"
+  fi
 fi
 
 case "$bump" in
@@ -57,6 +62,17 @@ esac
 
 new_ver="v${major}.${minor}.${patch}"
 echo "版本号：$latest_tag -> $new_ver"
+
+# 提交标题必须说明实际改动，不再自动生成只有版本号的空泛提交。
+if [ -z "$msg_opt" ]; then
+  echo "本次待提交文件："
+  git status --short
+  read -r -p "请用中文填写本次具体改动： " msg_opt
+fi
+if [ -z "$msg_opt" ]; then
+  echo "改动说明不能为空。用法：./release.sh -m \"简化登录页并更新介绍文案\"" >&2
+  exit 1
+fi
 
 # 容器部署通常没有 .git，发布时同步更新运行时的回落版本。
 python3 - "$new_ver" <<'PY'
@@ -82,17 +98,13 @@ PY
 if [ -n "$(git status --porcelain)" ]; then
   echo "检测到未提交改动，先提交..."
   git add -A
-  if [ -n "${msg_opt:-}" ]; then
-    git commit -m "$msg_opt"
-  else
-    git commit -m "发布版本 $new_ver"
-  fi
+  git commit -m "$msg_opt" -m "版本：$new_ver"
 else
   echo "工作区干净，无改动需要提交（仅打 tag）"
 fi
 
 # 打 tag 并推送
-git tag -a "$new_ver" -m "Release $new_ver"
+git tag -a "$new_ver" -m "$msg_opt" -m "版本：$new_ver"
 git push "$REMOTE" "$BRANCH"
 git push "$REMOTE" "$new_ver"
 
