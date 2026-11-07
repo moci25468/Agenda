@@ -278,42 +278,63 @@
       }
       .week-grid {
         display: grid;
-        grid-template-columns: repeat(7, 1fr);
-        gap: 8px;
-        min-width: 760px;
-      }
-      .week-col {
-        background: var(--card);
+        grid-template-columns: 82px repeat(7, minmax(0, 1fr));
+        gap: 1px;
+        min-width: 900px;
+        background: var(--line);
         border: 1px solid var(--line);
-        border-radius: var(--radius);
-        padding: 10px;
-        min-height: 180px;
+        border-radius: 10px;
+        overflow: hidden;
       }
-      .week-col.today {
-        border-color: var(--accent);
+      .week-grid > div {
+        background: var(--card);
       }
-      .week-col-head {
+      .week-head-cell {
         text-align: center;
-        padding-bottom: 8px;
-        border-bottom: 1px solid var(--line);
-        margin-bottom: 8px;
+        padding: 8px 4px;
       }
-      .week-col-head .dow {
+      .week-head-cell .dow {
         font-size: 13px;
         font-weight: 600;
       }
-      .week-col-head .dnum {
+      .week-head-cell .dnum {
         font-size: 12px;
         color: var(--sub);
       }
-      .week-col.today .dow {
+      .week-head-cell.today .dow {
         color: var(--accent);
+      }
+      .week-period {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        text-align: center;
+        padding: 8px 4px;
+      }
+      .week-period .p {
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .week-period .t {
+        font-size: 11px;
+        color: var(--sub);
+        font-variant-numeric: tabular-nums;
+      }
+      .week-cell {
+        padding: 6px;
+        min-height: 78px;
+      }
+      .week-cell.today {
+        background: #f7fbff;
       }
       .mini-course {
         background: var(--accent-soft);
         border-radius: 8px;
-        padding: 8px;
-        margin-bottom: 6px;
+        padding: 6px 8px;
+        margin-bottom: 5px;
+      }
+      .mini-course:last-child {
+        margin-bottom: 0;
       }
       .mini-course .t {
         font-size: 11px;
@@ -328,12 +349,6 @@
       .mini-course .r {
         font-size: 12px;
         color: var(--sub);
-      }
-      .week-col .none {
-        font-size: 12px;
-        color: var(--sub);
-        text-align: center;
-        padding-top: 12px;
       }
 
       /* AI 聊天 */
@@ -1366,30 +1381,56 @@
         $("#weekHint").textContent = data.is_demo
           ? "当前为演示课表，接入真实数据源后自动替换。"
           : `数据来源：${data.fetched_at || ""} 同步`;
-        const grid = $("#weekGrid");
-        grid.innerHTML = data.dates
-          .map((iso, i) => {
-            const dayCourses = data.courses.filter((c) => c.day === i + 1);
-            const isToday = iso === data.today;
-            const d = new Date(iso + "T00:00:00");
-            return `<div class="week-col${isToday ? " today" : ""}">
-      <div class="week-col-head"><div class="dow">${WEEKDAY[i]}</div><div class="dnum">${d.getMonth() + 1}/${d.getDate()}</div></div>
-      ${
-        dayCourses.length
-          ? dayCourses
-              .map(
-                (c) => `<div class="mini-course">
+        // 固定五大节（1-2、3-4、5-6、7-8、9-10），课程按节次落格，跨午别也不会错位
+        const blocks = [
+          { s: 1, e: 2 }, { s: 3, e: 4 }, { s: 5, e: 6 },
+          { s: 7, e: 8 }, { s: 9, e: 10 },
+        ];
+        const maxEnd = data.courses.reduce((m, c) => Math.max(m, c.end), 10);
+        for (let s = 11; s <= maxEnd; s += 2)
+          blocks.push({ s, e: Math.min(s + 1, maxEnd) });
+        const blockOf = (section) => Math.floor((section - 1) / 2);
+        const cellHtml = (day, bi, isToday) => {
+          const list = data.courses
+            .filter((c) => c.day === day && blockOf(c.start) === bi)
+            .sort(
+              (a, b) =>
+                a.start - b.start ||
+                a.end - b.end ||
+                a.name.localeCompare(b.name, "zh"),
+            );
+          return `<div class="week-cell${isToday ? " today" : ""}">${
+            list.length
+              ? list
+                  .map(
+                    (c) => `<div class="mini-course">
         <div class="t">${esc(c.start_time)}–${esc(c.end_time)} · ${c.start}-${c.end}节</div>
         <div class="n">${esc(c.name)}</div>
         <div class="r">${esc(c.room || "教室待定")}${c.note ? " · " + esc(c.note) : ""}</div>
       </div>`,
-              )
-              .join("")
-          : `<div class="none">无课</div>`
-      }
-    </div>`;
+                  )
+                  .join("")
+              : ""
+          }</div>`;
+        };
+        const heads = data.dates
+          .map((iso, i) => {
+            const d = new Date(iso + "T00:00:00");
+            return `<div class="week-head-cell${iso === data.today ? " today" : ""}">
+        <div class="dow">${WEEKDAY[i]}</div><div class="dnum">${d.getMonth() + 1}/${d.getDate()}</div>
+      </div>`;
           })
           .join("");
+        const rows = blocks
+          .map((b, bi) => {
+            const startTime = data.section_times[String(b.s)] || "";
+            const endTime = data.section_ends[String(b.e)] || "";
+            return `<div class="week-period">
+        <div class="p">第 ${b.s}-${b.e} 节</div><div class="t">${esc(startTime)}–${esc(endTime)}</div>
+      </div>` + data.dates.map((iso, i) => cellHtml(i + 1, bi, iso === data.today)).join("");
+          })
+          .join("");
+        $("#weekGrid").innerHTML = `<div></div>${heads}${rows}`;
       }
 
       /* ---------- 编辑课表 ---------- */
