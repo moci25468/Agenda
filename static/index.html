@@ -1,0 +1,2290 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>青理课表助手</title>
+    <style>
+      :root {
+        --bg: #f5f5f7;
+        --card: #ffffff;
+        --text: #1d1d1f;
+        --sub: #86868b;
+        --line: #e8e8ed;
+        --accent: #0071e3;
+        --accent-soft: #e8f2fd;
+        --ok: #248a3d;
+        --ok-soft: #e9f5ec;
+        --warn: #b25000;
+        --warn-soft: #fdf1e3;
+        --fail: #c41e1e;
+        --fail-soft: #fdeaea;
+        --radius: 12px;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+          "Helvetica Neue", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        font-size: 14px;
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 24px 20px 64px;
+      }
+      header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      h1 {
+        font-size: 22px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+      }
+      .header-sub {
+        color: var(--sub);
+        font-size: 13px;
+        margin-top: 2px;
+      }
+      .header-right {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .badge {
+        font-size: 12px;
+        padding: 3px 10px;
+        border-radius: 999px;
+        background: var(--warn-soft);
+        color: var(--warn);
+        white-space: nowrap;
+      }
+      .badge.real {
+        background: var(--ok-soft);
+        color: var(--ok);
+      }
+      button {
+        font: inherit;
+        cursor: pointer;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: var(--card);
+        color: var(--text);
+        padding: 7px 16px;
+        transition: opacity 0.15s;
+      }
+      button:hover {
+        opacity: 0.8;
+      }
+      button:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+      button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+      button.small {
+        padding: 4px 12px;
+        font-size: 13px;
+      }
+      .statusbar {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+        color: var(--sub);
+        font-size: 12px;
+        margin: 14px 0 0;
+      }
+      nav {
+        display: flex;
+        gap: 4px;
+        border-bottom: 1px solid var(--line);
+        margin: 18px 0 20px;
+        overflow-x: auto;
+      }
+      nav button {
+        border: none;
+        background: none;
+        border-radius: 0;
+        padding: 10px 14px;
+        color: var(--sub);
+        border-bottom: 2px solid transparent;
+        white-space: nowrap;
+      }
+      nav button.active {
+        color: var(--text);
+        font-weight: 600;
+        border-bottom-color: var(--accent);
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 18px;
+      }
+      .card + .card {
+        margin-top: 14px;
+      }
+      .card h2 {
+        font-size: 15px;
+        font-weight: 600;
+        margin-bottom: 12px;
+      }
+      .muted {
+        color: var(--sub);
+      }
+      .empty {
+        text-align: center;
+        color: var(--sub);
+        padding: 40px 0;
+      }
+      .hidden {
+        display: none !important;
+      }
+
+      /* 今日课表 */
+      .day-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        margin-bottom: 14px;
+      }
+      .day-head .date {
+        font-size: 17px;
+        font-weight: 600;
+      }
+      .course-row {
+        display: flex;
+        gap: 16px;
+        padding: 14px 0;
+        border-top: 1px solid var(--line);
+      }
+      .course-row:first-of-type {
+        border-top: none;
+      }
+      .course-time {
+        flex: 0 0 88px;
+        font-variant-numeric: tabular-nums;
+      }
+      .course-time .range {
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .course-time .sections {
+        font-size: 12px;
+        color: var(--sub);
+      }
+      .course-main {
+        flex: 1;
+        min-width: 0;
+      }
+      .course-name {
+        font-size: 15px;
+        font-weight: 600;
+      }
+      .course-meta {
+        font-size: 13px;
+        color: var(--sub);
+        margin-top: 2px;
+      }
+      .course-note {
+        font-size: 12px;
+        color: var(--warn);
+        margin-top: 2px;
+      }
+
+      /* 考试 */
+      .exam-group {
+        font-size: 12px;
+        color: var(--sub);
+        margin: 20px 0 2px;
+      }
+      .exam-group:first-child {
+        margin-top: 2px;
+      }
+      .exam-list .exam-row:first-child {
+        border-top: none;
+      }
+      .exam-row {
+        display: flex;
+        gap: 16px;
+        padding: 14px 0;
+        border-top: 1px solid var(--line);
+      }
+      .exam-row.done {
+        opacity: 0.55;
+      }
+      .exam-date {
+        flex: 0 0 88px;
+        font-variant-numeric: tabular-nums;
+      }
+      .exam-date .md {
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .exam-date .dow {
+        font-size: 12px;
+        color: var(--sub);
+      }
+      .exam-main {
+        flex: 1;
+        min-width: 0;
+      }
+      .exam-name {
+        font-size: 15px;
+        font-weight: 600;
+      }
+      .exam-when {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--accent);
+        margin-left: 6px;
+      }
+      .exam-meta {
+        font-size: 13px;
+        color: var(--sub);
+        margin-top: 2px;
+      }
+
+      /* 周视图 */
+      .week-nav {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+      .week-nav .label {
+        flex: 1;
+        text-align: center;
+        font-size: 15px;
+        font-weight: 600;
+      }
+      .week-grid-scroll {
+        overflow-x: auto;
+      }
+      .week-grid {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 8px;
+        min-width: 760px;
+      }
+      .week-col {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 10px;
+        min-height: 180px;
+      }
+      .week-col.today {
+        border-color: var(--accent);
+      }
+      .week-col-head {
+        text-align: center;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--line);
+        margin-bottom: 8px;
+      }
+      .week-col-head .dow {
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .week-col-head .dnum {
+        font-size: 12px;
+        color: var(--sub);
+      }
+      .week-col.today .dow {
+        color: var(--accent);
+      }
+      .mini-course {
+        background: var(--accent-soft);
+        border-radius: 8px;
+        padding: 8px;
+        margin-bottom: 6px;
+      }
+      .mini-course .t {
+        font-size: 11px;
+        color: var(--sub);
+        font-variant-numeric: tabular-nums;
+      }
+      .mini-course .n {
+        font-size: 13px;
+        font-weight: 600;
+        margin: 1px 0;
+      }
+      .mini-course .r {
+        font-size: 12px;
+        color: var(--sub);
+      }
+      .week-col .none {
+        font-size: 12px;
+        color: var(--sub);
+        text-align: center;
+        padding-top: 12px;
+      }
+
+      /* AI 聊天 */
+      .chat-box {
+        display: flex;
+        flex-direction: column;
+        height: 480px;
+      }
+      .chat-msgs {
+        flex: 1;
+        overflow-y: auto;
+        padding: 4px 2px;
+      }
+      .msg {
+        max-width: 78%;
+        padding: 10px 14px;
+        border-radius: 14px;
+        margin-bottom: 10px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .msg.user {
+        background: var(--accent);
+        color: #fff;
+        margin-left: auto;
+        border-bottom-right-radius: 4px;
+      }
+      .msg.ai {
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-bottom-left-radius: 4px;
+      }
+      .msg.ai.error {
+        background: var(--fail-soft);
+        color: var(--fail);
+        border-color: transparent;
+      }
+      .chips {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        padding: 10px 0;
+        border-top: 1px solid var(--line);
+      }
+      .chips button {
+        font-size: 12px;
+        padding: 4px 12px;
+        color: var(--accent);
+        background: var(--accent-soft);
+        border-color: transparent;
+      }
+      .chat-input {
+        display: flex;
+        gap: 8px;
+      }
+      .chat-input input {
+        flex: 1;
+      }
+
+      /* 日志 */
+      .log-row {
+        display: flex;
+        gap: 12px;
+        align-items: baseline;
+        padding: 10px 0;
+        border-top: 1px solid var(--line);
+        font-size: 13px;
+      }
+      .log-row:first-of-type {
+        border-top: none;
+      }
+      .log-ts {
+        flex: 0 0 132px;
+        color: var(--sub);
+        font-variant-numeric: tabular-nums;
+        font-size: 12px;
+      }
+      .pill {
+        font-size: 11px;
+        padding: 1px 8px;
+        border-radius: 999px;
+        white-space: nowrap;
+      }
+      .pill.ok {
+        background: var(--ok-soft);
+        color: var(--ok);
+      }
+      .pill.fail {
+        background: var(--fail-soft);
+        color: var(--fail);
+      }
+      .pill.skip {
+        background: var(--bg);
+        color: var(--sub);
+      }
+      .log-body {
+        flex: 1;
+        min-width: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      /* 设置 */
+      .form-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px 16px;
+      }
+      .form-grid .full {
+        grid-column: 1 / -1;
+      }
+      label.field {
+        display: block;
+        font-size: 12px;
+        color: var(--sub);
+      }
+      label.field > span {
+        display: block;
+        margin-bottom: 4px;
+      }
+      input,
+      select,
+      textarea {
+        font: inherit;
+        width: 100%;
+        padding: 8px 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--card);
+        color: var(--text);
+        outline: none;
+      }
+      input:focus,
+      select:focus,
+      textarea:focus {
+        border-color: var(--accent);
+      }
+      .check {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        padding: 4px 0;
+      }
+      .check input {
+        width: auto;
+      }
+      .form-actions {
+        display: flex;
+        gap: 10px;
+        margin-top: 16px;
+      }
+      .hint {
+        font-size: 12px;
+        color: var(--sub);
+        margin-top: 8px;
+      }
+      .section-divider {
+        border-top: 1px solid var(--line);
+        margin: 16px 0;
+      }
+
+      #toast {
+        position: fixed;
+        left: 50%;
+        bottom: 32px;
+        transform: translateX(-50%);
+        background: var(--text);
+        color: #fff;
+        padding: 10px 20px;
+        border-radius: 999px;
+        font-size: 13px;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s;
+        max-width: 86vw;
+      }
+      #toast.show {
+        opacity: 1;
+      }
+
+      /* 编辑课表 */
+      .sheet {
+        position: fixed;
+        inset: 0;
+        z-index: 60;
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.28);
+      }
+      .sheet-panel {
+        width: 100%;
+        max-width: 860px;
+        max-height: 92vh;
+        overflow-y: auto;
+        background: var(--card);
+        border-radius: 16px 16px 0 0;
+        padding: 20px;
+      }
+      .sheet-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 14px;
+      }
+      .sheet-head h2 {
+        font-size: 18px;
+        font-weight: 600;
+      }
+      .editor-list-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 6px;
+      }
+      .editor-day {
+        font-size: 12px;
+        color: var(--sub);
+        margin: 16px 0 2px;
+      }
+      .editor-row {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 0;
+        border-top: 1px solid var(--line);
+      }
+      .editor-day + .editor-row {
+        border-top: none;
+        padding-top: 4px;
+      }
+      .editor-row .info {
+        min-width: 0;
+      }
+      .editor-row .nm {
+        font-weight: 500;
+      }
+      .editor-row .meta {
+        font-size: 12px;
+        color: var(--sub);
+        margin-top: 2px;
+      }
+      .editor-row .acts {
+        display: flex;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+      .editor-row .acts button {
+        padding: 3px 10px;
+        font-size: 12px;
+      }
+      @media (min-width: 720px) {
+        .sheet {
+          align-items: center;
+          padding: 24px;
+        }
+        .sheet-panel {
+          border-radius: var(--radius);
+        }
+      }
+      @media (max-width: 640px) {
+        .form-grid {
+          grid-template-columns: 1fr;
+        }
+        .msg {
+          max-width: 92%;
+        }
+        .course-time {
+          flex-basis: 76px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="authScreen" style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:var(--bg)">
+      <div style="width:100%;max-width:380px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px">
+        <h1 style="font-size:20px;font-weight:600">青理课表助手</h1>
+        <p class="muted" id="authHint" style="margin-top:4px">请登录</p>
+        <div style="display:flex;gap:8px;margin:18px 0">
+          <button type="button" id="authTabLogin" class="primary" style="flex:1">登录</button>
+          <button type="button" id="authTabRegister" style="flex:1">注册</button>
+        </div>
+        <form id="loginForm" style="display:grid;gap:12px">
+          <label class="field"><span>用户名</span><input id="loginUsername" autocomplete="username" required></label>
+          <label class="field"><span>密码</span><input id="loginPassword" type="password" autocomplete="current-password" required></label>
+          <button class="primary" type="submit">登录</button>
+        </form>
+        <form id="registerForm" class="hidden" style="display:grid;gap:12px">
+          <label class="field"><span>用户名</span><input id="regUsername" autocomplete="username" required></label>
+          <label class="field"><span>密码（至少 8 位）</span><input id="regPassword" type="password" autocomplete="new-password" required></label>
+          <label class="field"><span>显示名称（可选）</span><input id="regName"></label>
+          <label class="field"><span>学号（可选）</span><input id="regStudentId"></label>
+          <label class="field" id="inviteField"><span>邀请码</span><input id="regInvite"></label>
+          <button class="primary" type="submit">注册</button>
+        </form>
+        <p class="hint" id="authError" style="color:var(--fail)"></p>
+      </div>
+    </div>
+    <div class="wrap hidden" id="app">
+      <header>
+        <div>
+          <h1>青理课表助手</h1>
+          <div class="header-sub" id="headerSub">青岛理工大学</div>
+        </div>
+        <div class="header-right">
+          <span class="badge hidden" id="demoBadge">演示数据</span>
+          <span id="userBox" class="muted" style="font-size:12px"></span>
+          <button class="small hidden" id="inviteBtn">邀请码</button>
+          <button class="small" id="logoutBtn">退出</button>
+          <button class="small" id="syncBtn">立即同步</button>
+        </div>
+      </header>
+      <div class="statusbar" id="statusbar"></div>
+
+      <nav id="nav">
+        <button data-tab="today" class="active">今日</button>
+        <button data-tab="week">本周课表</button>
+        <button data-tab="exams">考试</button>
+        <button data-tab="ai">AI 助手</button>
+        <button data-tab="logs">日志</button>
+        <button data-tab="settings">设置</button>
+      </nav>
+
+      <!-- 今日 -->
+      <section id="tab-today">
+        <div class="card">
+          <div class="day-head">
+            <span class="date" id="todayDate"></span>
+            <span class="muted" id="todayWeek"></span>
+          </div>
+          <div id="todayList"></div>
+        </div>
+      </section>
+
+      <!-- 周视图 -->
+      <section id="tab-week" class="hidden">
+        <div class="week-nav">
+          <button class="small" id="prevWeek">上一周</button>
+          <span class="label" id="weekLabel"></span>
+          <button class="small" id="nextWeek">下一周</button>
+          <button class="small" id="editCoursesBtn">编辑课表</button>
+        </div>
+        <div class="week-grid-scroll">
+          <div class="week-grid" id="weekGrid"></div>
+        </div>
+        <p class="hint" id="weekHint"></p>
+      </section>
+
+      <!-- 考试 -->
+      <section id="tab-exams" class="hidden">
+        <div class="card">
+          <div class="day-head">
+            <span class="date">考试安排</span>
+            <span class="muted" id="examSub"></span>
+          </div>
+          <div id="examList"></div>
+        </div>
+        <p class="hint" id="examHint">
+          考试数据来自正方教务，随每次同步更新；临时调考以教务系统为准。
+        </p>
+      </section>
+
+      <!-- AI -->
+      <section id="tab-ai" class="hidden">
+        <div class="card chat-box">
+          <div class="chat-msgs" id="chatMsgs">
+            <div class="msg ai">
+              你好，我是青理课表助手。可以问我课程、教室、教学周和考试安排的问题，例如「我最近有什么考试」。
+            </div>
+          </div>
+          <div class="chips" id="chatChips">
+            <button>我明天有什么课？</button>
+            <button>这周哪天没课？</button>
+            <button>明天第一节课在哪上？</button>
+            <button>现在是第几周？</button>
+            <button>我最近有什么考试？</button>
+            <button>下一场考试在哪个教室？</button>
+          </div>
+          <div class="chat-input">
+            <input
+              id="chatInput"
+              placeholder="输入问题，回车发送"
+              autocomplete="off"
+            />
+            <button class="primary" id="chatSend">发送</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 日志 -->
+      <section id="tab-logs" class="hidden">
+        <div class="card">
+          <h2>同步记录</h2>
+          <div id="syncLogs"></div>
+        </div>
+        <div class="card">
+          <h2>推送记录</h2>
+          <div id="pushLogs"></div>
+        </div>
+      </section>
+
+      <!-- 设置 -->
+      <section id="tab-settings" class="hidden">
+        <div class="card hidden" id="adminCard">
+          <h2>账号与邀请码</h2>
+          <p class="hint">新用户需凭邀请码注册，注册后各自维护自己的课表数据源、推送和 AI 配置，互不可见。邀请码一次性、7 天有效。</p>
+          <div class="form-actions">
+            <button id="genInviteBtn">生成邀请码</button>
+            <button id="refreshInvitesBtn">刷新列表</button>
+          </div>
+          <pre id="inviteList" style="margin-top:10px;padding:10px;background:var(--bg);border-radius:8px;font-size:12px;white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto">暂无邀请码</pre>
+          <p class="hint" id="userList"></p>
+        </div>
+        <div class="card">
+          <h2>课表与考试数据源</h2>
+          <div class="form-grid">
+            <label class="field"
+              ><span>接入方式</span>
+              <select name="provider.type" id="providerType">
+                <option value="mock">演示数据（无需配置）</option>
+                <option value="portal">青岛理工门户（cURL 一键导入）</option>
+                <option value="zhengfang">正方教务系统（jwglxt）</option>
+                <option value="httpjson">通用 HTTP JSON 接口</option>
+              </select>
+            </label>
+            <label class="field"
+              ><span>每日同步时间</span
+              ><input name="sync_time" placeholder="12:00"
+            /></label>
+
+            <div class="full" id="zfFields">
+              <div class="section-divider"></div>
+              <div class="form-grid">
+                <label class="field full"
+                  ><span>教务地址</span
+                  ><input
+                    name="provider.zf_base"
+                    placeholder="https://jxgl.qut.edu.cn/jwglxt"
+                /></label>
+                <label class="field"
+                  ><span>学号</span><input name="provider.zf_username"
+                /></label>
+                <label class="field"
+                  ><span>密码</span
+                  ><input name="provider.zf_password" type="password"
+                /></label>
+                <label class="field"
+                  ><span>学年</span
+                  ><input name="provider.zf_year" placeholder="2026"
+                /></label>
+                <label class="field"
+                  ><span>学期</span>
+                  <select name="provider.zf_term">
+                    <option value="3">第一学期（秋季）</option>
+                    <option value="12">第二学期（春季）</option>
+                  </select>
+                </label>
+                <label class="field full"
+                  ><span>Cookie（可选，填了则跳过账号登录）</span
+                  ><textarea
+                    name="provider.zf_cookie"
+                    rows="2"
+                    placeholder="浏览器登录教务系统后，复制请求头中的 Cookie"
+                  ></textarea>
+                </label>
+              </div>
+              <p class="hint" id="zfExamHint">
+                门户只提供课表。填写下方正方账号或 Cookie 后，每次同步会额外拉取考试，课表仍以门户为准。
+              </p>
+              <p class="hint">
+                正方登录已按青岛理工 jxgl 实际页面适配：RSA 加密 + csrftoken，支持账号密码直连；连续输错
+                3 次会要求验证码，此时请等几分钟或改用 Cookie。
+              </p>
+              <div
+                class="full"
+                style="
+                  display: flex;
+                  align-items: center;
+                  gap: 10px;
+                  flex-wrap: wrap;
+                "
+              >
+                <button type="button" id="zfTestBtn">测试正方登录</button>
+                <span class="hint" id="zfTestResult"
+                  >用上面的地址、学号、密码试登录并各拉一次课表和考试，不保存设置</span
+                >
+              </div>
+            </div>
+
+            <div class="full hidden" id="httpFields">
+              <div class="section-divider"></div>
+              <details class="full" style="margin-bottom: 12px">
+                <summary
+                  style="cursor: pointer; font-size: 13px; color: var(--accent)"
+                >
+                  门户接入向导（第一次接入先看这里）
+                </summary>
+                <div
+                  style="
+                    margin-top: 10px;
+                    font-size: 12px;
+                    line-height: 1.8;
+                    color: var(--sub);
+                  "
+                >
+                  1. 浏览器登录融合门户，进入课表 / 日程页（portal.qut.edu.cn
+                  下的页面）。<br />
+                  2. F12 → Network → 筛选
+                  <b>Fetch/XHR</b
+                  >，刷新页面，点开返回课程数据的那个请求（Response 是
+                  JSON，不是 HTML）。<br />
+                  3. 右键该请求 → Copy →
+                  <b>Copy as cURL</b
+                  >，粘到下面「导入并试拉取」。要复制的是数据请求，<b
+                    >不是 sso.qut.edu.cn/sso/login 登录页地址</b
+                  >。<br />
+                  4. 若导入后课程数为 0，切到该请求的 <b>Response</b> 全选复制
+                  JSON，粘到「离线分析响应」看字段结构。<br />
+                  <b>安全：</b>cURL 里含登录
+                  Cookie，只粘到本地这个页面，不要发到聊天或群聊；可以把不含
+                  Cookie 的响应预览发给助手帮忙配字段映射。<br />
+                  <b>注意：</b>如果接口地址里写死了周次 /
+                  日期参数，每天同步会一直拿到同一周的数据，导入结果会给出提示。
+                </div>
+              </details>
+              <div
+                class="full"
+                style="
+                  border: 1px solid var(--line);
+                  border-radius: 10px;
+                  padding: 14px;
+                  margin-bottom: 14px;
+                  background: var(--bg);
+                "
+              >
+                <div
+                  style="
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                    flex-wrap: wrap;
+                  "
+                >
+                  <button class="primary" id="browserLoginBtn">
+                    一键登录门户（推荐）
+                  </button>
+                  <button id="browserLoginForceBtn" class="hidden">
+                    我已登录，立即抓取接口
+                  </button>
+                  <button id="browserLoginStopBtn" class="hidden">取消</button>
+                  <span
+                    id="browserLoginState"
+                    class="muted"
+                    style="font-size: 12px"
+                    >登录页二维码将显示在下方面板，用微信扫码即可自动获取课表；无需把密码交给程序</span
+                  >
+                  <img
+                    id="qrImage"
+                    class="hidden"
+                    alt="登录二维码"
+                    style="
+                      margin-top: 10px;
+                      border-radius: 8px;
+                      background: #fff;
+                      padding: 8px;
+                      max-width: 240px;
+                      display: block;
+                    "
+                  />
+                </div>
+                <pre
+                  id="browserLoginLog"
+                  class="hidden"
+                  style="
+                    margin-top: 10px;
+                    padding: 10px;
+                    background: var(--card);
+                    border-radius: 8px;
+                    font-size: 12px;
+                    white-space: pre-wrap;
+                    word-break: break-word;
+                    max-height: 200px;
+                    overflow-y: auto;
+                  "
+                ></pre>
+                <p class="hint" id="browserLoginResult"></p>
+              </div>
+              <label class="field full"
+                ><span
+                  >备用方式：从浏览器导入接口（门户课表页 → F12 Network →
+                  右键课表请求 → Copy as cURL）</span
+                >
+                <textarea
+                  id="curlInput"
+                  rows="4"
+                  placeholder="curl 'https://portal.qut.edu.cn/...' -H 'cookie: ...' ..."
+                ></textarea>
+              </label>
+              <div class="form-actions">
+                <button id="importCurlBtn">导入并试拉取</button>
+                <button id="previewBtn">预览当前接口响应</button>
+              </div>
+              <pre
+                id="importPreview"
+                class="hidden"
+                style="
+                  margin-top: 10px;
+                  padding: 10px;
+                  background: var(--bg);
+                  border-radius: 8px;
+                  font-size: 12px;
+                  white-space: pre-wrap;
+                  word-break: break-word;
+                  max-height: 320px;
+                  overflow-y: auto;
+                "
+              ></pre>
+              <div class="section-divider"></div>
+              <label class="field full"
+                ><span
+                  >离线分析响应（导入不成功时用：Network → Response 全选复制
+                  JSON；不联网、不写配置）</span
+                >
+                <textarea
+                  id="analyzeInput"
+                  rows="3"
+                  placeholder='{"code":200,"data":{"list":[...]}}'
+                ></textarea>
+              </label>
+              <div class="form-actions">
+                <button id="analyzeBtn">分析响应结构</button>
+              </div>
+              <div class="section-divider"></div>
+              <div class="form-grid">
+                <label class="field full"
+                  ><span>课表 API 地址</span
+                  ><input name="provider.http_url" placeholder="https://..."
+                /></label>
+                <label class="field"
+                  ><span>请求方法</span
+                  ><select name="provider.http_method">
+                    <option>GET</option>
+                    <option>POST</option>
+                  </select></label
+                >
+                <label class="field"
+                  ><span>课程数组路径（点分隔）</span
+                  ><input
+                    name="provider.http_list_path"
+                    placeholder="data.courses"
+                /></label>
+                <label class="field full"
+                  ><span>请求头（JSON）</span
+                  ><textarea
+                    name="provider.http_headers"
+                    rows="2"
+                    placeholder='{"Authorization": "Bearer xxx"}'
+                  ></textarea>
+                </label>
+                <label class="field full"
+                  ><span>POST Body（JSON，GET 留空）</span
+                  ><textarea name="provider.http_body" rows="2"></textarea>
+                </label>
+              </div>
+              <p class="hint">
+                字段映射默认为
+                name/teacher/room/day/start/end/weeks，如接口字段不同，编辑
+                data/config.json 中的 provider.http_mapping。
+              </p>
+            </div>
+
+            <div class="full"><div class="section-divider"></div></div>
+            <label class="field"
+              ><span>开学日期（第 1 周周一）</span
+              ><input name="semester_start" type="date"
+            /></label>
+            <label class="field"
+              ><span>学期总周数</span
+              ><input name="total_weeks" type="number" min="1" max="40"
+            /></label>
+            <div class="full check">
+              <input type="checkbox" id="pushNextDay" /><span
+                >同步后推送次日课表预览</span
+              >
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>推送通道</h2>
+          <div class="check">
+            <input type="checkbox" id="barkEnabled" /><span
+              >启用 Bark（iOS 推送）</span
+            >
+          </div>
+          <div class="form-grid">
+            <label class="field"
+              ><span>Bark 服务器</span
+              ><input name="push.bark_server" placeholder="https://api.day.app"
+            /></label>
+            <label class="field"
+              ><span>Bark Key</span><input name="push.bark_key" type="password"
+            /></label>
+          </div>
+          <div class="section-divider"></div>
+          <div class="check">
+            <input type="checkbox" id="smtpEnabled" /><span
+              >启用邮件推送（SMTP）</span
+            >
+          </div>
+          <div class="form-grid">
+            <label class="field"
+              ><span>SMTP 服务器</span
+              ><input name="push.smtp_host" placeholder="smtp.qq.com"
+            /></label>
+            <label class="field"
+              ><span>端口</span
+              ><input name="push.smtp_port" type="number" placeholder="465"
+            /></label>
+            <label class="field"
+              ><span>账号</span
+              ><input name="push.smtp_user" placeholder="xxx@qq.com"
+            /></label>
+            <label class="field"
+              ><span>授权码 / 密码</span
+              ><input name="push.smtp_pass" type="password"
+            /></label>
+            <label class="field"
+              ><span>收件邮箱</span><input name="push.smtp_to"
+            /></label>
+            <div class="check" style="align-self: end">
+              <input type="checkbox" id="smtpSsl" /><span
+                >SSL（465 端口勾选）</span
+              >
+            </div>
+          </div>
+          <div class="form-actions">
+            <button id="testPushBtn">发送测试推送</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>AI 助手</h2>
+          <div class="check">
+            <input type="checkbox" id="aiEnabled" /><span
+              >启用 AI 问答（OpenAI 兼容接口）</span
+            >
+          </div>
+          <div class="form-grid">
+            <label class="field full"
+              ><span>接口地址</span
+              ><input
+                name="ai.base_url"
+                placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1"
+            /></label>
+            <label class="field"
+              ><span>模型</span><input name="ai.model" placeholder="qwen-plus"
+            /></label>
+            <label class="field"
+              ><span>API Key</span><input name="ai.api_key" type="password"
+            /></label>
+          </div>
+          <div class="form-actions" style="margin-top: 10px">
+            <button class="small" data-ai-preset="qwen">通义千问</button>
+            <button class="small" data-ai-preset="deepseek">DeepSeek</button>
+            <button class="small" data-ai-preset="ollama">本地 Ollama</button>
+            <span class="muted" style="font-size: 12px"
+              >预设只填地址与模型，Key 仍需自己填</span
+            >
+          </div>
+          <div class="form-grid" style="margin-top: 12px">
+            <label class="field full"
+              ><span
+                >自定义请求头（JSON，可覆盖 Authorization，适配自建网关）</span
+              >
+              <textarea
+                name="ai.headers"
+                rows="2"
+                placeholder='{"X-API-Key": "xxx"}'
+              ></textarea>
+            </label>
+          </div>
+          <div class="form-actions">
+            <button id="aiModelsBtn">探测可用模型</button>
+            <button id="aiTestBtn">测试连接</button>
+          </div>
+          <pre
+            id="aiDiag"
+            class="hidden"
+            style="
+              margin-top: 10px;
+              padding: 10px;
+              background: var(--bg);
+              border-radius: 8px;
+              font-size: 12px;
+              white-space: pre-wrap;
+              word-break: break-word;
+              max-height: 180px;
+              overflow-y: auto;
+            "
+          ></pre>
+          <p class="hint">
+            支持任何 OpenAI 兼容服务：通义千问
+            DashScope、DeepSeek、Moonshot、自建网关，或本地
+            Ollama（http://127.0.0.1:11434/v1，Key 任意填）。换服务不用改代码。
+          </p>
+        </div>
+
+        <div class="card">
+          <h2>安全 · App 接入</h2>
+          <div class="check">
+            <input type="checkbox" id="securityEnabled" /><span
+              >启用本地 token 鉴权（封装成 App 时建议开启）</span
+            >
+          </div>
+          <div class="form-grid">
+            <label class="field"
+              ><span>本地 Token</span
+              ><input
+                name="security.token"
+                type="password"
+                placeholder="点右侧按钮生成"
+            /></label>
+            <div class="field" style="display: flex; align-items: flex-end">
+              <button id="genTokenBtn">生成随机 Token</button>
+            </div>
+            <label class="field full"
+              ><span>额外允许的来源（逗号分隔，可选）</span
+              ><input
+                id="allowedOrigins"
+                placeholder="tauri://localhost, capacitor://localhost"
+            /></label>
+          </div>
+          <p class="hint">
+            开启后同源页面（浏览器直接访问）不受影响；跨源调用（App WebView /
+            浏览器扩展）需带 <b>Authorization: Bearer &lt;token&gt;</b> 或
+            <b>X-Local-Token</b> 请求头。默认已允许
+            tauri://localhost、capacitor://localhost、app:// 与本机
+            localhost/127.0.0.1 任意端口。
+          </p>
+          <p class="hint">
+            App 化的数据入口：<b>POST /api/ingest</b>，body 形如 {"payload":
+            课表JSON, "push": false, "source": "app"}。登录态留在 WebView
+            内，只把数据传进来；解析、变更检测、推送与 AI
+            上下文全部复用现有链路。
+          </p>
+        </div>
+
+        <div class="form-actions">
+          <button class="primary" id="saveSettingsBtn">保存设置</button>
+          <button id="syncNowBtn2">保存并立即同步</button>
+        </div>
+      </section>
+    </div>
+
+    <!-- 编辑课表 -->
+    <div id="courseEditor" class="sheet hidden">
+      <div class="sheet-panel" role="dialog" aria-modal="true" aria-label="编辑课表">
+        <div class="sheet-head">
+          <div>
+            <h2>编辑课表</h2>
+            <p class="hint">手动调整叠加在同步结果上，下次同步不会覆盖。</p>
+          </div>
+          <button class="small" id="closeEditorBtn">完成</button>
+        </div>
+        <form id="courseForm" class="form-grid">
+          <label class="field full"
+            ><span>课程名称</span>
+            <input id="courseName" placeholder="例如 高等数学" autocomplete="off"
+          /></label>
+          <label class="field"
+            ><span>星期</span>
+            <select id="courseDay">
+              <option value="1">周一</option>
+              <option value="2">周二</option>
+              <option value="3">周三</option>
+              <option value="4">周四</option>
+              <option value="5">周五</option>
+              <option value="6">周六</option>
+              <option value="7">周日</option>
+            </select></label
+          >
+          <label class="field"
+            ><span>周次</span>
+            <input id="courseWeeks" placeholder="1-16 或 1-15(单)、3,5,7" autocomplete="off"
+          /></label>
+          <label class="field"
+            ><span>开始节次</span>
+            <input id="courseStart" type="number" min="1" max="12" value="1"
+          /></label>
+          <label class="field"
+            ><span>结束节次</span>
+            <input id="courseEnd" type="number" min="1" max="12" value="2"
+          /></label>
+          <label class="field"
+            ><span>教室</span>
+            <input id="courseRoom" placeholder="选填" autocomplete="off"
+          /></label>
+          <label class="field"
+            ><span>教师</span>
+            <input id="courseTeacher" placeholder="选填" autocomplete="off"
+          /></label>
+          <label class="field full"
+            ><span>备注</span>
+            <input id="courseNote" placeholder="选填，例如 实验室 / 单周" autocomplete="off"
+          /></label>
+          <div class="full form-actions" style="margin-top: 0">
+            <button class="primary" type="submit" id="saveCourseBtn">添加课程</button>
+            <button type="button" id="cancelCourseBtn">清空</button>
+          </div>
+        </form>
+        <div class="section-divider"></div>
+        <div class="editor-list-head">
+          <span class="muted" id="courseCount"></span>
+          <span>
+            <button class="small hidden" id="restoreHiddenBtn">恢复隐藏</button>
+            <button class="small" id="resetCoursesBtn" disabled>恢复自动课表</button>
+          </span>
+        </div>
+        <div id="courseList"></div>
+      </div>
+    </div>
+    <div id="toast"></div>
+
+    <script>
+      const $ = (s) => document.querySelector(s);
+      const $$ = (s) => document.querySelectorAll(s);
+      const WEEKDAY = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+      let status = null,
+        weekData = null,
+        viewWeek = null,
+        chatHistory = [];
+
+      async function api(path, opts = {}) {
+        const r = await fetch(path, {
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          ...opts,
+        });
+        const data = await r.json().catch(() => ({}));
+        if (r.status === 401 && !path.startsWith("/api/auth/")) {
+          showAuthScreen();
+          throw new Error("登录已失效，请重新登录");
+        }
+        if (!r.ok) throw new Error(data.detail || `请求失败 (${r.status})`);
+        return data;
+      }
+      function toast(msg, ms = 2600) {
+        const t = $("#toast");
+        t.textContent = msg;
+        t.classList.add("show");
+        clearTimeout(t._timer);
+        t._timer = setTimeout(() => t.classList.remove("show"), ms);
+      }
+      function esc(s) {
+        const d = document.createElement("div");
+        d.textContent = s ?? "";
+        return d.innerHTML;
+      }
+
+      /* ---------- 状态与今日 ---------- */
+      async function loadStatus() {
+        status = await api("/api/status");
+        $("#headerSub").textContent =
+          `${status.school} · ${status.week > 0 ? "第 " + status.week + " 周" : "假期"} · ${status.weekday}`;
+        const badge = $("#demoBadge");
+        badge.classList.toggle("hidden", !status.is_demo);
+        badge.textContent = "演示数据";
+        const providerName =
+          {
+            mock: "演示数据",
+            zhengfang: "正方教务",
+            httpjson: "自定义接口",
+            portal: "校门户",
+          }[status.provider] || status.provider;
+        $("#statusbar").innerHTML = [
+          `数据源：${esc(providerName)}`,
+          `课程数：${status.course_count}`,
+          status.upcoming_exam_count
+            ? `考试：${status.upcoming_exam_count} 场待考`
+            : "",
+          `上次同步：${esc(status.last_sync || "尚未同步")}`,
+          `下次同步：${esc(status.next_sync || "-")}（每日 ${esc(status.sync_time)}）`,
+          `推送：${status.push_channels.length ? status.push_channels.join(" / ") : "未启用"}`,
+          `AI：${status.ai_enabled ? "已启用" : "未配置"}`,
+        ]
+          .filter(Boolean)
+          .map((s) => `<span>${s}</span>`)
+          .join("");
+      }
+
+      function courseRow(c) {
+        return `<div class="course-row">
+    <div class="course-time"><div class="range">${esc(c.start_time)}–${esc(c.end_time)}</div><div class="sections">第 ${c.start}–${c.end} 节</div></div>
+    <div class="course-main">
+      <div class="course-name">${esc(c.name)}</div>
+      <div class="course-meta">${esc(c.room || "教室待定")}${c.teacher ? " · " + esc(c.teacher) : ""}${c.campus ? " · " + esc(c.campus) : ""}</div>
+      ${c.note ? `<div class="course-note">${esc(c.note)}</div>` : ""}
+    </div>
+  </div>`;
+      }
+
+      async function loadToday() {
+        weekData = await api("/api/timetable");
+        if (viewWeek === null) viewWeek = Math.max(weekData.current_week, 1);
+        const d = new Date(weekData.today + "T00:00:00");
+        $("#todayDate").textContent =
+          `${d.getMonth() + 1} 月 ${d.getDate()} 日 ${WEEKDAY[d.getDay() === 0 ? 6 : d.getDay() - 1]}`;
+        $("#todayWeek").textContent =
+          weekData.current_week > 0
+            ? `第 ${weekData.current_week} 教学周`
+            : "假期";
+        const list = weekData.today_courses;
+        $("#todayList").innerHTML = list.length
+          ? list.map(courseRow).join("")
+          : `<div class="empty">今天没有课</div>`;
+      }
+
+      /* ---------- 周视图 ---------- */
+      async function loadWeek(week) {
+        const data = await api("/api/timetable?week=" + week);
+        viewWeek = data.week;
+        $("#weekLabel").textContent =
+          `第 ${data.week} 周` +
+          (data.week === data.current_week ? "（本周）" : "");
+        $("#weekHint").textContent = data.is_demo
+          ? "当前为演示课表，接入真实数据源后自动替换。"
+          : `数据来源：${data.fetched_at || ""} 同步`;
+        const grid = $("#weekGrid");
+        grid.innerHTML = data.dates
+          .map((iso, i) => {
+            const dayCourses = data.courses.filter((c) => c.day === i + 1);
+            const isToday = iso === data.today;
+            const d = new Date(iso + "T00:00:00");
+            return `<div class="week-col${isToday ? " today" : ""}">
+      <div class="week-col-head"><div class="dow">${WEEKDAY[i]}</div><div class="dnum">${d.getMonth() + 1}/${d.getDate()}</div></div>
+      ${
+        dayCourses.length
+          ? dayCourses
+              .map(
+                (c) => `<div class="mini-course">
+        <div class="t">${esc(c.start_time)}–${esc(c.end_time)} · ${c.start}-${c.end}节</div>
+        <div class="n">${esc(c.name)}</div>
+        <div class="r">${esc(c.room || "教室待定")}${c.note ? " · " + esc(c.note) : ""}</div>
+      </div>`,
+              )
+              .join("")
+          : `<div class="none">无课</div>`
+      }
+    </div>`;
+          })
+          .join("");
+      }
+
+      /* ---------- 编辑课表 ---------- */
+      let courseData = null;
+      let editingUid = "";
+
+      function weeksLabel(weeks) {
+        if (!weeks || !weeks.length) return "每周";
+        const s = [...weeks].sort((a, b) => a - b);
+        if (s.length > 3) {
+          const step = s[1] - s[0];
+          const same =
+            (step === 1 || step === 2) &&
+            s.every((w, i) => i === 0 || w - s[i - 1] === step);
+          if (same && step === 2)
+            return `${s[0]}-${s[s.length - 1]} ${s[0] % 2 ? "单周" : "双周"}`;
+        }
+        const parts = [];
+        let a = s[0],
+          b = s[0];
+        for (let i = 1; i <= s.length; i++) {
+          const w = s[i];
+          if (w === b + 1) {
+            b = w;
+            continue;
+          }
+          parts.push(a === b ? `${a}` : `${a}-${b}`);
+          a = b = w;
+        }
+        return `第 ${parts.join(",")} 周`;
+      }
+
+      function resetCourseForm() {
+        editingUid = "";
+        $("#courseForm").reset();
+        $("#courseStart").value = 1;
+        $("#courseEnd").value = 2;
+        $("#saveCourseBtn").textContent = "添加课程";
+      }
+
+      function openCourseEditor() {
+        $("#courseEditor").classList.remove("hidden");
+        document.body.style.overflow = "hidden";
+        loadCourseEditor();
+      }
+
+      function closeCourseEditor() {
+        $("#courseEditor").classList.add("hidden");
+        document.body.style.overflow = "";
+        resetCourseForm();
+      }
+
+      function fillCourseForm(uid) {
+        const c = (courseData?.courses || []).find((x) => x.uid === uid);
+        if (!c) return;
+        editingUid = uid;
+        $("#courseName").value = c.name || "";
+        $("#courseDay").value = String(c.day || 1);
+        $("#courseStart").value = c.start;
+        $("#courseEnd").value = c.end;
+        $("#courseWeeks").value = (c.weeks || []).join(",");
+        $("#courseRoom").value = c.room || "";
+        $("#courseTeacher").value = c.teacher || "";
+        $("#courseNote").value = c.note || "";
+        $("#saveCourseBtn").textContent = "保存修改";
+        $(".sheet-panel").scrollTop = 0;
+        $("#courseName").focus();
+      }
+
+      async function loadCourseEditor() {
+        try {
+          courseData = await api("/api/courses");
+        } catch (e) {
+          toast(e.message, 4000);
+          return;
+        }
+        const cs = courseData.courses || [];
+        const counts = [];
+        if (courseData.added_count) counts.push(`手动添加 ${courseData.added_count}`);
+        if (courseData.edited_count) counts.push(`修改 ${courseData.edited_count}`);
+        if (courseData.hidden_count) counts.push(`隐藏 ${courseData.hidden_count}`);
+        $("#courseCount").textContent =
+          `${cs.length} 门课` + (counts.length ? " · " + counts.join(" / ") : "");
+        $("#resetCoursesBtn").disabled = !courseData.has_overrides;
+        $("#restoreHiddenBtn").classList.toggle(
+          "hidden",
+          !courseData.hidden_count,
+        );
+        $("#restoreHiddenBtn").textContent = `恢复隐藏（${courseData.hidden_count}）`;
+        const box = $("#courseList");
+        if (!cs.length) {
+          box.innerHTML = `<div class="empty">还没有课程，先同步或在上方手动添加</div>`;
+          return;
+        }
+        box.innerHTML = WEEKDAY.map((dow, i) => {
+          const list = cs.filter((c) => c.day === i + 1);
+          if (!list.length) return "";
+          return (
+            `<div class="editor-day">${dow}</div>` +
+            list
+              .map(
+                (c) => `<div class="editor-row">
+        <div class="info">
+          <div class="nm">${esc(c.name)}${c.manual ? ' <span class="muted" style="font-size:11px">手动</span>' : ""}</div>
+          <div class="meta">${c.start}-${c.end} 节 · ${esc(c.start_time)}–${esc(c.end_time)} · ${weeksLabel(c.weeks)}${c.room ? " · " + esc(c.room) : ""}</div>
+        </div>
+        <div class="acts">
+          <button type="button" data-edit="${esc(c.uid)}">修改</button>
+          <button type="button" data-del="${esc(c.uid)}">${c.manual ? "删除" : "隐藏"}</button>
+        </div>
+      </div>`,
+              )
+              .join("")
+          );
+        }).join("");
+      }
+
+      async function applyCourseAction(action, uid, course) {
+        try {
+          await api("/api/courses", {
+            method: "POST",
+            body: JSON.stringify({
+              action,
+              uid: uid || null,
+              course: course || null,
+            }),
+          });
+          const msg = {
+            add: "已添加课程",
+            update: "已保存修改",
+            delete: "已从课表移除",
+            restore_hidden: "已恢复隐藏的课程",
+            reset: "已恢复自动课表",
+          };
+          toast(msg[action] || "已更新", 3000);
+          await loadCourseEditor();
+          await Promise.all([loadStatus(), loadToday()]);
+          if (!$("#tab-week").classList.contains("hidden"))
+            await loadWeek(viewWeek ?? Math.max(weekData?.current_week || 1, 1));
+          return true;
+        } catch (e) {
+          toast(e.message, 4000);
+          return false;
+        }
+      }
+
+      $("#editCoursesBtn").addEventListener("click", openCourseEditor);
+      $("#closeEditorBtn").addEventListener("click", closeCourseEditor);
+      $("#cancelCourseBtn").addEventListener("click", resetCourseForm);
+      $("#courseEditor").addEventListener("click", (e) => {
+        if (e.target.id === "courseEditor") closeCourseEditor();
+      });
+      document.addEventListener("keydown", (e) => {
+        if (
+          e.key === "Escape" &&
+          !$("#courseEditor").classList.contains("hidden")
+        )
+          closeCourseEditor();
+      });
+      $("#courseList").addEventListener("click", (ev) => {
+        const edit = ev.target.closest("[data-edit]");
+        const del = ev.target.closest("[data-del]");
+        if (edit) fillCourseForm(edit.dataset.edit);
+        else if (del) applyCourseAction("delete", del.dataset.del);
+      });
+      $("#resetCoursesBtn").addEventListener("click", () => {
+        if (confirm("恢复自动课表？会清除所有手动添加、修改和隐藏的课程。"))
+          applyCourseAction("reset");
+      });
+      $("#restoreHiddenBtn").addEventListener("click", () =>
+        applyCourseAction("restore_hidden"),
+      );
+      $("#courseForm").addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        const body = {
+          name: $("#courseName").value.trim(),
+          day: Number($("#courseDay").value),
+          start: Number($("#courseStart").value),
+          end: Number($("#courseEnd").value),
+          weeks: $("#courseWeeks").value.trim(),
+          room: $("#courseRoom").value.trim(),
+          teacher: $("#courseTeacher").value.trim(),
+          note: $("#courseNote").value.trim(),
+        };
+        if (!body.name) {
+          toast("请填写课程名称");
+          $("#courseName").focus();
+          return;
+        }
+        if (await applyCourseAction(editingUid ? "update" : "add", editingUid, body))
+          resetCourseForm();
+      });
+
+      /* ---------- 考试 ---------- */
+      let examData = null;
+      function examRow(e) {
+        const d = new Date(e.date + "T00:00:00");
+        const md = `${d.getMonth() + 1}/${d.getDate()}`;
+        const dow = WEEKDAY[d.getDay() === 0 ? 6 : d.getDay() - 1];
+        let when = "";
+        if (!e.finished && examData?.today) {
+          const days = Math.round(
+            (new Date(e.date + "T00:00:00") -
+              new Date(examData.today + "T00:00:00")) /
+              86400000,
+          );
+          if (days === 0) when = "今天";
+          else if (days === 1) when = "明天";
+          else if (days > 1) when = `${days} 天后`;
+        }
+        const time =
+          e.start && e.end ? `${e.start}–${e.end}` : e.display_time || e.time;
+        const meta = [time, e.room || "考场待定", e.seat ? `座位 ${e.seat}` : ""]
+          .filter(Boolean)
+          .map(esc)
+          .join(" · ");
+        const extra = [e.campus, e.note].filter(Boolean).map(esc).join(" · ");
+        return `<div class="exam-row${e.finished ? " done" : ""}">
+    <div class="exam-date"><div class="md">${md}</div><div class="dow">${dow}</div></div>
+    <div class="exam-main">
+      <div class="exam-name">${esc(e.name)}${when ? `<span class="exam-when">${when}</span>` : ""}</div>
+      <div class="exam-meta">${meta}</div>
+      ${extra ? `<div class="exam-meta">${extra}</div>` : ""}
+    </div>
+  </div>`;
+      }
+      async function loadExams() {
+        examData = await api("/api/exams");
+        const box = $("#examList");
+        const sub = $("#examSub");
+        if (!examData.exams.length) {
+          sub.textContent = "";
+          box.innerHTML = examData.supported
+            ? `<div class="empty">暂无考试安排，点「立即同步」从教务拉取</div>`
+            : examData.provider === "portal"
+              ? `<div class="empty">门户只提供课表；填写正方账号或 Cookie 后，同步会额外拉取考试<br><button class="small" id="examToSettings" style="margin-top:12px">去设置填写正方账号</button></div>`
+              : `<div class="empty">当前数据源不支持考试查询，请在设置中切换到正方教务<br><button class="small" id="examToSettings" style="margin-top:12px">去设置</button></div>`;
+          $("#examHint").textContent = examData.supported
+            ? "考试数据来自正方教务，随每次同步更新；临时调考以教务系统为准。"
+            : "";
+          return;
+        }
+        sub.textContent = [
+          examData.is_demo ? "演示数据" : "",
+          examData.fetched_at ? `${examData.fetched_at} 同步` : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        const group = (title, list) =>
+          list.length
+            ? `<div class="exam-group">${title} · ${list.length} 场</div><div class="exam-list">${list.map(examRow).join("")}</div>`
+            : "";
+        box.innerHTML =
+          group("即将进行", examData.upcoming) +
+          group("已结束", examData.finished);
+        $("#examHint").textContent = examData.is_demo
+          ? "当前为演示考试数据，接入正方教务后自动替换。"
+          : "考试数据来自正方教务，随每次同步更新；临时调考以教务系统为准。";
+      }
+
+      /* ---------- AI ---------- */
+      function addMsg(role, text, isError = false) {
+        const div = document.createElement("div");
+        div.className =
+          "msg " +
+          (role === "user" ? "user" : "ai" + (isError ? " error" : ""));
+        div.textContent = text;
+        $("#chatMsgs").appendChild(div);
+        $("#chatMsgs").scrollTop = $("#chatMsgs").scrollHeight;
+        return div;
+      }
+      async function sendChat(text) {
+        text = (text || $("#chatInput").value).trim();
+        if (!text) return;
+        $("#chatInput").value = "";
+        addMsg("user", text);
+        chatHistory.push({ role: "user", content: text });
+        $("#chatSend").disabled = true;
+        const pending = addMsg("ai", "正在思考…");
+        try {
+          const data = await api("/api/chat", {
+            method: "POST",
+            body: JSON.stringify({
+              message: text,
+              history: chatHistory.slice(0, -1),
+            }),
+          });
+          pending.textContent = data.reply;
+          chatHistory.push({ role: "assistant", content: data.reply });
+        } catch (e) {
+          pending.textContent = e.message;
+          pending.classList.add("error");
+        } finally {
+          $("#chatSend").disabled = false;
+          $("#chatMsgs").scrollTop = $("#chatMsgs").scrollHeight;
+        }
+      }
+
+      /* ---------- 日志 ---------- */
+      async function loadLogs() {
+        const data = await api("/api/logs");
+        const pill = (s) =>
+          `<span class="pill ${s === "ok" ? "ok" : s === "fail" ? "fail" : "skip"}">${{ ok: "成功", fail: "失败", skip: "跳过" }[s] || s}</span>`;
+        $("#syncLogs").innerHTML = data.sync.length
+          ? data.sync
+              .map(
+                (l) =>
+                  `<div class="log-row"><span class="log-ts">${esc(l.ts)}</span>${pill(l.status)}<span class="log-body">${esc(l.message)}</span></div>`,
+              )
+              .join("")
+          : `<div class="empty">暂无同步记录</div>`;
+        $("#pushLogs").innerHTML = data.push.length
+          ? data.push
+              .map(
+                (l) =>
+                  `<div class="log-row"><span class="log-ts">${esc(l.ts)}</span>${pill(l.status)}<span class="log-body"><b>[${esc(l.channel)}] ${esc(l.title)}</b>\n${esc(l.body)}${l.error ? "\n" + esc(l.error) : ""}</span></div>`,
+              )
+              .join("")
+          : `<div class="empty">暂无推送记录</div>`;
+      }
+
+      /* ---------- 设置 ---------- */
+      function setNested(obj, path, value) {
+        const parts = path.split(".");
+        let cur = obj;
+        parts.slice(0, -1).forEach((p) => {
+          cur[p] = cur[p] || {};
+          cur = cur[p];
+        });
+        cur[parts[parts.length - 1]] = value;
+      }
+      function getNested(obj, path) {
+        return path.split(".").reduce((o, k) => (o == null ? o : o[k]), obj);
+      }
+
+      async function loadSettings() {
+        const cfg = await api("/api/settings");
+        $$("#tab-settings [name]").forEach((el) => {
+          const v = getNested(cfg, el.name);
+          if (v !== undefined && v !== null)
+            el.value = typeof v === "object" ? JSON.stringify(v) : v;
+        });
+        $("#pushNextDay").checked = !!cfg.push_next_day;
+        $("#barkEnabled").checked = !!cfg.push?.bark_enabled;
+        $("#smtpEnabled").checked = !!cfg.push?.smtp_enabled;
+        $("#smtpSsl").checked = cfg.push?.smtp_ssl !== false;
+        $("#aiEnabled").checked = !!cfg.ai?.enabled;
+        $("#securityEnabled").checked = !!cfg.security?.enabled;
+        const origins = cfg.security?.allowed_origins || [];
+        $("#allowedOrigins").value = Array.isArray(origins)
+          ? origins.join(", ")
+          : String(origins);
+        toggleProviderFields();
+      }
+      function collectSettings() {
+        const cfg = {};
+        $$("#tab-settings [name]").forEach((el) => {
+          let v = el.value;
+          if (el.type === "number") v = v === "" ? null : Number(v);
+          setNested(cfg, el.name, v);
+        });
+        cfg.push_next_day = $("#pushNextDay").checked;
+        cfg.push = cfg.push || {};
+        cfg.push.bark_enabled = $("#barkEnabled").checked;
+        cfg.push.smtp_enabled = $("#smtpEnabled").checked;
+        cfg.push.smtp_ssl = $("#smtpSsl").checked;
+        cfg.ai = cfg.ai || {};
+        cfg.ai.enabled = $("#aiEnabled").checked;
+        cfg.security = cfg.security || {};
+        cfg.security.enabled = $("#securityEnabled").checked;
+        cfg.security.allowed_origins = $("#allowedOrigins")
+          .value.split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        return cfg;
+      }
+      function toggleProviderFields() {
+        const t = $("#providerType").value;
+        $("#zfFields").classList.toggle(
+          "hidden",
+          t !== "zhengfang" && t !== "portal",
+        );
+        $("#zfExamHint").classList.toggle("hidden", t !== "portal");
+        $("#httpFields").classList.toggle(
+          "hidden",
+          t !== "httpjson" && t !== "portal",
+        );
+      }
+      async function saveSettings(syncAfter = false) {
+        try {
+          await api("/api/settings", {
+            method: "POST",
+            body: JSON.stringify(collectSettings()),
+          });
+          toast("设置已保存");
+          await loadStatus();
+          if (syncAfter) await doSync();
+          else {
+            await loadToday();
+            if (!$("#tab-week").classList.contains("hidden"))
+              await loadWeek(viewWeek);
+            if (!$("#tab-exams").classList.contains("hidden"))
+              await loadExams();
+          }
+        } catch (e) {
+          toast(e.message, 4000);
+        }
+      }
+      async function doSync() {
+        $("#syncBtn").disabled = true;
+        toast("正在同步课表与考试…", 1800);
+        try {
+          const r = await api("/api/sync", { method: "POST" });
+          toast(r.message, 4000);
+          await Promise.all([loadStatus(), loadToday()]);
+          if (!$("#tab-week").classList.contains("hidden"))
+            await loadWeek(viewWeek);
+          if (!$("#tab-exams").classList.contains("hidden"))
+            await loadExams();
+          if (!$("#tab-logs").classList.contains("hidden")) await loadLogs();
+        } catch (e) {
+          toast(e.message, 4000);
+        } finally {
+          $("#syncBtn").disabled = false;
+        }
+      }
+
+      /* ---------- Tab 切换 ---------- */
+      function switchTab(tab) {
+        $$("#nav button").forEach((b) =>
+          b.classList.toggle("active", b.dataset.tab === tab),
+        );
+        ["today", "week", "exams", "ai", "logs", "settings"].forEach((t) =>
+          $("#tab-" + t).classList.toggle("hidden", t !== tab),
+        );
+        if (tab === "week")
+          loadWeek(viewWeek ?? Math.max(status?.week || 1, 1));
+        if (tab === "exams") loadExams();
+        if (tab === "logs") loadLogs();
+        if (tab === "settings") loadSettings();
+      }
+
+      /* ---------- 接口诊断展示 ---------- */
+      const KIND_CN = {
+        courses: "周课表",
+        events: "日程事件流",
+        unknown: "未识别",
+        empty: "无数组",
+      };
+      function formatAnalysis(a) {
+        if (!a) return "";
+        const lines = [
+          "",
+          `【响应诊断】类型：${KIND_CN[a.kind] || a.kind}`,
+          a.hint || "",
+          `顶层字段：${(a.top_keys || []).join(", ")}`,
+        ];
+        (a.arrays || []).forEach((x, i) => {
+          lines.push(
+            `候选数组 ${i + 1}：${x.path}（${x.count} 条）字段：${(x.keys || []).join(", ")}`,
+          );
+        });
+        lines.push(
+          `建议路径：${a.suggested_path || "(根数组)"}`,
+          `建议映射：${JSON.stringify(a.mapping || {})}`,
+        );
+        return lines.join("\n");
+      }
+      function formatWarnings(w) {
+        return w && w.length
+          ? "\n【注意】\n" + w.map((x) => "- " + x).join("\n")
+          : "";
+      }
+
+      /* ---------- 一键登录门户 ---------- */
+      let browserLoginTimer = null;
+      const LOGIN_STATE_CN = {
+        idle: "",
+        starting: "正在启动浏览器",
+        waiting_login: "请用微信扫描上方二维码",
+        analyzing: "正在分析接口",
+        done: "完成",
+        error: "出错",
+        cancelled: "已取消",
+      };
+      function stopBrowserLoginPolling() {
+        if (browserLoginTimer) {
+          clearInterval(browserLoginTimer);
+          browserLoginTimer = null;
+        }
+      }
+      function renderBrowserLogin(s) {
+        const running = ["starting", "waiting_login", "analyzing"].includes(
+          s.status,
+        );
+        $("#browserLoginBtn").disabled = running;
+        $("#browserLoginStopBtn").classList.toggle("hidden", !running);
+        $("#browserLoginForceBtn").classList.toggle(
+          "hidden",
+          s.status !== "waiting_login",
+        );
+        const label = LOGIN_STATE_CN[s.status] || s.status;
+        $("#browserLoginState").textContent = s.message
+          ? `${label} — ${s.message}`
+          : label;
+        const logEl = $("#browserLoginLog");
+        if (s.log && s.log.length) {
+          logEl.classList.remove("hidden");
+          logEl.textContent = s.log.join("\n");
+        }
+        const qrEl = $("#qrImage");
+        if (s.qr_image) {
+          qrEl.src = "data:image/png;base64," + s.qr_image;
+          qrEl.classList.remove("hidden");
+        } else {
+          qrEl.classList.add("hidden");
+          qrEl.removeAttribute("src");
+        }
+        let extra = "";
+        if (s.status === "done" && s.result) {
+          extra = s.result.ok
+            ? `已写入数据源：${s.result.url}（${s.result.method}）\n数组路径：${s.result.list_path || "(根数组)"}\n${s.result.message}`
+            : s.result.message || "";
+          if (s.result.warnings && s.result.warnings.length)
+            extra += "\n" + s.result.warnings.join("\n");
+        }
+        $("#browserLoginResult").textContent = extra;
+        return running;
+      }
+      async function pollBrowserLogin() {
+        let s;
+        try {
+          s = await api("/api/provider/browser-login/status");
+        } catch (e) {
+          stopBrowserLoginPolling();
+          return;
+        }
+        const running = renderBrowserLogin(s);
+        if (running) {
+          if (!browserLoginTimer)
+            browserLoginTimer = setInterval(pollBrowserLogin, 1500);
+        } else {
+          stopBrowserLoginPolling();
+          if (s.status === "done") {
+            await loadSettings();
+            await loadStatus();
+            await loadToday();
+          }
+        }
+      }
+
+      /* ---------- 事件绑定 ---------- */
+      $("#nav").addEventListener("click", (e) => {
+        if (e.target.dataset.tab) switchTab(e.target.dataset.tab);
+      });
+      $("#syncBtn").addEventListener("click", doSync);
+      $("#examList").addEventListener("click", (e) => {
+        if (!e.target.closest("#examToSettings")) return;
+        switchTab("settings");
+        setTimeout(() => {
+          const f = $('[name="provider.zf_username"]');
+          if (f) {
+            f.scrollIntoView({ block: "center" });
+            f.focus();
+          }
+        }, 60);
+      });
+      $("#prevWeek").addEventListener("click", () =>
+        loadWeek(Math.max(1, viewWeek - 1)),
+      );
+      $("#nextWeek").addEventListener("click", () =>
+        loadWeek(Math.min(status?.total_weeks || 30, viewWeek + 1)),
+      );
+      $("#chatSend").addEventListener("click", () => sendChat());
+      $("#chatInput").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") sendChat();
+      });
+      $("#chatChips").addEventListener("click", (e) => {
+        if (e.target.tagName === "BUTTON") sendChat(e.target.textContent);
+      });
+      $("#providerType").addEventListener("change", toggleProviderFields);
+      $("#importCurlBtn").addEventListener("click", async () => {
+        const text = $("#curlInput").value.trim();
+        if (!text) {
+          toast("请先粘贴 cURL");
+          return;
+        }
+        $("#importCurlBtn").disabled = true;
+        toast("正在导入并试拉取…", 2000);
+        try {
+          const r = await api("/api/provider/import-curl", {
+            method: "POST",
+            body: JSON.stringify({ curl: text }),
+          });
+          const pre = $("#importPreview");
+          pre.classList.remove("hidden");
+          const head = r.ok
+            ? `导入成功：解析出 ${r.course_count} 门课程\n数组路径：${r.list_path || "(根数组)"}\n字段映射：${JSON.stringify(r.mapping)}\n首门课程：${JSON.stringify(r.sample, null, 2)}`
+            : `导入未完全成功：${r.error}\n已保存接口地址与请求头，可调整下方字段后点「预览当前接口响应」。`;
+          pre.textContent =
+            head +
+            formatWarnings(r.warnings) +
+            formatAnalysis(r.analysis) +
+            `\n\n响应预览（不含 Cookie，可复制发给助手调字段）：\n${r.raw_preview}`;
+          toast(
+            r.ok ? `导入成功，${r.course_count} 门课程` : r.error || "导入失败",
+            5000,
+          );
+          await loadSettings();
+          await loadStatus();
+        } catch (e) {
+          toast(e.message, 5000);
+        } finally {
+          $("#importCurlBtn").disabled = false;
+        }
+      });
+      $("#previewBtn").addEventListener("click", async () => {
+        try {
+          await api("/api/settings", {
+            method: "POST",
+            body: JSON.stringify(collectSettings()),
+          });
+          const r = await api("/api/provider/preview", { method: "POST" });
+          const pre = $("#importPreview");
+          pre.classList.remove("hidden");
+          pre.textContent =
+            `当前路径：${r.current_list_path || "(根数组)"} → 解析 ${r.parsed.count} 门${r.parsed.error ? "（" + r.parsed.error + "）" : ""}` +
+            `\n建议路径：${r.guessed_list_path || "(根数组)"}\n建议映射：${JSON.stringify(r.guessed_mapping)}` +
+            formatWarnings(r.warnings) +
+            formatAnalysis(r.analysis) +
+            `\n\n响应预览（不含 Cookie）：\n${r.raw_preview}`;
+        } catch (e) {
+          toast(e.message, 5000);
+        }
+      });
+      $("#analyzeBtn").addEventListener("click", async () => {
+        const text = $("#analyzeInput").value.trim();
+        if (!text) {
+          toast("请先粘贴 Network → Response 里的 JSON");
+          return;
+        }
+        try {
+          const r = await api("/api/provider/analyze", {
+            method: "POST",
+            body: JSON.stringify({ text }),
+          });
+          const pre = $("#importPreview");
+          pre.classList.remove("hidden");
+          pre.textContent =
+            "离线分析结果（不联网、不写配置）" + formatAnalysis(r);
+          toast("分析完成", 2500);
+        } catch (e) {
+          toast(e.message, 5000);
+        }
+      });
+      $("#browserLoginBtn").addEventListener("click", async () => {
+        try {
+          const r = await api("/api/provider/browser-login/start", {
+            method: "POST",
+          });
+          if (!r.ok) {
+            toast(r.message, 6000);
+            return;
+          }
+          toast(r.message, 4000);
+          $("#browserLoginState").textContent = "正在启动浏览器…";
+          pollBrowserLogin();
+        } catch (e) {
+          toast(e.message, 5000);
+        }
+      });
+      $("#browserLoginStopBtn").addEventListener("click", async () => {
+        try {
+          await api("/api/provider/browser-login/stop", { method: "POST" });
+          toast("已请求取消");
+        } catch (e) {
+          toast(e.message, 4000);
+        }
+      });
+      $("#browserLoginForceBtn").addEventListener("click", async () => {
+        try {
+          const r = await api("/api/provider/browser-login/force", {
+            method: "POST",
+          });
+          toast(r.message, 4000);
+          pollBrowserLogin();
+        } catch (e) {
+          toast(e.message, 4000);
+        }
+      });
+
+      /* ---------- 可插拔模型服务 ---------- */
+      const AI_PRESETS = {
+        qwen: {
+          base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          model: "qwen-plus",
+        },
+        deepseek: {
+          base_url: "https://api.deepseek.com/v1",
+          model: "deepseek-chat",
+        },
+        ollama: { base_url: "http://127.0.0.1:11434/v1", model: "qwen2.5:7b" },
+      };
+      function showAiDiag(t) {
+        const el = $("#aiDiag");
+        el.classList.remove("hidden");
+        el.textContent = t;
+      }
+      async function saveThenProbe(path, method) {
+        await api("/api/settings", {
+          method: "POST",
+          body: JSON.stringify(collectSettings()),
+        });
+        return api(path, { method });
+      }
+      $$("[data-ai-preset]").forEach((btn) =>
+        btn.addEventListener("click", () => {
+          const p = AI_PRESETS[btn.dataset.aiPreset];
+          if (!p) return;
+          $('[name="ai.base_url"]').value = p.base_url;
+          $('[name="ai.model"]').value = p.model;
+          toast("已填入预设，记得点保存", 2500);
+        }),
+      );
+      $("#aiModelsBtn").addEventListener("click", async () => {
+        try {
+          const r = await saveThenProbe("/api/ai/models", "GET");
+          showAiDiag(
+            r.models?.length
+              ? `可用模型（${r.models.length}）：\n${r.models.join("\n")}\n\n复制想要的模型名填到「模型」框即可。`
+              : "该服务未返回模型列表（部分网关不提供 /models 接口）。",
+          );
+          toast("模型探测完成", 2500);
+        } catch (e) {
+          showAiDiag("探测失败：" + e.message);
+          toast(e.message, 5000);
+        }
+      });
+      $("#aiTestBtn").addEventListener("click", async () => {
+        try {
+          const r = await saveThenProbe("/api/ai/test", "POST");
+          showAiDiag(`连接正常\n模型：${r.model}\n回复：${r.reply}`);
+          toast("模型连接正常", 2500);
+        } catch (e) {
+          showAiDiag("连接失败：" + e.message);
+          toast(e.message, 5000);
+        }
+      });
+      $("#genTokenBtn").addEventListener("click", async () => {
+        try {
+          const r = await api("/api/security/token", { method: "POST" });
+          $('[name="security.token"]').value = r.token;
+          toast("已生成 Token，记得点保存", 3000);
+        } catch (e) {
+          toast(e.message, 4000);
+        }
+      });
+      $("#saveSettingsBtn").addEventListener("click", () =>
+        saveSettings(false),
+      );
+      $("#syncNowBtn2").addEventListener("click", () => saveSettings(true));
+      $("#zfTestBtn").addEventListener("click", async () => {
+        const btn = $("#zfTestBtn"),
+          out = $("#zfTestResult");
+        btn.disabled = true;
+        out.style.color = "var(--sub)";
+        out.textContent = "正在登录教务…";
+        try {
+          const cfg = collectSettings();
+          const r = await api("/api/provider/test-zf", {
+            method: "POST",
+            body: JSON.stringify({ provider: cfg.provider || {} }),
+          });
+          out.textContent = r.message;
+          out.style.color = r.ok ? "var(--ok)" : "var(--warn)";
+        } catch (e) {
+          out.textContent = e.message;
+          out.style.color = "var(--warn)";
+        } finally {
+          btn.disabled = false;
+        }
+      });
+      $("#testPushBtn").addEventListener("click", async () => {
+        try {
+          await api("/api/settings", {
+            method: "POST",
+            body: JSON.stringify(collectSettings()),
+          });
+          const r = await api("/api/push/test", { method: "POST" });
+          const msgs = r.results.map(
+            (x) => `${x.channel}: ${x.ok ? "成功" : x.error}`,
+          );
+          toast(msgs.join("；"), 5000);
+        } catch (e) {
+          toast(e.message, 4000);
+        }
+      });
+
+      /* ---------- 启动 ---------- */
+      /* ---------- 多用户：登录 / 注册 / 邀请码 ---------- */
+      let currentUser = null;
+
+      function showAuthScreen() {
+        $("#authScreen").classList.remove("hidden");
+        $("#app").classList.add("hidden");
+      }
+      function showApp() {
+        $("#authScreen").classList.add("hidden");
+        $("#app").classList.remove("hidden");
+      }
+      function authError(msg) { $("#authError").textContent = msg || ""; }
+      function switchAuthTab(which) {
+        const reg = which === "register";
+        $("#loginForm").classList.toggle("hidden", reg);
+        $("#registerForm").classList.toggle("hidden", !reg);
+        $("#authTabLogin").classList.toggle("primary", !reg);
+        $("#authTabRegister").classList.toggle("primary", reg);
+        authError("");
+      }
+      async function refreshInvites() {
+        if (!currentUser || currentUser.role !== "admin") return;
+        try {
+          const [iv, us] = await Promise.all([api("/api/auth/invites"), api("/api/auth/users")]);
+          const lines = iv.invites.map(x => `${x.code}  ${x.used_by ? "已使用" : "可用"}  到期 ${x.expires_at}`);
+          $("#inviteList").textContent = lines.length ? lines.join("\n") : "暂无邀请码";
+          $("#userList").textContent = "用户：" + us.users.map(u =>
+            u.username + (u.role === "admin" ? "(管理员)" : "")).join("、");
+        } catch (e) { toast(e.message, 4000); }
+      }
+      async function boot() {
+        try {
+          const st = await api("/api/auth/status");
+          if (!st.authenticated) {
+            showAuthScreen();
+            $("#authHint").textContent = st.needs_setup
+              ? "首次使用：注册的第一个账号将成为管理员，并继承现有课表配置"
+              : "请登录后使用（注册需要邀请码）";
+            $("#inviteField").classList.toggle("hidden", !st.invite_required);
+            switchAuthTab(st.needs_setup ? "register" : "login");
+            return;
+          }
+          currentUser = st.user;
+          showApp();
+          $("#userBox").textContent = currentUser.display_name +
+            (currentUser.role === "admin" ? "（管理员）" : "");
+          $("#inviteBtn").classList.toggle("hidden", currentUser.role !== "admin");
+          $("#adminCard").classList.toggle("hidden", currentUser.role !== "admin");
+          await loadStatus();
+          await loadToday();
+          pollBrowserLogin();
+          if (currentUser.role === "admin") refreshInvites();
+        } catch (e) {
+          toast("加载失败：" + e.message, 5000);
+        }
+      }
+      $("#authTabLogin").addEventListener("click", () => switchAuthTab("login"));
+      $("#authTabRegister").addEventListener("click", () => switchAuthTab("register"));
+      $("#loginForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        authError("");
+        try {
+          await api("/api/auth/login", { method: "POST", body: JSON.stringify({
+            username: $("#loginUsername").value.trim(),
+            password: $("#loginPassword").value }) });
+          location.reload();
+        } catch (err) { authError(err.message); }
+      });
+      $("#registerForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        authError("");
+        try {
+          await api("/api/auth/register", { method: "POST", body: JSON.stringify({
+            username: $("#regUsername").value.trim(),
+            password: $("#regPassword").value,
+            display_name: $("#regName").value.trim(),
+            student_id: $("#regStudentId").value.trim(),
+            invite: $("#regInvite").value.trim() }) });
+          location.reload();
+        } catch (err) { authError(err.message); }
+      });
+      $("#logoutBtn").addEventListener("click", async () => {
+        try { await api("/api/auth/logout", { method: "POST" }); } catch (e) {}
+        location.reload();
+      });
+      $("#inviteBtn").addEventListener("click", () => switchTab("settings"));
+      $("#genInviteBtn").addEventListener("click", async () => {
+        try {
+          const r = await api("/api/auth/invites", { method: "POST" });
+          toast("新邀请码：" + r.code, 8000);
+          await refreshInvites();
+        } catch (e) { toast(e.message, 5000); }
+      });
+      $("#refreshInvitesBtn").addEventListener("click", refreshInvites);
+
+      boot();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+data/config.json
+data/campus.db
+data/browser_profile/
+data/shot-*.png
+data/tmp-shot-*.png
+.workbuddy/
+.DS_Store

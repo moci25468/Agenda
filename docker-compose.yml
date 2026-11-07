@@ -1,0 +1,14 @@
+services:
+  campus-assistant:
+    build: .
+    container_name: qut-campus-assistant
+    restart: unless-stopped
+    ports:
+      # 只绑定回环地址：本项目 API 默认无鉴权且配置内含门户 Cookie，
+      # 不要改成 "8300:8300" 直接暴露公网。需要外网访问请用 SSH 隧道或 nginx + Basic Auth。
+      - "127.0.0.1:8300:8300"
+    volumes:
+      - ./data:/data
+    environment:
+      - TZ=Asia/Shanghai
+      - CAMPUS_DATA_DIR=/data
