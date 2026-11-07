@@ -174,9 +174,9 @@ async def status():
     week = current_week(cfg.get("semester_start", ""),
                         today, cfg.get("total_weeks", 30))
     snap = db.get_snapshot()
-    all_courses = (apply_course_overrides(
-        [Course.from_dict(d) for d in snap["courses"]],
-        cfg.get("course_overrides")) if snap else [])
+    all_courses = apply_course_overrides(
+        [Course.from_dict(d) for d in snap["courses"]] if snap else [],
+        cfg.get("course_overrides"))
     exam_snap = db.get_exam_snapshot()
     upcoming_exams = []
     if exam_snap:
@@ -217,9 +217,9 @@ async def timetable(week: int | None = None):
                             today, cfg.get("total_weeks", 30))
     week = week or max(cur_week, 1)
     snap = db.get_snapshot()
-    courses = (apply_course_overrides(
-        [Course.from_dict(d) for d in snap["courses"]],
-        cfg.get("course_overrides")) if snap else [])
+    courses = apply_course_overrides(
+        [Course.from_dict(d) for d in snap["courses"]] if snap else [],
+        cfg.get("course_overrides"))
     in_week = [c for c in courses if c.in_week(week)]
     out = []
     for c in sorted(in_week, key=lambda x: (x.day, x.start)):

@@ -37,25 +37,27 @@ def build_context(cfg: dict) -> str:
         f"今天是 {today.strftime('%Y年%m月%d日')} {WEEKDAY_CN[today.isoweekday() - 1]}，当前教学周：第 {week} 周。",
         f"学校：{cfg.get('school', '青岛理工大学')}。",
     ]
-    if snap:
-        courses = apply_course_overrides(
-            [Course.from_dict(d) for d in snap["courses"]],
-            cfg.get("course_overrides"))
-        this_week = [c for c in courses if c.in_week(week)]
-        if this_week:
+    courses = apply_course_overrides(
+        [Course.from_dict(d) for d in snap["courses"]] if snap else [],
+        cfg.get("course_overrides"))
+    this_week = [c for c in courses if c.in_week(week)]
+    if this_week:
+        if snap:
             lines.append(f"学生本周课表（数据来源：{snap['source']}，更新于 {snap['fetched_at']}）：")
-            for dow in range(1, 8):
-                day_courses = sorted([c for c in this_week if c.day == dow], key=lambda c: c.start)
-                if day_courses:
-                    lines.append(f"- {WEEKDAY_CN[dow - 1]}：" + "；".join(course_line(cfg, c) for c in day_courses))
-                else:
-                    lines.append(f"- {WEEKDAY_CN[dow - 1]}：无课")
         else:
-            lines.append("本周没有课程安排。")
-        if snap["source"] == "mock":
-            lines.append("注意：当前课表为演示数据，回答时请提醒用户这是示例课表。")
+            lines.append("学生本周课表（手动维护）：")
+        for dow in range(1, 8):
+            day_courses = sorted([c for c in this_week if c.day == dow], key=lambda c: c.start)
+            if day_courses:
+                lines.append(f"- {WEEKDAY_CN[dow - 1]}：" + "；".join(course_line(cfg, c) for c in day_courses))
+            else:
+                lines.append(f"- {WEEKDAY_CN[dow - 1]}：无课")
+    elif snap:
+        lines.append("本周没有课程安排。")
     else:
         lines.append("课表尚未同步，暂无课程数据。")
+    if snap and snap["source"] == "mock":
+        lines.append("注意：当前课表为演示数据，回答时请提醒用户这是示例课表。")
 
     exam_snap = db.get_exam_snapshot()
     if exam_snap is None:
