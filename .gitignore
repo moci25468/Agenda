@@ -1,10 +1,47 @@
+# ===== 运行时数据（含隐私：Cookie、密码哈希、课表、浏览器登录态、截图）=====
+# 整个 data/ 目录都不进版本库；应用启动时会自动创建该目录。
+data/
+
+# ===== Python =====
 .venv/
+venv/
 __pycache__/
-*.pyc
-data/config.json
-data/campus.db
-data/browser_profile/
-data/shot-*.png
-data/tmp-shot-*.png
-.workbuddy/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# ===== 密钥与凭据（严禁上传）=====
+.env
+.env.*
+*.env
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.secret.*
+config.local.json
+secrets.json
+
+# ===== 数据库文件 =====
+*.db
+*.sqlite
+*.sqlite3
+
+# ===== 日志与临时产物 =====
+*.log
+*.tmp
+*.bak
+*.swp
+
+# ===== 系统 / 编辑器 =====
 .DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.code-workspace
+
+# ===== 项目内部工具数据 =====
+.workbuddy/
