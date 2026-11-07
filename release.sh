@@ -66,7 +66,7 @@ if [ -n "$(git status --porcelain)" ]; then
   if [ -n "${msg_opt:-}" ]; then
     git commit -m "$msg_opt"
   else
-    git commit -m "Bump version to $new_ver"
+    git commit -m "发布版本 $new_ver"
   fi
 else
   echo "工作区干净，无改动需要提交（仅打 tag）"
