@@ -264,6 +264,60 @@ _cfg_room["provider"]["zhengfang"]["username"] = ""
 _cfg_room["provider"]["zhengfang"]["password"] = ""
 save_config(_cfg_room)
 
+# 应用辅导 + 配置状态注入 AI 上下文
+_ctx_cfg = build_context(load_config())
+check("辅导.AI 上下文含配置现状",
+      "应用配置现状" in _ctx_cfg and "推送" in _ctx_cfg and "日历订阅" in _ctx_cfg
+      and "Bark" in _ctx_cfg, _ctx_cfg[-400:])
+_prompt_guide = SYSTEM_PROMPT.format(context="占位上下文")
+check("辅导.提示词含应用使用说明",
+      "应用使用辅导" in _prompt_guide and "Bark" in _prompt_guide
+      and "一键订阅" in _prompt_guide, "")
+# 敏感值不泄露：配置了 Bark Key 后，上下文不应出现具体 Key
+_cfg_sens = load_config()
+_cfg_sens["push"] = {**_cfg_sens.get("push", {}),
+                     "bark_enabled": True, "bark_key": "SECRETKEY123"}
+save_config(_cfg_sens)
+_ctx_sens = build_context(load_config())
+check("辅导.上下文不泄露 Bark Key",
+      "SECRETKEY123" not in _ctx_sens and "已配置" in _ctx_sens, _ctx_sens[-400:])
+_cfg_sens["push"]["bark_enabled"] = False
+_cfg_sens["push"]["bark_key"] = ""
+save_config(_cfg_sens)
+
+# 天气按天摘要 + 注入 AI 上下文
+_orig_fetch2 = _weather.fetch_hourly
+from datetime import date as _date
+_today_s = _date.today().isoformat()
+_tomorrow_s = (_date.today() + timedelta(days=1)).isoformat()
+async def _fake_hourly2(lat, lon):
+    return {
+        f"{_today_s}T08:00": {"temp": 12, "code": 61, "pop": 40},
+        f"{_today_s}T12:00": {"temp": 18, "code": 1, "pop": 10},
+        f"{_today_s}T20:00": {"temp": 14, "code": 3, "pop": 20},
+        f"{_tomorrow_s}T08:00": {"temp": 10, "code": 71, "pop": 30},
+    }
+_weather.fetch_hourly = _fake_hourly2
+from app.weather import daily_summary
+_ws = asyncio.run(daily_summary(load_config(), _today_s))
+check("天气.按天摘要", "12~18℃" in _ws and "小雨" in _ws, _ws)
+_ws2 = asyncio.run(daily_summary(load_config(), _tomorrow_s))
+check("天气.次日摘要", "10℃" in _ws2 and "小雪" in _ws2, _ws2)
+# 未开启天气时摘要为空
+_wcfg_off = load_config()
+_wcfg_off["weather"] = {**_wcfg_off.get("weather", {}), "enabled": False}
+save_config(_wcfg_off)
+check("天气.关闭后摘要为空",
+      asyncio.run(daily_summary(load_config(), _today_s)) == "")
+_wcfg_off["weather"]["enabled"] = True
+save_config(_wcfg_off)
+
+# AI 上下文注入天气（异步 _weather_context，仍用 fake 数据）
+from app.ai import _weather_context
+_ctx_w = asyncio.run(_weather_context(load_config()))
+check("天气.AI 上下文注入", "今日天气" in _ctx_w and "明日天气" in _ctx_w, _ctx_w)
+_weather.fetch_hourly = _orig_fetch2
+
 # 流式回复的 SSE 行解析（OpenAI 兼容格式）
 check("流式.SSE 解析增量",
       _sse_delta('data: {"choices":[{"delta":{"content":"你好"}}]}') == "你好")

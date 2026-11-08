@@ -150,6 +150,43 @@ async def weather_line(cfg: dict, day_s: str, hhmm: str) -> str:
     return line
 
 
+async def daily_summary(cfg: dict, day_s: str) -> str:
+    """返回某一天（YYYY-MM-DD）的天气概况一句话，如「多云，12~18℃，最高降水概率 40%」。
+
+    供 AI 上下文注入使用；未开启、坐标无效或接口不可用时返回空串。
+    """
+    w = cfg.get("weather") or {}
+    if w.get("enabled") is False or not day_s:
+        return ""
+    try:
+        lat = float(w.get("lat") or 35.96)
+        lon = float(w.get("lon") or 120.20)
+    except (TypeError, ValueError):
+        return ""
+    hourly = await fetch_hourly(lat, lon)
+    day_items = [v for k, v in hourly.items() if k.startswith(day_s)]
+    if not day_items:
+        return ""
+    temps = [round(float(v["temp"])) for v in day_items
+             if isinstance(v.get("temp"), (int, float))]
+    pops = [int(float(v["pop"])) for v in day_items
+            if isinstance(v.get("pop"), (int, float))]
+    # 取白天时段（8~20 点）代表性天气码，避免凌晨/夜间码干扰
+    day_codes = [v["code"] for k, v in hourly.items()
+                 if k.startswith(day_s) and 8 <= int(k[11:13]) <= 20 and v.get("code") is not None]
+    if not day_codes:
+        day_codes = [v["code"] for v in day_items if v.get("code") is not None]
+    code = day_codes[0] if day_codes else None
+    text = describe_code(code) if code is not None else "天气未知"
+    parts = [text]
+    if temps:
+        parts.append(f"{min(temps)}~{max(temps)}℃")
+    line = " ".join(parts)
+    if pops:
+        line += f"，最高降水概率 {max(pops)}%"
+    return line
+
+
 def clear_cache():
     """测试或手动刷新用。"""
     _cache.clear()
