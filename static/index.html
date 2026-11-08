@@ -3275,6 +3275,11 @@
               >启用 Bark（iOS 推送）</span
             >
           </div>
+          <div class="check">
+            <input type="checkbox" id="reminderEnabled" /><span
+              >课前提醒（课程 / 日程 / 考试开始前推送）</span
+            >
+          </div>
           <div class="form-grid">
             <label class="field"
               ><span>Bark 服务器</span
@@ -3284,8 +3289,12 @@
               ><span>Bark Key</span><input name="push.bark_key" type="password"
             /></label>
           </div>
+          <label class="field"
+            ><span>提前提醒（分钟）</span
+            ><input name="push.reminder_advance" type="number" min="1" max="180" placeholder="15"
+          /></label>
           <p class="hint">
-            在 iOS App Store 安装 Bark，复制 App 里的 Key 填入即可，适合每天课表提醒。
+            在 iOS App Store 安装 Bark，复制 App 里的 Key 填入即可。开启课前提醒后，每节课、日程、考试开始前都会推送一次。
           </p>
           <div class="form-actions">
             <button id="testPushBtn">发送测试推送</button>
@@ -4888,6 +4897,7 @@
         });
         $("#pushNextDay").checked = !!cfg.push_next_day;
         $("#barkEnabled").checked = !!cfg.push?.bark_enabled;
+        $("#reminderEnabled").checked = cfg.push?.reminder_enabled !== false;
         $("#aiEnabled").checked = !!cfg.ai?.enabled;
       }
       function collectSettings() {
@@ -4900,6 +4910,7 @@
         cfg.push_next_day = $("#pushNextDay").checked;
         cfg.push = cfg.push || {};
         cfg.push.bark_enabled = $("#barkEnabled").checked;
+        cfg.push.reminder_enabled = $("#reminderEnabled").checked;
         cfg.ai = cfg.ai || {};
         cfg.ai.enabled = $("#aiEnabled").checked;
         return cfg;

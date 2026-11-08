@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from . import db
 from .config import load_config
@@ -20,6 +21,7 @@ WEEKDAY_CN = ["周一", "周二", "周三", "周四", "周五", "周六", "周�
 
 _scheduler: BackgroundScheduler | None = None
 JOB_ID = "daily_timetable_sync"
+REMINDER_JOB_ID = "class_reminders"
 
 
 def section_time(cfg: dict, section: int, end: bool = False) -> str:
@@ -158,6 +160,99 @@ async def run_sync(push: bool = True) -> dict:
     return result
 
 
+def _parse_hhmm(day_s: str, hhmm: str) -> datetime | None:
+    """把 'YYYY-MM-DD' + 'HH:MM' 拼成带时区的 datetime；解析失败返回 None。"""
+    try:
+        hh, mm = str(hhmm).split(":")[:2]
+        return datetime.fromisoformat(f"{day_s}T{int(hh):02d}:{int(mm):02d}:00").replace(tzinfo=TZ)
+    except (ValueError, AttributeError):
+        return None
+
+
+async def run_reminders(now: datetime | None = None) -> list[dict]:
+    """每分钟检查一次：课程 / 日程 / 考试开始前 N 分钟各推一次。
+
+    reminders 表按 (用户, 日期, 事项) 去重，推过就不再推；提前量在设置里调。
+    """
+    cfg = load_config()
+    p = cfg.get("push", {})
+    if not p.get("bark_enabled") or not p.get("reminder_enabled", True):
+        return []
+    try:
+        advance = int(p.get("reminder_advance") or 15)
+    except (TypeError, ValueError):
+        advance = 15
+    advance = max(1, min(advance, 180))
+    now = now or datetime.now(TZ)
+    now = now.replace(tzinfo=TZ) if now.tzinfo is None else now.astimezone(TZ)
+    day_s = now.date().isoformat()
+    window = timedelta(minutes=advance)
+
+    items: list[tuple[str, str, datetime, str]] = []  # (标题, 去重键, 开始时间, 正文)
+
+    snap = db.get_snapshot()
+    if snap:
+        courses = apply_course_overrides(
+            [Course.from_dict(d) for d in snap["courses"]], cfg.get("course_overrides"))
+        for c in courses_on(cfg, courses, now.date()):
+            start_at = _parse_hhmm(day_s, section_time(cfg, c.start))
+            if not start_at:
+                continue
+            room = f" @{c.room}" if c.room else ""
+            teacher = f"（{c.teacher}）" if c.teacher else ""
+            body = (f"{c.start}-{c.end}节 {section_time(cfg, c.start)}"
+                    f"-{section_time(cfg, c.end, end=True)} {c.name}{room}{teacher}")
+            items.append(("上课提醒", f"course:{c.name}:{c.start}:{c.room}", start_at, body))
+
+    for d in db.list_events(date_from=day_s, date_to=day_s):
+        e = Event.from_dict(d)
+        if not e.start:
+            continue  # 全天日程没有「开始前」的概念
+        start_at = _parse_hhmm(day_s, e.start)
+        if start_at:
+            items.append(("日程提醒", f"event:{e.id}", start_at, event_line(e)))
+
+    exam_snap = db.get_exam_snapshot()
+    if exam_snap:
+        for d in exam_snap["exams"]:
+            e = Exam.from_dict(d)
+            if e.date != day_s or not e.start:
+                continue
+            start_at = _parse_hhmm(day_s, e.start)
+            if not start_at:
+                continue
+            room = f" @{e.room}" if e.room else ""
+            seat = f" 座位 {e.seat}" if e.seat else ""
+            items.append(("考试提醒", f"exam:{e.name}:{e.start}", start_at, f"{e.name}{room}{seat}"))
+
+    pushed: list[dict] = []
+    for title, key, start_at, body in items:
+        if not (start_at - window <= now < start_at):
+            continue  # 没进提醒窗口，或已经开始了
+        if db.reminder_sent(day_s, key):
+            continue
+        db.mark_reminder(day_s, key)  # 先标记再推，推送失败也不重复打扰
+        remaining = max(1, int((start_at - now).total_seconds() // 60))
+        results = await push_all(cfg, title, f"还有 {remaining} 分钟\n{body}")
+        pushed.append({"title": title, "key": key, "results": results})
+    return pushed
+
+
+def _reminder_job_wrapper():
+    """提醒轮询：和定时同步一样逐用户切换上下文。"""
+    from .user_context import current_user_id, set_current_user
+
+    user_ids = db.list_user_ids() or [1]
+    for uid in user_ids:
+        ctx = set_current_user(uid)
+        try:
+            asyncio.run(run_reminders())
+        except Exception as e:  # noqa: BLE001
+            db.add_sync_log("fail", f"课前提醒异常：{type(e).__name__}: {e}")
+        finally:
+            current_user_id.reset(ctx)
+
+
 def _job_wrapper():
     """定时任务：逐个用户切换上下文后同步，配置 / 快照 / 推送互不串扰。"""
     from .user_context import current_user_id, set_current_user
@@ -178,6 +273,12 @@ def start_scheduler(cfg: dict):
     if _scheduler is None:
         _scheduler = BackgroundScheduler(timezone=TZ)
         _scheduler.start()
+    # 课前提醒每分钟跑一次；提前量每次运行时读配置，改设置不用重排任务
+    _scheduler.add_job(
+        _reminder_job_wrapper, IntervalTrigger(minutes=1, timezone=TZ),
+        id=REMINDER_JOB_ID, replace_existing=True, max_instances=1,
+        coalesce=True, misfire_grace_time=120,
+    )
     reschedule(cfg)
 
 

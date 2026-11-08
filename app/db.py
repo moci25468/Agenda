@@ -134,6 +134,13 @@ def init_db():
             created_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_mem_user ON user_memories(user_id);
+        CREATE TABLE IF NOT EXISTS reminders (
+            user_id INTEGER NOT NULL,
+            day TEXT NOT NULL,
+            item_key TEXT NOT NULL,
+            sent_at TEXT NOT NULL,
+            PRIMARY KEY (user_id, day, item_key)
+        );
         """)
         # 旧版本迁移：snapshot 只有 id=1 一行；日志表没有 user_id
         cols = {r[1] for r in conn.execute("PRAGMA table_info(snapshot)")}
@@ -219,6 +226,25 @@ def add_push_log(channel: str, title: str, body: str, status: str, error: str = 
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (_uid(), now_str(), channel, title, body, status, error),
         )
+
+
+def reminder_sent(day: str, item_key: str) -> bool:
+    """今天这个事项是否已经推过提前提醒（每分钟轮询靠它去重）。"""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM reminders WHERE user_id = ? AND day = ? AND item_key = ?",
+            (_uid(), day, item_key)).fetchone()
+    return row is not None
+
+
+def mark_reminder(day: str, item_key: str):
+    """标记已推送；顺手清掉 7 天前的记录，表不会无限膨胀。"""
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO reminders (user_id, day, item_key, sent_at) VALUES (?, ?, ?, ?)",
+            (_uid(), day, item_key, now_str()))
+        cutoff = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+        conn.execute("DELETE FROM reminders WHERE user_id = ? AND day < ?", (_uid(), cutoff))
 
 
 def get_logs(limit: int = 50) -> dict:
@@ -526,7 +552,7 @@ def delete_user(user_id: int):
     with get_conn() as conn:
         for table in ("sessions", "snapshot", "exam_snapshot",
                       "sync_log", "push_log", "user_config", "events",
-                      "chat_messages", "user_memories"):
+                      "chat_messages", "user_memories", "reminders"):
             conn.execute(f"DELETE FROM {table} WHERE user_id = ?", (user_id,))
         conn.execute("DELETE FROM invites WHERE used_by = ?", (user_id,))
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))

@@ -70,6 +70,8 @@ DEFAULT_CONFIG = {
         "bark_enabled": False,
         "bark_server": "https://api.day.app",
         "bark_key": "",
+        "reminder_enabled": True,   # 课程/日程/考试开始前推送
+        "reminder_advance": 15,     # 提前多少分钟
     },
     "ai": {
         "enabled": False,

@@ -28,7 +28,9 @@ from app.config import load_config as _load_cfg, save_config as _save_cfg
 from app import db as _db
 from datetime import date, datetime
 from app.push import push_all
-from app.scheduler import run_sync, format_changes, courses_on, section_time
+from app.scheduler import run_sync, format_changes, courses_on, section_time, run_reminders, TZ
+import app.scheduler as _sched
+from app.user_context import current_user_id, set_current_user
 from app.config import load_config, save_config
 from app import db
 from app.models import (
@@ -254,6 +256,132 @@ mon = courses_on(cfg, courses, date(2026, 11, 9))
 check("周日无课筛选", len(sun) == 0)
 check("周一有课筛选", bool(mon) and all(
     c.day == 1 for c in mon), str([c.name for c in mon]))
+
+# 课前提醒：固定 now + mock 推送，验证窗口 / 去重 / 开关 / 提前量 / 用户隔离
+_orig_push = _sched.push_all
+_push_calls = []
+
+
+async def _fake_push(cfg, title, body):
+    _push_calls.append((title, body))
+    return [{"channel": "bark", "ok": True, "error": ""}]
+
+
+_sched.push_all = _fake_push
+_orig_snap = db.get_snapshot()
+_orig_esnap = db.get_exam_snapshot()
+_orig_cfg = load_config()
+
+
+def _at(s):
+    return datetime.fromisoformat(s).replace(tzinfo=TZ)
+
+
+_rcfg = load_config()
+_rcfg["semester_start"] = "2026-08-31"   # 2026-11-09 起为第 11 周周一~周五
+_rcfg["push"] = {**_rcfg.get("push", {}), "bark_enabled": True, "bark_key": "test",
+                 "reminder_enabled": True, "reminder_advance": 15}
+save_config(_rcfg)
+db.save_snapshot([c.to_dict() for c in [
+    Course("提醒测试课", day=1, start=1, end=2, room="1-101", weeks=[11]),
+    Course("已开始课", day=1, start=2, end=2, weeks=[11]),
+    Course("周二课", day=2, start=1, end=2, weeks=[11]),
+    Course("周三课", day=3, start=1, end=2, weeks=[11]),
+    Course("周四课", day=4, start=1, end=2, weeks=[11]),
+]], "test")
+_rem_ev = db.add_event({"title": "提醒测试日程", "date": "2026-11-09",
+                        "start": "12:00", "end": "13:00", "location": "活动中心"})
+db.save_exam_snapshot([{"name": "提醒测试考试", "time": "2026-11-09 14:00-16:00",
+                        "room": "1-201", "seat": "12"}], "test")
+
+asyncio.run(run_reminders(now=_at("2026-11-09T07:44:00")))
+check("提醒.窗口外不推", not _push_calls, str(_push_calls))
+_push_calls.clear()
+asyncio.run(run_reminders(now=_at("2026-11-09T07:50:00")))
+check("提醒.课前15分钟内推送", len(_push_calls) == 1 and _push_calls[0][0] == "上课提醒"
+      and "还有 10 分钟" in _push_calls[0][1] and "提醒测试课" in _push_calls[0][1]
+      and "@1-101" in _push_calls[0][1], str(_push_calls))
+_push_calls.clear()
+asyncio.run(run_reminders(now=_at("2026-11-09T07:51:00")))
+check("提醒.同一事项只推一次", not _push_calls, str(_push_calls))
+_push_calls.clear()
+asyncio.run(run_reminders(now=_at("2026-11-09T09:00:00")))
+check("提醒.已开始不推", not _push_calls, str(_push_calls))
+_push_calls.clear()
+asyncio.run(run_reminders(now=_at("2026-11-09T11:50:00")))
+check("提醒.日程开始前推送", len(_push_calls) == 1 and _push_calls[0][0] == "日程提醒"
+      and "提醒测试日程" in _push_calls[0][1] and "还有 10 分钟" in _push_calls[0][1],
+      str(_push_calls))
+_push_calls.clear()
+asyncio.run(run_reminders(now=_at("2026-11-09T13:50:00")))
+check("提醒.考试开始前推送", len(_push_calls) == 1 and _push_calls[0][0] == "考试提醒"
+      and "提醒测试考试" in _push_calls[0][1] and "座位 12" in _push_calls[0][1],
+      str(_push_calls))
+
+_push_calls.clear()
+_rcfg = load_config()
+_rcfg["push"]["reminder_enabled"] = False
+save_config(_rcfg)
+asyncio.run(run_reminders(now=_at("2026-11-10T07:50:00")))
+check("提醒.关闭开关不推", not _push_calls, str(_push_calls))
+_rcfg = load_config()
+_rcfg["push"]["reminder_enabled"] = True
+save_config(_rcfg)
+asyncio.run(run_reminders(now=_at("2026-11-10T07:50:00")))
+check("提醒.重新开启后推送", len(_push_calls) == 1
+      and "周二课" in _push_calls[0][1], str(_push_calls))
+
+_push_calls.clear()
+_rcfg = load_config()
+_rcfg["push"]["reminder_advance"] = 5
+save_config(_rcfg)
+asyncio.run(run_reminders(now=_at("2026-11-11T07:50:00")))
+check("提醒.自定义提前量窗口外不推", not _push_calls, str(_push_calls))
+asyncio.run(run_reminders(now=_at("2026-11-11T07:56:00")))
+check("提醒.自定义提前量生效", len(_push_calls) == 1
+      and "还有 4 分钟" in _push_calls[0][1], str(_push_calls))
+
+# 用户隔离：999 的配置 / 快照 / 去重记录独立于默认用户
+_ctx999 = set_current_user(999)
+try:
+    _cfg999 = load_config()
+    _cfg999["semester_start"] = "2026-08-31"
+    _cfg999["push"] = {**_cfg999.get("push", {}), "bark_enabled": True, "bark_key": "t",
+                       "reminder_enabled": True, "reminder_advance": 15}
+    save_config(_cfg999)
+    db.save_snapshot([Course("周五隔离课", day=5, start=1, end=2,
+                             weeks=[11]).to_dict()], "test")
+    _push_calls.clear()
+    asyncio.run(run_reminders(now=_at("2026-11-13T07:50:00")))
+    check("提醒.按用户独立推送", len(_push_calls) == 1
+          and "周五隔离课" in _push_calls[0][1], str(_push_calls))
+    check("提醒.去重记录落当前用户",
+          db.reminder_sent("2026-11-13", "course:周五隔离课:1:"))
+finally:
+    current_user_id.reset(_ctx999)
+_push_calls.clear()
+asyncio.run(run_reminders(now=_at("2026-11-13T07:50:00")))
+check("提醒.用户间互不串扰", not _push_calls
+      and not db.reminder_sent("2026-11-13", "course:周五隔离课:1:"), str(_push_calls))
+
+_push_calls.clear()
+_rcfg = load_config()
+_rcfg["push"]["bark_enabled"] = False
+save_config(_rcfg)
+asyncio.run(run_reminders(now=_at("2026-11-12T07:50:00")))
+check("提醒.Bark 关闭不推", not _push_calls, str(_push_calls))
+
+# 还原现场：快照 / 考试 / 配置 / 推送函数，清理提醒测试数据
+db.delete_event(_rem_ev["id"])
+db.delete_user(999)   # 清掉隔离用户的配置 / 快照 / 提醒记录
+with db.get_conn() as conn:
+    conn.execute("DELETE FROM reminders WHERE user_id = 1")
+_sched.push_all = _orig_push
+if _orig_snap:
+    db.save_snapshot(_orig_snap["courses"], _orig_snap["source"])
+if _orig_esnap:
+    db.save_exam_snapshot(_orig_esnap["exams"], _orig_esnap["source"])
+save_config(_orig_cfg)
 
 
 async def main():
@@ -823,6 +951,10 @@ async def http_tests(port: int):
         bad = await cb2.post(f"{base}/api/auth/delete-account",
                              json={"username": "admin", "password": "BobPass123"})
         check("注销.用户名不一致被拒", bad.status_code == 400, str(bad.status_code))
+        with db.get_conn() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO reminders (user_id, day, item_key, sent_at) VALUES (?, ?, ?, ?)",
+                (bob_id, "2026-11-09", "course:注销清理课:1:", db.now_str()))
         ok = await cb2.post(f"{base}/api/auth/delete-account",
                             json={"username": "bob", "password": "BobPass123"})
         check("注销.确认后删除账号",
@@ -839,9 +971,12 @@ async def http_tests(port: int):
                                   (bob_id,)).fetchone()[0]
             n_mem = conn.execute("SELECT COUNT(*) FROM user_memories WHERE user_id = ?",
                                  (bob_id,)).fetchone()[0]
+            n_rem = conn.execute("SELECT COUNT(*) FROM reminders WHERE user_id = ?",
+                                 (bob_id,)).fetchone()[0]
         check("注销.个人日程一并删除", n_ev == 0, str(n_ev))
         check("注销.对话与记忆一并删除", n_chat == 0 and n_mem == 0,
               f"chat={n_chat} mem={n_mem}")
+        check("注销.提醒记录一并删除", n_rem == 0, str(n_rem))
         # 管理员注销时把权限交给最早注册的其他账号
         code2 = (await ca2.post(f"{base}/api/auth/invites")).json().get("code")
         r = await ca2.post(f"{base}/api/auth/register", json={
