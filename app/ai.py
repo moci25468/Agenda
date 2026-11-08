@@ -11,7 +11,7 @@ from datetime import date
 import httpx
 
 from . import db
-from .config import load_config
+from .config import load_config, zhengfang_configured
 from .models import Course, Event, Exam, apply_course_overrides, current_week, event_line
 from .scheduler import WEEKDAY_CN, course_line, courses_on
 
@@ -95,6 +95,11 @@ def build_context(cfg: dict) -> str:
         lines.append("关于用户的长期记忆（以往对话中确认的事实，回答时自然参考，不要逐条复述）：")
         for m in memories[:50]:
             lines.append(f"- {m['content']}")
+
+    if zhengfang_configured(cfg):
+        lines.append("空教室查询：已就绪，用户问空教室/自习教室时按规则 7 输出查询标记。")
+    else:
+        lines.append("空教室查询：未配置正方教务账号；被问到时引导用户去「课表来源」填写正方学号密码，不要输出查询标记。")
     return "\n".join(lines)
 
 
@@ -117,6 +122,14 @@ SYSTEM_PROMPT = """你是「Agenda 知序」，青岛理工大学学生的校园
    系统会立即自动保存并注入后续对话，所以你可以直接说「记住了」。
    只记长期稳定的事实（身份、偏好、习惯、目标）；一次性的时间安排用规则 5 的日程标记，不要用记忆标记。
    用户没有明确要求记住时不要输出；一次最多一行。
+7. 当用户询问空教室/自习教室时（如「今天下午哪里有空教室」「明天 3-4 节能自习的教室」），
+   在回复末尾单独一行输出：
+   [查空教室] {{"date": "YYYY-MM-DD", "start": 1, "end": 2, "campus": "", "building": ""}}
+   date 根据上下文中的今天推算；start/end 为节次（1-12，一般上午 1-4、下午 5-8、晚上 9-11），
+   用户没说节次时按上午/下午/晚上选对应的大节；campus 填校区名（市北/长江路/临沂/黄岛），
+   building 填教学楼名，用户没指定就留空字符串；一次最多一行。
+   系统会实时查询并把结果卡片展示给用户，查询结果会回写进对话供你后续参考。
+   不要自己编造教室名单，可以说「为你查询……的空教室」；上下文提示未配置时不要输出标记。
 
 课表、考试与日程上下文：
 {context}"""

@@ -268,6 +268,31 @@
         color: var(--accent);
         margin-top: 10px;
       }
+      .room-card .rc-list {
+        margin-top: 8px;
+      }
+      .room-card .rc-group {
+        font-size: 12px;
+        color: var(--sub);
+        margin: 8px 0 2px;
+      }
+      .room-card .rc-room {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 10px;
+        font-size: 13px;
+        padding: 3px 0;
+        border-top: 1px solid var(--line);
+      }
+      .room-card .rc-group + .rc-room {
+        border-top: none;
+      }
+      .room-card .rc-seats {
+        font-size: 12px;
+        color: var(--sub);
+        white-space: nowrap;
+      }
 
       /* 考试 */
       .exam-group {
@@ -4294,7 +4319,7 @@
       }
       let chatBusy = false;
       const CHAT_WELCOME =
-        "课程、教室、考试和个人日程，都可以直接问我。说「帮我记一下明天下午三点开会」，我会生成确认卡片，一键存入日程；说「记住我喜欢坐前排」，我会长期记住。对话会保存在你的账号里，刷新不丢。";
+        "课程、教室、考试和个人日程，都可以直接问我。说「帮我记一下明天下午三点开会」，我会生成确认卡片，一键存入日程；说「记住我喜欢坐前排」，我会长期记住；问「今天下午有哪些空教室」，我会实时查教务。对话会保存在你的账号里，刷新不丢。";
 
       // 编辑重发：从某条消息起截断历史与 DOM，再重新发送
       function truncateChat(k) {
@@ -4368,15 +4393,19 @@
           });
         } catch (e) {}
       }
-      // 渲染一条 AI 回复：日程标记 → 确认卡片；记忆标记 → 已记住 chips
+      // 渲染一条 AI 回复：日程标记 → 确认卡片；记忆标记 → 已记住 chips；空教室标记 → 查询结果卡片
       function renderAiContent(bubble, acc, fromHistory = false) {
-        const { text: t1, proposal } = extractEventProposal(acc);
-        const { text: cleanText, memory } = extractMemory(t1);
+        const { text: t0, result: roomResult } = extractRoomResult(acc);
+        const { text: t1, proposal } = extractEventProposal(t0);
+        const { text: t2, memory } = extractMemory(t1);
+        const { text: cleanText, query: roomQuery } = extractRoomQuery(t2);
         bubble.innerHTML = renderReply(
-          cleanText || (proposal ? "为你整理了一条日程，确认后存入：" : acc));
+          cleanText || (proposal ? "为你整理了一条日程，确认后存入："
+            : (roomQuery || roomResult) ? "为你查询了空教室：" : acc));
         attachMsgActions(bubble, "ai");
         if (proposal) appendEventProposal(bubble, proposal);
         if (memory) appendMemoryChip(bubble, memory, fromHistory);
+        if (roomQuery || roomResult) appendRoomCard(bubble, roomQuery, roomResult, acc);
       }
 
       // AI 回复末尾的 [添加日程] {json} 标记 → 确认卡片，用户点击后才真正保存
@@ -4498,6 +4527,157 @@
           }
         });
       }
+      // [查空教室] {json} 标记 → 实时查询教务并渲染结果卡片
+      function extractRoomQuery(text) {
+        const m = text.match(/\[查空教室\]\s*(\{[^\n]*\})/);
+        if (!m) return { text, query: null };
+        try {
+          const obj = JSON.parse(m[1]);
+          const start = parseInt(obj.start, 10);
+          const end = parseInt(obj.end, 10);
+          if (obj && typeof obj.date === "string"
+              && /^\d{4}-\d{2}-\d{2}$/.test(obj.date.trim())
+              && start >= 1 && end >= start && end <= 12) {
+            const str = (v) => (typeof v === "string" ? v.trim() : "");
+            return {
+              text: text.replace(m[0], "").trim(),
+              query: {
+                date: obj.date.trim(), start, end,
+                campus: str(obj.campus).slice(0, 20),
+                building: str(obj.building).slice(0, 30),
+              },
+            };
+          }
+        } catch (e) {}
+        return { text, query: null };
+      }
+      // [空教室结果] {json}：查询完成后回写进历史，刷新直接渲染、后续对话可引用
+      function extractRoomResult(text) {
+        const m = text.match(/\[空教室结果\]\s*(\{[^\n]*\})/);
+        if (!m) return { text, result: null };
+        try {
+          const obj = JSON.parse(m[1]);
+          if (obj && typeof obj === "object")
+            return { text: text.replace(m[0], "").trim(), result: obj };
+        } catch (e) {}
+        return { text: text.replace(m[0], "").trim(), result: null };
+      }
+      function roomResolveName(list, name) {
+        if (!name) return "";
+        const hit = (list || []).find((o) =>
+          o.name === name || (o.name || "").includes(name) || name.includes(o.name || ""));
+        return hit ? hit.id : "";
+      }
+      async function appendRoomCard(bubble, query, result, acc) {
+        const card = document.createElement("div");
+        card.className = "event-proposal room-card";
+        bubble.appendChild(card);
+        if (result) { renderRoomCard(card, query, result); return; }
+        const hidx = parseInt(bubble.dataset.hidx, 10);
+        const save = (res) => {
+          // 仅当这条回复仍是历史里未被截断/重试的原消息时才回写
+          if (!Number.isInteger(hidx) || chatHistory[hidx]?.role !== "assistant"
+              || chatHistory[hidx].content !== acc) return;
+          const base = acc.trimEnd();
+          let sample = res.rooms || [];
+          let payload = JSON.stringify({ ...res, rooms: sample });
+          // 历史单条上限 4000 字：超长时递减样本，保证结果标记不被截掉
+          while (base.length + payload.length + 20 > 3900 && sample.length > 0) {
+            sample = sample.slice(0, Math.max(0, sample.length - 4));
+            payload = JSON.stringify({ ...res, rooms: sample });
+          }
+          chatHistory[hidx].content = base + "\n[空教室结果] " + payload;
+          persistChat();
+        };
+        card.innerHTML =
+          '<div class="ep-head">空教室查询</div><div class="ep-meta">正在查询正方教务…</div>';
+        try {
+          if (!roomMeta) roomMeta = await api("/api/rooms/meta");
+          const campusId = roomResolveName(roomMeta.campuses, query.campus);
+          let buildings = roomMeta.buildings;
+          if (campusId && campusId !== roomMeta.campus) {
+            const m2 = await api("/api/rooms/meta?campus=" + encodeURIComponent(campusId));
+            buildings = m2.buildings;
+          }
+          const buildingId = roomResolveName(buildings, query.building);
+          const params = new URLSearchParams({
+            date_s: query.date, start: query.start, end: query.end,
+            campus: campusId, building: buildingId,
+          });
+          const data = await api("/api/rooms/free?" + params.toString());
+          const res = {
+            date: data.date, week: data.week, day: data.day,
+            start: data.start, end: data.end,
+            campus: query.campus, building: query.building,
+            campusId, buildingId, count: data.count,
+            rooms: data.rooms.slice(0, 12).map((r) => ({
+              name: r.name, code: r.code, building: r.building, seats: r.seats,
+            })),
+          };
+          renderRoomCard(card, query, res);
+          save(res);
+        } catch (e) {
+          const res = {
+            error: e.message, date: query.date, start: query.start, end: query.end,
+            campus: query.campus, building: query.building,
+          };
+          renderRoomCard(card, query, res);
+          save(res);
+        }
+      }
+      function renderRoomCard(card, query, res) {
+        const q = query || res;
+        const when = `${q.date || ""} 第 ${q.start}–${q.end} 节`;
+        const scope = [q.campus, q.building].filter(Boolean).join(" · ");
+        const head = `<div class="ep-head">空教室查询 · ${esc(when)}${scope ? " · " + esc(scope) : ""}</div>`;
+        if (res.error) {
+          card.innerHTML = head +
+            `<div class="ep-meta" style="color:var(--fail)">查询失败：${esc(res.error)}</div>` +
+            (/正方/.test(res.error)
+              ? '<div class="ep-actions"><button class="small" data-rc="source">去配置正方账号</button></div>'
+              : "");
+        } else {
+          const rooms = res.rooms || [];
+          const groups = new Map();
+          rooms.forEach((r) => {
+            const k = r.building || "其他";
+            if (!groups.has(k)) groups.set(k, []);
+            groups.get(k).push(r);
+          });
+          let list = "";
+          for (const [b, rs] of groups) {
+            list += `<div class="rc-group">${esc(b)}</div>` + rs.map((r) =>
+              `<div class="rc-room"><span>${esc(r.name)}${r.code && r.code !== r.name ? ` <span class="event-tag">${esc(r.code)}</span>` : ""}</span><span class="rc-seats">${r.seats ? esc(r.seats) + " 座" : ""}</span></div>`).join("");
+          }
+          card.innerHTML = head +
+            `<div class="ep-title">共 ${res.count} 间空教室</div>` +
+            (list ? `<div class="rc-list">${list}</div>` : "") +
+            (res.count > rooms.length
+              ? `<div class="ep-meta">仅展示前 ${rooms.length} 间</div>` : "") +
+            '<div class="ep-actions"><button class="small" data-rc="all">在空教室页查看全部</button></div>';
+        }
+        card.addEventListener("click", async (e) => {
+          const btn = e.target.closest("button[data-rc]");
+          if (!btn) return;
+          if (btn.dataset.rc === "source") { switchTab("source"); return; }
+          btn.disabled = true;
+          try {
+            // 先备好 meta 再切页，避免 switchTab 触发一次默认条件的自动查询
+            if (!roomMeta || (res.campusId && res.campusId !== roomMeta.campus)) {
+              roomMeta = await api("/api/rooms/meta" +
+                (res.campusId ? "?campus=" + encodeURIComponent(res.campusId) : ""));
+              roomFillMeta(true);
+            }
+            switchTab("rooms");
+            $("#roomDate").value = res.date || roomMeta.today;
+            $("#roomStart").value = String(res.start || 1);
+            $("#roomEnd").value = String(res.end || 2);
+            $("#roomBuilding").value = res.buildingId || "";
+            await queryRooms();
+          } catch (err) { toast(err.message, 4000); }
+          finally { btn.disabled = false; }
+        });
+      }
       async function sendChat(text, opts = {}) {
         if (chatBusy) return;
         text = (text || $("#chatInput").value).trim();
@@ -4555,8 +4735,8 @@
               if (payload.error) throw new Error(payload.error);
               if (payload.delta) {
                 acc += payload.delta;
-                // 流式过程中先隐藏日程/记忆标记行，结束后再渲染成卡片
-                bubble.innerHTML = renderReply(acc.replace(/\[(添加日程|记住)\][\s\S]*$/, ""));
+                // 流式过程中先隐藏日程/记忆/空教室标记行，结束后再渲染成卡片
+                bubble.innerHTML = renderReply(acc.replace(/\[(添加日程|记住|查空教室)\][\s\S]*$/, ""));
                 $("#chatMsgs").scrollTop = $("#chatMsgs").scrollHeight;
               }
             }

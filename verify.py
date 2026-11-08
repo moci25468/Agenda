@@ -217,6 +217,23 @@ check("空教室.响应解析", _room["code"] == "C2-4-114" and _room["seats"] =
       and _room["building"] == "环境实验楼" and _room["campus"] == "黄岛校区",
       str(_room)[:200])
 
+# 空教室 × AI：提示词规则 7 可渲染（JSON  braces 已转义）、上下文按配置状态提示
+_prompt_room = SYSTEM_PROMPT.format(context="占位上下文")
+check("空教室.AI 提示词模板可渲染", "[查空教室]" in _prompt_room
+      and '"date"' in _prompt_room and '"campus"' in _prompt_room)
+_ctx_room = build_context(load_config())
+check("空教室.AI 上下文未配置提示", "空教室查询：未配置" in _ctx_room, _ctx_room[-160:])
+_cfg_room = load_config()
+_cfg_room["provider"] = {**_cfg_room.get("provider", {}), "zhengfang": {
+    **_cfg_room.get("provider", {}).get("zhengfang", {}),
+    "username": "20260001", "password": "dummy"}}
+save_config(_cfg_room)
+check("空教室.AI 上下文已就绪提示",
+      "空教室查询：已就绪" in build_context(load_config()))
+_cfg_room["provider"]["zhengfang"]["username"] = ""
+_cfg_room["provider"]["zhengfang"]["password"] = ""
+save_config(_cfg_room)
+
 # 流式回复的 SSE 行解析（OpenAI 兼容格式）
 check("流式.SSE 解析增量",
       _sse_delta('data: {"choices":[{"delta":{"content":"你好"}}]}') == "你好")
