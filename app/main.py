@@ -34,6 +34,7 @@ from .scheduler import (
     section_time, shutdown_scheduler, start_scheduler,
 )
 from .version import get_version, get_full_version
+from . import ical
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
@@ -272,6 +273,28 @@ async def timetable(week: int | None = None):
         } for c in courses_on(cfg, courses, tomorrow)],
         "tomorrow_events": tomorrow_events,
     }
+
+
+@app.get("/api/export/calendar.ics")
+async def export_calendar():
+    """导出整学期课表为 iCalendar（.ics）文件，供系统日历导入。"""
+    cfg = load_config()
+    courses = ical.courses_for_export(cfg)
+    if not courses:
+        raise HTTPException(404, "课表尚未同步，请先在「课表来源」页同步数据")
+    body = ical.build_ical(cfg, courses)
+    school = (cfg.get("school", "") or "课程表").replace("/", "-")
+    from urllib.parse import quote
+    filename = f"{school}-课表.ics"
+    return Response(
+        content=body,
+        media_type="text/calendar; charset=utf-8",
+        headers={
+            "Content-Disposition":
+                f"attachment; filename=\"course-schedule.ics\"; "
+                f"filename*=UTF-8''{quote(filename)}",
+        },
+    )
 
 
 def _course_overrides(cfg: dict) -> dict:
