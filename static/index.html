@@ -491,6 +491,9 @@
         flex: 1;
         overflow-y: auto;
         padding: 4px 2px;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
       }
       .msg {
         max-width: 78%;
@@ -515,8 +518,10 @@
       .msg.user {
         background: var(--accent);
         color: #fff;
-        margin-left: auto;
+        align-self: flex-end;
         border-bottom-right-radius: 4px;
+        width: fit-content;
+        max-width: 62%;
       }
       .msg.ai {
         background: var(--bg);
@@ -1640,7 +1645,9 @@
         background: var(--card);
         color: var(--text);
         border: 1px solid var(--line);
+        width: 100%;
         max-width: 100%;
+        align-self: stretch;
       }
       .msg.editing textarea {
         width: 100%;
@@ -1946,7 +1953,9 @@
           padding: 18px;
         }
         .msg.user {
-          max-width: 88%;
+          max-width: 82%;
+          width: fit-content;
+          align-self: flex-end;
         }
         .chips {
           flex-wrap: nowrap;
@@ -3226,7 +3235,9 @@
       }
       .msg { line-height: 1.8; }
       .msg.user {
-        max-width: min(76%, 680px);
+        max-width: min(58%, 520px);
+        width: fit-content;
+        align-self: flex-end;
         margin-bottom: 24px;
         padding: 11px 16px;
         border-radius: 15px 15px 4px 15px;
@@ -3369,7 +3380,7 @@
         .chat-head p { max-width: 360px; }
         .chat-msgs { padding: 18px; }
         .msg.ai { max-width: 100%; padding: 16px; }
-        .msg.user { max-width: 88%; }
+        .msg.user { max-width: 82%; width: fit-content; align-self: flex-end; }
         .chips { flex-wrap: nowrap; overflow-x: auto; padding: 11px 18px; scrollbar-width: none; }
         .chips::-webkit-scrollbar { display: none; }
         .chips button { flex: 0 0 auto; }
@@ -3821,7 +3832,7 @@
         </div>
 
         <div class="card">
-          <h2>Bark 推送</h2>
+          <h2>Bark 推送（iOS）</h2>
           <div class="check">
             <input type="checkbox" id="barkEnabled" /><span
               >启用 Bark（iOS 推送）</span
@@ -3851,6 +3862,22 @@
           <div class="form-actions">
             <button id="testPushBtn">发送测试推送</button>
           </div>
+        </div>
+
+        <div class="card">
+          <h2>企业微信 / 钉钉群机器人</h2>
+          <div class="check">
+            <input type="checkbox" id="wecomEnabled" /><span
+              >启用群机器人（安卓 / 微信内接收）</span
+            >
+          </div>
+          <label class="field"
+            ><span>机器人 Webhook</span
+            ><input name="push.wecom_webhook" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."
+          /></label>
+          <p class="hint">
+            在企业微信群里「添加群机器人」复制 Webhook 地址粘贴到这里，也可以只填 key；钉钉群机器人同理。安卓手机在微信 / 企业微信里就能收到，和 Bark 可同时开启。
+          </p>
         </div>
 
         <div class="card">
@@ -5869,6 +5896,7 @@
         });
         $("#pushNextDay").checked = !!cfg.push_next_day;
         $("#barkEnabled").checked = !!cfg.push?.bark_enabled;
+        $("#wecomEnabled").checked = !!cfg.push?.wecom_enabled;
         $("#reminderEnabled").checked = cfg.push?.reminder_enabled !== false;
         $("#aiEnabled").checked = !!cfg.ai?.enabled;
       }
@@ -5882,6 +5910,7 @@
         cfg.push_next_day = $("#pushNextDay").checked;
         cfg.push = cfg.push || {};
         cfg.push.bark_enabled = $("#barkEnabled").checked;
+        cfg.push.wecom_enabled = $("#wecomEnabled").checked;
         cfg.push.reminder_enabled = $("#reminderEnabled").checked;
         cfg.ai = cfg.ai || {};
         cfg.ai.enabled = $("#aiEnabled").checked;

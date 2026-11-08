@@ -27,7 +27,7 @@ from app.curl_import import parse_curl, guess_mapping
 from app.config import load_config as _load_cfg, save_config as _save_cfg
 from app import db as _db
 from datetime import date, datetime
-from app.push import push_all
+from app.push import push_all, send_wecom, _wecom_url, WECOM_API
 from app.scheduler import run_sync, format_changes, courses_on, section_time, run_reminders, TZ
 import app.scheduler as _sched
 from app.user_context import current_user_id, set_current_user
@@ -439,6 +439,33 @@ if _orig_esnap:
     db.save_exam_snapshot(_orig_esnap["exams"], _orig_esnap["source"])
 save_config(_orig_cfg)
 
+# 企业微信 / 钉钉群机器人：本地 mock webhook（负载 / 失败 / 日志）
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+_wecom_hits: list[tuple[str, dict]] = []
+
+
+class _WecomMock(BaseHTTPRequestHandler):
+    def do_POST(self):
+        raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        _wecom_hits.append((self.path, json.loads(raw or b"{}")))
+        data = ({"errcode": 93000, "errmsg": "invalid webhook url"} if "fail" in self.path
+                else {"errcode": 0, "errmsg": "ok"})
+        body = json.dumps(data).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *a):
+        pass
+
+
+_wecom_srv = ThreadingHTTPServer(("127.0.0.1", 0), _WecomMock)
+threading.Thread(target=_wecom_srv.serve_forever, daemon=True).start()
+WECOM_OK = f"http://127.0.0.1:{_wecom_srv.server_address[1]}/wecom"
+WECOM_FAIL = f"http://127.0.0.1:{_wecom_srv.server_address[1]}/fail"
+
 
 async def main():
     # 5. 手动同步（无推送通道 → skip 日志，不报错）
@@ -453,6 +480,30 @@ async def main():
     results = await push_all(cfg2, "测试", "内容")
     check("Bark 缺 Key 优雅失败",
           results[0]["ok"] is False and "未配置" in results[0]["error"], str(results))
+
+    # 6a. 企业微信 / 钉钉群机器人：URL 补全、发送负载、失败反馈、通道日志
+    check("群机器人.key 自动补全", _wecom_url("abc-123") == WECOM_API + "abc-123"
+          and _wecom_url(WECOM_OK) == WECOM_OK)
+    ok, err = await send_wecom({"push": {"wecom_webhook": WECOM_OK}}, "标题", "正文")
+    check("群机器人.发送与负载", ok and _wecom_hits
+          and _wecom_hits[-1][1]["msgtype"] == "text"
+          and "标题" in _wecom_hits[-1][1]["text"]["content"]
+          and "正文" in _wecom_hits[-1][1]["text"]["content"], str(_wecom_hits[-1:]))
+    ok, err = await send_wecom({"push": {"wecom_webhook": WECOM_FAIL}}, "t", "b")
+    check("群机器人.失败反馈", ok is False and "invalid" in err, err)
+    check("群机器人.未配置优雅失败",
+          (await send_wecom({"push": {}}, "t", "b"))[0] is False)
+    _cw = load_config()
+    _cw["push"] = {**_cw.get("push", {}), "bark_enabled": False,
+                   "wecom_enabled": True, "wecom_webhook": WECOM_OK}
+    _wr = await push_all(_cw, "群推送", "正文")
+    check("群机器人.push_all 通道", any(x["channel"] == "wecom" and x["ok"] for x in _wr),
+          str(_wr))
+    _wlogs = db.get_logs(5)["push"]
+    check("群机器人.推送日志留痕",
+          any(x["channel"] == "wecom" and x["status"] == "ok" for x in _wlogs))
+    check("群机器人.默认关闭", load_config()["push"]["wecom_enabled"] is False
+          and load_config()["push"]["wecom_webhook"] == "")
 
     # 7. 日志落库
     logs = db.get_logs(10)
