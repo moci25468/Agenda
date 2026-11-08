@@ -180,6 +180,15 @@ def get_snapshot() -> dict | None:
     return {"courses": json.loads(row["data"]), "source": row["source"], "fetched_at": row["fetched_at"]}
 
 
+def get_snapshot_for(user_id: int) -> dict | None:
+    """按指定用户读课表快照（供日历订阅等无 Cookie 上下文的场景）。"""
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM snapshot WHERE user_id = ?", (user_id,)).fetchone()
+    if not row:
+        return None
+    return {"courses": json.loads(row["data"]), "source": row["source"], "fetched_at": row["fetched_at"]}
+
+
 def save_snapshot(courses: list[dict], source: str):
     with get_conn() as conn:
         conn.execute(

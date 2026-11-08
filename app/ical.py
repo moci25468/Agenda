@@ -130,10 +130,14 @@ def build_ical(cfg: dict, courses: list[Course]) -> str:
     return "\r\n".join(lines) + "\r\n"
 
 
-def courses_for_export(cfg: dict) -> list[Course]:
-    """从当前配置取课表快照并叠加手动调整，供导出接口复用。"""
+def courses_for_export(cfg: dict, user_id: int | None = None) -> list[Course]:
+    """从当前配置取课表快照并叠加手动调整，供导出接口复用。
+
+    user_id 非空时按指定用户读快照（日历订阅无 Cookie 上下文），
+    否则走当前用户上下文。
+    """
     from . import db
     from .models import apply_course_overrides
-    snap = db.get_snapshot()
+    snap = db.get_snapshot_for(user_id) if user_id is not None else db.get_snapshot()
     courses = [Course.from_dict(d) for d in snap["courses"]] if snap else []
     return apply_course_overrides(courses, cfg.get("course_overrides"))

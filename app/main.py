@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import secrets
 import uuid
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
@@ -61,6 +62,8 @@ ALLOWED_ORIGIN_RE = re.compile(
 )
 PUBLIC_API_PATHS = {
     "/api/health", "/api/auth/status", "/api/auth/register", "/api/auth/login",
+    # 日历订阅端点：webcal:// 拉取时日历 App 不携带 Cookie，靠 URL 里的私有 token 鉴权
+    "/api/export/calendar.ics",
 }
 _CORS_HEADER_NAMES = {
     b"access-control-allow-origin", b"access-control-allow-credentials",
@@ -91,6 +94,22 @@ def _apply_cors(response, origin: str, allowed: bool):
     response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Local-Token"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     response.headers["Vary"] = "Origin"
+
+
+def _subscribe_user_by_token(token: str) -> tuple[int, dict] | None:
+    """用日历订阅私有 token 定位用户，返回 (user_id, cfg)。
+
+    订阅 token 存于该用户 user_config 的 calendar_subscribe_token 字段，
+    永不过期、可随时重新生成。找不到或未配置时返回 None。
+    """
+    if not token:
+        return None
+    from . import db as _db
+    for uid in _db.list_user_ids(active_only=False):
+        cfg = _db.get_user_config(uid)
+        if cfg.get("calendar_subscribe_token") == token:
+            return uid, cfg
+    return None
 
 
 class AccessGuard:
@@ -276,10 +295,27 @@ async def timetable(week: int | None = None):
 
 
 @app.get("/api/export/calendar.ics")
-async def export_calendar():
-    """导出整学期课表为 iCalendar（.ics）文件，供系统日历导入。"""
-    cfg = load_config()
-    courses = ical.courses_for_export(cfg)
+async def export_calendar(request: Request):
+    """导出整学期课表为 iCalendar（.ics），同时支持日历订阅（webcal:// 自动同步）。
+
+    - 带 ?token=<订阅 token>：定位到具体用户（订阅拉取无 Cookie），供系统日历订阅；
+    - 不带 token：走当前登录会话（下载场景），仍按 Cookie 鉴权。
+    """
+    token = request.query_params.get("token", "").strip()
+    sub = _subscribe_user_by_token(token) if token else None
+    if token and not sub:
+        raise HTTPException(404, "订阅链接无效或已失效，请重新生成订阅链接")
+
+    if sub:
+        user_id, raw_cfg = sub
+        from .config import DEFAULT_CONFIG, _deep_merge, normalize_provider
+        cfg = json.loads(json.dumps(_deep_merge(DEFAULT_CONFIG, raw_cfg)))
+        cfg["provider"] = normalize_provider(cfg.get("provider", {}))
+        courses = ical.courses_for_export(cfg, user_id=user_id)
+    else:
+        # 无 token：依赖当前用户上下文（AccessGuard 已保证已登录）
+        cfg = load_config()
+        courses = ical.courses_for_export(cfg)
     if not courses:
         raise HTTPException(404, "课表尚未同步，请先在「课表来源」页同步数据")
     body = ical.build_ical(cfg, courses)
@@ -293,8 +329,46 @@ async def export_calendar():
             "Content-Disposition":
                 f"attachment; filename=\"course-schedule.ics\"; "
                 f"filename*=UTF-8''{quote(filename)}",
+            # 让系统日历识别为可订阅的日历源
+            "Cache-Control": "no-cache",
         },
     )
+
+
+@app.get("/api/export/subscribe")
+async def get_subscribe_info(request: Request):
+    """返回当前用户的日历订阅信息：订阅 token 与可用的订阅 URL。
+
+    token 不存在时自动生成并落库（绑定当前用户，永不过期）。
+    前端据此拼出 webcal:// 与 Google 日历订阅链接。
+    """
+    cfg = load_config()
+    token = (cfg.get("calendar_subscribe_token") or "").strip()
+    if not token:
+        token = secrets.token_urlsafe(32)
+        cfg["calendar_subscribe_token"] = token
+        save_config(cfg)
+
+    # 用请求里的 host 拼绝对地址，兼容本地/线上
+    host = request.headers.get("host", "")
+    scheme = "https" if not host.startswith(("127.0.0.1", "localhost")) else "http"
+    base = f"{scheme}://{host}"
+    ics_path = f"/api/export/calendar.ics?token={token}"
+    return {
+        "token": token,
+        "webcal": f"webcal://{host}{ics_path}",
+        "https": f"{base}{ics_path}",
+        "google": f"https://calendar.google.com/calendar/r?cid=webcal://{host}{ics_path}",
+    }
+
+
+@app.post("/api/export/subscribe/regenerate")
+async def regenerate_subscribe_token():
+    """重新生成订阅 token（防止链接泄露后他人继续订阅）。旧 token 立即失效。"""
+    cfg = load_config()
+    cfg["calendar_subscribe_token"] = secrets.token_urlsafe(32)
+    save_config(cfg)
+    return {"ok": True}
 
 
 def _course_overrides(cfg: dict) -> dict:

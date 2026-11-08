@@ -3557,6 +3557,7 @@
           <button class="small" id="nextWeek">下一周</button>
           <button class="small" id="editCoursesBtn">编辑课表</button>
           <button class="small" id="exportIcsBtn">导出日历</button>
+          <button class="small" id="subscribeIcsBtn">一键订阅</button>
         </div>
         <div class="week-grid-scroll">
           <div class="week-grid" id="weekGrid"></div>
@@ -4777,6 +4778,54 @@
         }
       }
 
+      // 检测设备类型，决定订阅跳转方式
+      function _detectPlatform() {
+        const ua = navigator.userAgent || "";
+        if (/iPhone|iPad|iPod/i.test(ua)) return "ios";
+        if (/Android/i.test(ua)) return "android";
+        return "desktop";
+      }
+
+      async function subscribeCalendar() {
+        const btn = $("#subscribeIcsBtn");
+        btn.disabled = true;
+        const old = btn.textContent;
+        btn.textContent = "准备中…";
+        try {
+          const resp = await fetch("/api/export/subscribe");
+          if (!resp.ok) {
+            let msg = "获取订阅信息失败";
+            try {
+              const j = await resp.json();
+              if (j && j.detail) msg = j.detail;
+            } catch (e) {}
+            throw new Error(msg);
+          }
+          const info = await resp.json();
+          const platform = _detectPlatform();
+
+          if (platform === "ios") {
+            // iOS：webcal:// 直接唤起系统日历订阅
+            toast("正在唤起系统日历订阅…", 2500);
+            window.location.href = info.webcal;
+          } else if (platform === "android") {
+            // 安卓：优先跳 Google 日历订阅；无 Google 日历则提示复制链接
+            toast("正在打开日历订阅，若未自动弹出请用「下载」方式导入", 3500);
+            window.location.href = info.google;
+          } else {
+            // 桌面：默认下载 .ics，同时给出订阅链接提示
+            exportCalendar();
+            toast("桌面端建议下载后导入；也可复制订阅链接到在线日历", 4000);
+            try { await navigator.clipboard.writeText(info.webcal); } catch (e) {}
+          }
+        } catch (e) {
+          toast(e.message || "订阅失败", 3000);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = old;
+        }
+      }
+
       function fillCourseForm(uid) {
         const c = (courseData?.courses || []).find((x) => x.uid === uid);
         if (!c) return;
@@ -4873,6 +4922,7 @@
 
       $("#editCoursesBtn").addEventListener("click", openCourseEditor);
       $("#exportIcsBtn").addEventListener("click", exportCalendar);
+      $("#subscribeIcsBtn").addEventListener("click", subscribeCalendar);
       $("#closeEditorBtn").addEventListener("click", closeCourseEditor);
       $("#cancelCourseBtn").addEventListener("click", resetCourseForm);
       $("#courseEditor").addEventListener("click", (e) => {

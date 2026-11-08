@@ -785,6 +785,34 @@ async def http_tests(port: int):
                   and "B 专属课" not in na and "A 专属课" not in nb,
                   f"A={na} B={nb}")
 
+            # 日历订阅：私有 token 定位用户，webcal 拉取无需 Cookie
+            sinfo = (await ca.get(f"{base}/api/export/subscribe")).json()
+            check("订阅.返回 token 与链接", bool(sinfo.get("token"))
+                  and sinfo.get("webcal", "").startswith("webcal://")
+                  and sinfo.get("https", "").startswith("http")
+                  and "google" in sinfo, str(sinfo)[:200])
+            stok = sinfo["token"]
+            # 匿名（无 Cookie）用 token 拉订阅，应返回 A 的课表
+            async with _hx.AsyncClient(timeout=30, trust_env=False) as anon_sub:
+                ics_anon = await anon_sub.get(
+                    f"{base}/api/export/calendar.ics?token={stok}")
+                check("订阅.无 Cookie 凭 token 可取", ics_anon.status_code == 200
+                      and "BEGIN:VCALENDAR" in ics_anon.text
+                      and "A 专属课" in ics_anon.text, str(ics_anon.status_code))
+                bad = await anon_sub.get(
+                    f"{base}/api/export/calendar.ics?token=wrong")
+                check("订阅.错误 token 被拒", bad.status_code == 404, str(bad.status_code))
+            # 重新生成后旧 token 失效
+            await ca.post(f"{base}/api/export/subscribe/regenerate")
+            sinfo2 = (await ca.get(f"{base}/api/export/subscribe")).json()
+            check("订阅.重新生成换新 token", sinfo2.get("token")
+                  and sinfo2["token"] != stok, str(sinfo2.get("token")))
+            async with _hx.AsyncClient(timeout=30, trust_env=False) as anon_sub2:
+                old_again = await anon_sub2.get(
+                    f"{base}/api/export/calendar.ics?token={stok}")
+                check("订阅.旧 token 立即失效", old_again.status_code == 404,
+                      str(old_again.status_code))
+
         await ca.post(f"{base}/api/settings", json={"security": {
             "enabled": True, "token": "test-token-123", "allowed_origins": []}})
         cross = {"Origin": "capacitor://localhost"}

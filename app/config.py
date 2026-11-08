@@ -25,6 +25,7 @@ MASK_PATHS = [
     ("provider", "zhengfang", "password"),
     ("provider", "zhengfang", "cookie"),
     ("provider", "portal", "headers"),
+    ("calendar_subscribe_token",),
 ]
 
 DEFAULT_CONFIG = {
@@ -87,6 +88,8 @@ DEFAULT_CONFIG = {
         "token": "",              # 跨源（App WebView / 扩展）调用需携带
         "allowed_origins": [],    # 额外允许的来源
     },
+    # 日历订阅：私有 token 绑定当前用户，用于 webcal:// 一键订阅自动同步
+    "calendar_subscribe_token": "",
 }
 
 
