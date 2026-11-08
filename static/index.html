@@ -5400,6 +5400,20 @@
         if (inCode && codeBuf.length) out.push(codeBlock());
         return out.join("");
       }
+      // 滚动聊天区到底部；instant=true 时临时关闭 smooth，立即定位（用于恢复历史/切 tab）
+      function scrollChatToBottom(instant = false) {
+        const box = $("#chatMsgs");
+        if (!box) return;
+        if (instant) {
+          const prev = box.style.scrollBehavior;
+          box.style.scrollBehavior = "auto";
+          box.scrollTop = box.scrollHeight;
+          // 下一帧恢复 smooth，避免影响后续发送消息的平滑滚动
+          requestAnimationFrame(() => { box.style.scrollBehavior = prev; });
+        } else {
+          box.scrollTop = box.scrollHeight;
+        }
+      }
       function addMsg(role, text, isError = false, hidx = null) {
         const div = document.createElement("div");
         div.className =
@@ -5532,10 +5546,7 @@
             }
           });
           // 所有消息渲染完后滚到底，避免最后一条 AI 长回复把位置顶回中间
-          requestAnimationFrame(() => {
-            const box = $("#chatMsgs");
-            box.scrollTop = box.scrollHeight;
-          });
+          requestAnimationFrame(() => scrollChatToBottom(true));
         } catch (e) {}
       }
       // AI 回复末尾的 [追问] ["...", "..."] → 可点击选项；正文不暴露控制标记
@@ -6300,6 +6311,13 @@
           refreshInvites();
         }
         if (tab === "settings") loadSettings();
+        // 切到 AI 页时滚到底部：历史在页面加载时（容器还隐藏）就渲染了，
+        // 那时的滚底无效，需等 tab 可见、布局完成后重新定位到最后一条消息。
+        if (tab === "ai") {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => scrollChatToBottom(true));
+          });
+        }
       }
 
       /* ---------- 接口诊断展示 ---------- */
