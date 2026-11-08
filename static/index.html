@@ -3833,16 +3833,37 @@
         }
       }
 
-      async function loadRooms(campus = "") {
+      let roomMetaPromise = null;
+      function loadRooms(campus = "") {
+        // 复用进行中的加载：meta 未就绪时点查询/切校区不会并发重复登录教务
+        if (!roomMetaPromise)
+          roomMetaPromise = _loadRooms(campus).finally(() => { roomMetaPromise = null; });
+        return roomMetaPromise;
+      }
+      function roomError(title, message) {
+        const needConfig = /正方|配置|登录|密码|过期/.test(message);
+        $("#roomResult").innerHTML =
+          `<div class="empty"><div class="empty-title">${esc(title)}</div><div class="empty-sub">${esc(message)}</div>
+           <button class="small" data-room-act="retry" style="margin-top:12px">重试</button>${needConfig ? ' <button class="small" data-room-act="source" style="margin-top:12px">去配置正方账号</button>' : ""}</div>`;
+      }
+      async function _loadRooms(campus = "") {
         try {
+          if (!roomMeta)
+            $("#roomResult").innerHTML =
+              `<div class="empty"><div class="empty-title">正在连接正方教务…</div><div class="empty-sub">首次需要登录教务，约几秒钟。</div></div>`;
           roomMeta = await api("/api/rooms/meta" + (campus ? "?campus=" + encodeURIComponent(campus) : ""));
           roomFillMeta(!!campus);
           if (!roomLastQuery) await queryRooms();
         } catch (e) {
-          $("#roomResult").innerHTML =
-            `<div class="empty"><div class="empty-title">空教室暂不可用</div><div class="empty-sub">${esc(e.message)}</div></div>`;
+          roomError("空教室暂不可用", e.message);
         }
       }
+      $("#roomResult").addEventListener("click", (e) => {
+        const btn = e.target.closest("button[data-room-act]");
+        if (!btn) return;
+        if (btn.dataset.roomAct === "source") switchTab("source");
+        else queryRooms();
+      });
 
       function roomRow(r) {
         const meta = [r.category, r.seats ? `${r.seats} 座` : "", r.campus]
@@ -3881,7 +3902,9 @@
       }
 
       async function queryRooms() {
-        if (roomBusy || !roomMeta) return;
+        if (roomBusy) return;
+        // meta 未就绪（未配置/登录失败/仍在加载）：先重试加载，不再静默无响应
+        if (!roomMeta) { await loadRooms($("#roomCampus").value || ""); return; }
         const params = new URLSearchParams({
           date_s: $("#roomDate").value || roomMeta.today,
           start: $("#roomStart").value || "1",
@@ -3907,8 +3930,7 @@
           $("#roomResultBar").classList.remove("hidden");
           renderRooms();
         } catch (e) {
-          $("#roomResult").innerHTML =
-            `<div class="empty"><div class="empty-title">查询失败</div><div class="empty-sub">${esc(e.message)}</div></div>`;
+          roomError("查询失败", e.message);
         } finally {
           roomBusy = false;
           $("#roomQueryBtn").disabled = false;
