@@ -313,7 +313,10 @@ async def export_calendar(request: Request):
         cfg["provider"] = normalize_provider(cfg.get("provider", {}))
         courses = ical.courses_for_export(cfg, user_id=user_id)
     else:
-        # 无 token：依赖当前用户上下文（AccessGuard 已保证已登录）
+        # 无 token：必须已登录（下载场景）。端点虽在公开白名单（供 webcal 无 Cookie 拉取），
+        # 但绝不能回落到全局模板/默认用户，否则会泄露他人课表。
+        if get_current_user() is None:
+            raise HTTPException(401, "请先登录，或使用有效的订阅链接")
         cfg = load_config()
         courses = ical.courses_for_export(cfg)
     if not courses:

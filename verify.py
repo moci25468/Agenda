@@ -799,6 +799,10 @@ async def http_tests(port: int):
                 check("订阅.无 Cookie 凭 token 可取", ics_anon.status_code == 200
                       and "BEGIN:VCALENDAR" in ics_anon.text
                       and "A 专属课" in ics_anon.text, str(ics_anon.status_code))
+                # 无 token 也无 Cookie：必须 401，不得回落全局模板泄露他人课表
+                bare = await anon_sub.get(f"{base}/api/export/calendar.ics")
+                check("订阅.无 token 无 Cookie 拒绝", bare.status_code == 401,
+                      str(bare.status_code))
                 bad = await anon_sub.get(
                     f"{base}/api/export/calendar.ics?token=wrong")
                 check("订阅.错误 token 被拒", bad.status_code == 404, str(bad.status_code))
