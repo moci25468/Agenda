@@ -25,6 +25,7 @@ WEEKDAY_CN = ["周一", "周二", "周三", "周四", "周五", "周六", "周�
 _scheduler: BackgroundScheduler | None = None
 JOB_ID = "daily_timetable_sync"
 REMINDER_JOB_ID = "class_reminders"
+NEXT_DAY_JOB_ID = "next_day_summary"
 
 
 def section_time(cfg: dict, section: int, end: bool = False) -> str:
@@ -95,10 +96,9 @@ async def apply_snapshot(cfg: dict, courses: list[Course], source: str,
 
     pushed = []
     if push:
-        tomorrow = date.today() + timedelta(days=1)
-        tomorrow_s = tomorrow.isoformat()
+        today = date.today()
+        now = datetime.now(TZ)
         effective = apply_course_overrides(courses, cfg.get("course_overrides"))
-        next_courses = courses_on(cfg, effective, tomorrow)
         parts = []
         title = "课表已更新"
         has_change = bool(changes.get("has_change"))
@@ -106,25 +106,33 @@ async def apply_snapshot(cfg: dict, courses: list[Course], source: str,
             parts.append("【课表变更】\n" + format_changes(cfg, changes))
         elif changes.get("first_sync"):
             parts.append(f"首次同步完成，共 {len(courses)} 门课程。")
-        # 「明日课表 / 明日日程」按天去重：同一天已推过就不再重复（手动反复同步
-        # 也不打扰）；但本次有实质课表变更时照推，确保调课信息不丢。
-        next_day_dedup_key = "next_day"
-        next_day_already_sent = db.reminder_sent(tomorrow_s, next_day_dedup_key)
-        if cfg.get("push_next_day", True) and (has_change or not next_day_already_sent):
-            if next_courses:
-                parts.append(f"【明日课表】{tomorrow.strftime('%m月%d日')} {WEEKDAY_CN[tomorrow.isoweekday() - 1]}\n"
-                             + "\n".join(course_line(cfg, c) for c in next_courses))
+        # 同步后推送：优先推「今天剩余课程」（同步时刻之后还没结束的课）；
+        # 今天没课了才推「明日课表」。明日课表的定时推送由每晚 22:00 任务负责，
+        # 两者共用 reminders 表去重，同一天「明日课表」只推一次。
+        if cfg.get("push_next_day", True):
+            today_courses = courses_on(cfg, effective, today)
+            remaining = _courses_after(cfg, today_courses, now)
+            if remaining:
+                parts.append(
+                    f"【今日剩余课程】{WEEKDAY_CN[today.isoweekday() - 1]}\n"
+                    + "\n".join(course_line(cfg, c) for c in remaining))
             else:
-                parts.append(f"【明日课表】{tomorrow.strftime('%m月%d日')} 没有课，好好休息。")
-            next_events = [Event.from_dict(d) for d in
-                           db.list_events(date_from=tomorrow_s, date_to=tomorrow_s)]
-            if next_events:
-                parts.append("【明日日程】\n" + "\n".join(event_line(e) for e in next_events))
-            if not has_change:
-                title = "明日安排提醒" if next_events else "明日课表提醒"
-            # 标记「明日」已推过（仅当确实生成了明日部分时）
-            if not next_day_already_sent:
-                db.mark_reminder(tomorrow_s, next_day_dedup_key)
+                tomorrow = today + timedelta(days=1)
+                tomorrow_s = tomorrow.isoformat()
+                if not db.reminder_sent(tomorrow_s, "next_day"):
+                    next_courses = courses_on(cfg, effective, tomorrow)
+                    if next_courses:
+                        parts.append(f"【明日课表】{tomorrow.strftime('%m月%d日')} {WEEKDAY_CN[tomorrow.isoweekday() - 1]}\n"
+                                     + "\n".join(course_line(cfg, c) for c in next_courses))
+                    else:
+                        parts.append(f"【明日课表】{tomorrow.strftime('%m月%d日')} 没有课，好好休息。")
+                    next_events = [Event.from_dict(d) for d in
+                                   db.list_events(date_from=tomorrow_s, date_to=tomorrow_s)]
+                    if next_events:
+                        parts.append("【明日日程】\n" + "\n".join(event_line(e) for e in next_events))
+                    if not has_change:
+                        title = "明日安排提醒" if next_events else "明日课表提醒"
+                    db.mark_reminder(tomorrow_s, "next_day")
         if parts:
             pushed = await push_all(cfg, title, "\n\n".join(parts))
     return {"ok": True, "message": summary, "changes": changes, "pushed": pushed}
@@ -185,6 +193,56 @@ def _push_ready(cfg: dict) -> bool:
     p = cfg.get("push", {})
     return bool(p.get("bark_enabled")
                 or (p.get("wecom_enabled") and (p.get("wecom_webhook") or "").strip()))
+
+
+def _courses_after(cfg: dict, courses: list[Course], moment: datetime) -> list[Course]:
+    """过滤出「moment 时刻之后仍未结束」的课（结束时间 > 当前时刻）。"""
+    out = []
+    for c in courses:
+        end_at = _parse_hhmm(moment.date().isoformat(), section_time(cfg, c.end, end=True))
+        if end_at and end_at > moment:
+            out.append(c)
+    return out
+
+
+async def push_next_day_summary(now: datetime | None = None) -> list[dict]:
+    """每晚 22:00 定时推送「明日课表 + 明日日程」，按天去重（每天只推一次）。
+
+    与同步推送解耦：同步时若今天还有课只推「今日剩余」，明天的课交给本任务统一推。
+    """
+    cfg = load_config()
+    if not cfg.get("push_next_day", True):
+        return []
+    if not _push_ready(cfg):
+        return []
+    now = now or datetime.now(TZ)
+    now = now.replace(tzinfo=TZ) if now.tzinfo is None else now.astimezone(TZ)
+    tomorrow = (now + timedelta(days=1)).date()
+    tomorrow_s = tomorrow.isoformat()
+    dedup_key = "next_day"
+    if db.reminder_sent(tomorrow_s, dedup_key):
+        return []
+    snap = db.get_snapshot()
+    if not snap:
+        return []
+    courses = apply_course_overrides(
+        [Course.from_dict(d) for d in snap["courses"]], cfg.get("course_overrides"))
+    next_courses = courses_on(cfg, courses, tomorrow)
+    parts = []
+    if next_courses:
+        parts.append(f"【明日课表】{tomorrow.strftime('%m月%d日')} {WEEKDAY_CN[tomorrow.isoweekday() - 1]}\n"
+                     + "\n".join(course_line(cfg, c) for c in next_courses))
+    else:
+        parts.append(f"【明日课表】{tomorrow.strftime('%m月%d日')} 没有课，好好休息。")
+    next_events = [Event.from_dict(d) for d in
+                   db.list_events(date_from=tomorrow_s, date_to=tomorrow_s)]
+    if next_events:
+        parts.append("【明日日程】\n" + "\n".join(event_line(e) for e in next_events))
+    title = "明日安排提醒" if next_events else "明日课表提醒"
+    # 先标记再推，推送失败也不重复打扰
+    db.mark_reminder(tomorrow_s, dedup_key)
+    results = await push_all(cfg, title, "\n\n".join(parts))
+    return [{"title": title, "key": dedup_key, "results": results}]
 
 
 async def run_reminders(now: datetime | None = None) -> list[dict]:
@@ -348,6 +406,21 @@ def _job_wrapper():
             current_user_id.reset(ctx)
 
 
+def _next_day_job_wrapper():
+    """每晚 22:00 逐用户推「明日课表 + 明日日程」。"""
+    from .user_context import current_user_id, set_current_user
+
+    user_ids = db.list_user_ids() or [1]
+    for uid in user_ids:
+        ctx = set_current_user(uid)
+        try:
+            asyncio.run(push_next_day_summary())
+        except Exception as e:  # noqa: BLE001
+            db.add_sync_log("fail", f"明日课表推送异常：{type(e).__name__}: {e}")
+        finally:
+            current_user_id.reset(ctx)
+
+
 def start_scheduler(cfg: dict):
     global _scheduler
     if _scheduler is None:
@@ -358,6 +431,11 @@ def start_scheduler(cfg: dict):
         _reminder_job_wrapper, IntervalTrigger(minutes=1, timezone=TZ),
         id=REMINDER_JOB_ID, replace_existing=True, max_instances=1,
         coalesce=True, misfire_grace_time=120,
+    )
+    # 每晚 22:00 推「明日课表 + 明日日程」，按天去重
+    _scheduler.add_job(
+        _next_day_job_wrapper, CronTrigger(hour=22, minute=0, timezone=TZ),
+        id=NEXT_DAY_JOB_ID, replace_existing=True, misfire_grace_time=3600,
     )
     reschedule(cfg)
 

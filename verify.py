@@ -26,7 +26,7 @@ import httpx
 from app.curl_import import parse_curl, guess_mapping
 from app.config import load_config as _load_cfg, save_config as _save_cfg
 from app import db as _db
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from app.push import push_all, send_wecom, _wecom_url, WECOM_API
 from app.scheduler import (run_sync, format_changes, courses_on, section_time,
                            run_reminders, push_exam_reviews, TZ)
@@ -471,28 +471,62 @@ asyncio.run(run_reminders(now=_at("2026-11-13T07:50:00")))
 check("提醒.用户间互不串扰", not _push_calls
       and not db.reminder_sent("2026-11-13", "course:周五隔离课:1:"), str(_push_calls))
 
-# 明日课表推送去重：手动反复同步（无实质变更）不应重复推「明日课表」
+# 同步后推送逻辑：今天有剩余课 → 只推今日剩余；今天没课 → 推明日课表
+# 明日课表按天去重（同步兜底推 / 每晚 22:00 定时推，同一天只推一次）
 _sync_cfg = load_config()
 _sync_cfg["push"] = {**_sync_cfg.get("push", {}), "bark_enabled": True, "bark_key": "t",
                      "push_next_day": True, "reminder_enabled": False}
 save_config(_sync_cfg)
-# 清空快照，避免与前面提醒测试的课程产生「变更」干扰；课程设 day=2（明天周二）
+# 清空快照与提醒记录，避免前面测试的课程/去重记录干扰
 db.save_snapshot([], "test")
-_sync_courses = [Course("明日课", day=2, start=1, end=2, weeks=list(range(1, 20)))]
+with db.get_conn() as conn:
+    conn.execute("DELETE FROM reminders WHERE user_id = 1")
+
+# 1) 今天有剩余课（周一 day=1，用真实 today 判断）→ 只推「今日剩余课程」
+_today = date.today()
+_today_dow = _today.isoweekday()
+_today_course = [Course("今日课", day=_today_dow, start=9, end=10,
+                        weeks=list(range(1, 20)))]
 _push_calls.clear()
-asyncio.run(_sched.apply_snapshot(_sync_cfg, _sync_courses, "test", push=True))
-check("明日推送.首次同步推送", len(_push_calls) == 1
-      and "明日课表" in _push_calls[0][1] and "明日课" in _push_calls[0][1], str(_push_calls))
-_push_calls.clear()
-asyncio.run(_sched.apply_snapshot(_sync_cfg, _sync_courses, "test", push=True))
-check("明日推送.无变更不重复推", not _push_calls, str(_push_calls))
-# 有实质变更时仍要推（调课信息不丢）
+asyncio.run(_sched.apply_snapshot(_sync_cfg, _today_course, "test", push=True))
+check("同步推送.今天有课只推今日剩余",
+      len(_push_calls) == 1 and "今日剩余课程" in _push_calls[0][1]
+      and "今日课" in _push_calls[0][1] and "明日课表" not in _push_calls[0][1],
+      str(_push_calls))
+
+# 2) 今天没课 → 推「明日课表」
+_tmr_dow = (_today + timedelta(days=1)).isoweekday()
 _push_calls.clear()
 asyncio.run(_sched.apply_snapshot(_sync_cfg,
-                          [Course("明日课", day=2, start=3, end=4, weeks=list(range(1, 20)))],
-                          "test", push=True))
-check("明日推送.课表变更仍推", len(_push_calls) == 1
-      and "课表变更" in _push_calls[0][1], str(_push_calls))
+      [Course("明日课", day=_tmr_dow, start=1, end=2, weeks=list(range(1, 20)))],
+      "test", push=True))
+check("同步推送.今天没课推明日课表",
+      len(_push_calls) == 1 and "明日课表" in _push_calls[0][1]
+      and "明日课" in _push_calls[0][1], str(_push_calls))
+
+# 3) 明日课表当天已推过 → 再次同步不重复推
+_push_calls.clear()
+asyncio.run(_sched.apply_snapshot(_sync_cfg,
+      [Course("明日课", day=_tmr_dow, start=1, end=2, weeks=list(range(1, 20)))],
+      "test", push=True))
+check("同步推送.明日已推不重复", not _push_calls, str(_push_calls))
+
+# 4) 每晚 22:00 定时任务按天去重：已推过则不再推
+_push_calls.clear()
+asyncio.run(_sched.push_next_day_summary(now=_at("2026-11-09T22:00:00")))
+check("定时推送.明日已推则跳过", not _push_calls, str(_push_calls))
+
+# 清理去重记录，验证定时任务在「未推过」时能推
+with db.get_conn() as conn:
+    conn.execute("DELETE FROM reminders WHERE user_id = 1")
+_push_calls.clear()
+asyncio.run(_sched.push_next_day_summary(now=_at("2026-11-09T22:00:00")))
+check("定时推送.未推则推送明日", len(_push_calls) == 1
+      and "明日课表" in _push_calls[0][0], str(_push_calls))
+
+# 清理本段测试的去重记录，避免影响后续
+with db.get_conn() as conn:
+    conn.execute("DELETE FROM reminders WHERE user_id = 1")
 
 _push_calls.clear()
 _rcfg = load_config()
