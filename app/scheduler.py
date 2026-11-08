@@ -96,27 +96,35 @@ async def apply_snapshot(cfg: dict, courses: list[Course], source: str,
     pushed = []
     if push:
         tomorrow = date.today() + timedelta(days=1)
+        tomorrow_s = tomorrow.isoformat()
         effective = apply_course_overrides(courses, cfg.get("course_overrides"))
         next_courses = courses_on(cfg, effective, tomorrow)
         parts = []
         title = "课表已更新"
-        if changes.get("has_change"):
+        has_change = bool(changes.get("has_change"))
+        if has_change:
             parts.append("【课表变更】\n" + format_changes(cfg, changes))
         elif changes.get("first_sync"):
             parts.append(f"首次同步完成，共 {len(courses)} 门课程。")
-        if cfg.get("push_next_day", True):
+        # 「明日课表 / 明日日程」按天去重：同一天已推过就不再重复（手动反复同步
+        # 也不打扰）；但本次有实质课表变更时照推，确保调课信息不丢。
+        next_day_dedup_key = "next_day"
+        next_day_already_sent = db.reminder_sent(tomorrow_s, next_day_dedup_key)
+        if cfg.get("push_next_day", True) and (has_change or not next_day_already_sent):
             if next_courses:
                 parts.append(f"【明日课表】{tomorrow.strftime('%m月%d日')} {WEEKDAY_CN[tomorrow.isoweekday() - 1]}\n"
                              + "\n".join(course_line(cfg, c) for c in next_courses))
             else:
                 parts.append(f"【明日课表】{tomorrow.strftime('%m月%d日')} 没有课，好好休息。")
-            tomorrow_s = tomorrow.isoformat()
             next_events = [Event.from_dict(d) for d in
                            db.list_events(date_from=tomorrow_s, date_to=tomorrow_s)]
             if next_events:
                 parts.append("【明日日程】\n" + "\n".join(event_line(e) for e in next_events))
-            if not changes.get("has_change"):
+            if not has_change:
                 title = "明日安排提醒" if next_events else "明日课表提醒"
+            # 标记「明日」已推过（仅当确实生成了明日部分时）
+            if not next_day_already_sent:
+                db.mark_reminder(tomorrow_s, next_day_dedup_key)
         if parts:
             pushed = await push_all(cfg, title, "\n\n".join(parts))
     return {"ok": True, "message": summary, "changes": changes, "pushed": pushed}

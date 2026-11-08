@@ -471,6 +471,29 @@ asyncio.run(run_reminders(now=_at("2026-11-13T07:50:00")))
 check("提醒.用户间互不串扰", not _push_calls
       and not db.reminder_sent("2026-11-13", "course:周五隔离课:1:"), str(_push_calls))
 
+# 明日课表推送去重：手动反复同步（无实质变更）不应重复推「明日课表」
+_sync_cfg = load_config()
+_sync_cfg["push"] = {**_sync_cfg.get("push", {}), "bark_enabled": True, "bark_key": "t",
+                     "push_next_day": True, "reminder_enabled": False}
+save_config(_sync_cfg)
+# 清空快照，避免与前面提醒测试的课程产生「变更」干扰；课程设 day=2（明天周二）
+db.save_snapshot([], "test")
+_sync_courses = [Course("明日课", day=2, start=1, end=2, weeks=list(range(1, 20)))]
+_push_calls.clear()
+asyncio.run(_sched.apply_snapshot(_sync_cfg, _sync_courses, "test", push=True))
+check("明日推送.首次同步推送", len(_push_calls) == 1
+      and "明日课表" in _push_calls[0][1] and "明日课" in _push_calls[0][1], str(_push_calls))
+_push_calls.clear()
+asyncio.run(_sched.apply_snapshot(_sync_cfg, _sync_courses, "test", push=True))
+check("明日推送.无变更不重复推", not _push_calls, str(_push_calls))
+# 有实质变更时仍要推（调课信息不丢）
+_push_calls.clear()
+asyncio.run(_sched.apply_snapshot(_sync_cfg,
+                          [Course("明日课", day=2, start=3, end=4, weeks=list(range(1, 20)))],
+                          "test", push=True))
+check("明日推送.课表变更仍推", len(_push_calls) == 1
+      and "课表变更" in _push_calls[0][1], str(_push_calls))
+
 _push_calls.clear()
 _rcfg = load_config()
 _rcfg["push"]["bark_enabled"] = False
