@@ -92,7 +92,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
     out = dict(base)
     for k, v in override.items():
         # 手动调整是整体状态，必须整体替换：否则删除的条目会被旧的合回来
-        if k == "course_overrides":
+        if k in ("course_overrides", "exam_overrides"):
             out[k] = v
         elif isinstance(v, dict) and isinstance(out.get(k), dict):
             out[k] = _deep_merge(out[k], v)

@@ -1384,6 +1384,19 @@
       .today-card {
         padding: 28px;
       }
+      .tomorrow-card {
+        margin-top: 16px;
+        padding: 24px 28px;
+      }
+      .tomorrow-card .day-head {
+        padding-bottom: 16px;
+      }
+      .tomorrow-card .section-kicker {
+        color: var(--sub);
+      }
+      .tomorrow-card .day-head .date {
+        font-size: 22px;
+      }
       .day-head {
         align-items: flex-end;
         margin-bottom: 0;
@@ -2206,6 +2219,9 @@
         .today-card {
           padding: 31px 32px;
         }
+        .tomorrow-card {
+          padding: 26px 32px;
+        }
         .today-card .day-head {
           padding-bottom: 25px;
         }
@@ -2620,6 +2636,9 @@
         background: var(--card);
         box-shadow: none;
       }
+      .tomorrow-card {
+        padding: 20px 23px;
+      }
       .card h2::before,
       .chat-head h2::before {
         display: none;
@@ -2772,6 +2791,9 @@
         .card,
         .today-card {
           padding: 19px;
+        }
+        .tomorrow-card {
+          padding: 18px 19px;
         }
         .today-card .day-head .date,
         .day-head .date {
@@ -3368,6 +3390,7 @@
         .brand-cn { display: none; }
         .header-right .badge { display: none; }
         .card, .today-card { padding: 18px; }
+        .tomorrow-card { padding: 16px 18px; }
         .day-head { align-items: flex-start; }
         .course-time { flex-basis: 88px; }
         .course-time .range { font-size: 13px; }
@@ -3485,6 +3508,17 @@
           </div>
           <div id="todayList"></div>
         </div>
+        <!-- 今日无安排时展示，方便规划明日 -->
+        <div class="card tomorrow-card hidden" id="tomorrowBlock">
+          <div class="day-head">
+            <div>
+              <div class="section-kicker">明日安排</div>
+              <div class="date" id="tomorrowDate"></div>
+            </div>
+            <button class="small" id="addTomorrowEventBtn">添加明日日程</button>
+          </div>
+          <div id="tomorrowList"></div>
+        </div>
       </section>
 
       <!-- 个人日程 -->
@@ -3524,11 +3558,12 @@
           <div class="day-head">
             <span class="date">考试安排</span>
             <span class="muted" id="examSub"></span>
+            <button class="small" id="editExamsBtn">编辑考试</button>
           </div>
           <div id="examList"></div>
         </div>
         <p class="hint" id="examHint">
-          考试数据来自正方教务，随每次同步更新；临时调考以教务系统为准。
+          考试数据来自正方教务，随每次同步更新；点「编辑考试」可手动添加或调整，临时调考以教务系统为准。
         </p>
       </section>
 
@@ -3960,6 +3995,62 @@
       </div>
     </div>
 
+    <!-- 编辑考试 -->
+    <div id="examEditor" class="sheet hidden">
+      <div class="sheet-panel" role="dialog" aria-modal="true" aria-label="编辑考试">
+        <div class="sheet-head">
+          <div>
+            <h2>编辑考试</h2>
+            <p class="hint">手动调整叠加在同步结果上，下次同步不会覆盖。</p>
+          </div>
+          <button class="small" id="closeExamEditorBtn">完成</button>
+        </div>
+        <form id="examForm" class="form-grid">
+          <label class="field full"
+            ><span>考试名称</span>
+            <input id="examName" placeholder="例如 高等数学（期末）" autocomplete="off"
+          /></label>
+          <label class="field"
+            ><span>日期</span>
+            <input id="examDate" type="date" required
+          /></label>
+          <label class="field"
+            ><span>开始时间（选填）</span>
+            <input id="examStart" type="time"
+          /></label>
+          <label class="field"
+            ><span>结束时间（选填）</span>
+            <input id="examEnd" type="time"
+          /></label>
+          <label class="field"
+            ><span>考场</span>
+            <input id="examRoom" placeholder="选填" autocomplete="off"
+          /></label>
+          <label class="field"
+            ><span>座位号</span>
+            <input id="examSeat" placeholder="选填" autocomplete="off"
+          /></label>
+          <label class="field full"
+            ><span>备注</span>
+            <input id="examNote" placeholder="选填，例如 开卷 / 带学生证" autocomplete="off"
+          /></label>
+          <div class="full form-actions" style="margin-top: 0">
+            <button class="primary" type="submit" id="saveExamAdjustBtn">添加考试</button>
+            <button type="button" id="cancelExamAdjustBtn">清空</button>
+          </div>
+        </form>
+        <div class="section-divider"></div>
+        <div class="editor-list-head">
+          <span class="muted" id="examAdjustCount"></span>
+          <span>
+            <button class="small hidden" id="restoreHiddenExamsBtn">恢复隐藏</button>
+            <button class="small" id="resetExamsBtn" disabled>恢复自动考试</button>
+          </span>
+        </div>
+        <div id="examAdjustList"></div>
+      </div>
+    </div>
+
     <!-- 添加 / 编辑日程 -->
     <div id="eventEditor" class="sheet hidden">
       <div class="sheet-panel" role="dialog" aria-modal="true" aria-label="编辑日程">
@@ -4211,9 +4302,43 @@
           events.length ? `${events.length} 项日程` : "",
         ].filter(Boolean).join(" · ");
         $("#todayCount").textContent = countText || "今日无安排";
-        $("#todayList").innerHTML = items.length
+        if (items.length) {
+          $("#todayList").innerHTML = items.map((x) => x.html).join("");
+          $("#tomorrowBlock").classList.add("hidden");
+        } else {
+          $("#todayList").innerHTML =
+            `<div class="empty"><div class="empty-title">今天没有课程和日程</div><div class="empty-sub">可以安心安排自己的时间，或去「日程」页添加一条安排。</div></div>`;
+          renderTomorrow();
+        }
+      }
+
+      // 今日无安排时，在下方展示「明日安排」模块，方便提前规划
+      function renderTomorrow() {
+        const block = $("#tomorrowBlock");
+        const tmCourses = weekData.tomorrow_courses || [];
+        const tmEvents = weekData.tomorrow_events || [];
+        const d = new Date(weekData.tomorrow + "T00:00:00");
+        const dow = WEEKDAY[d.getDay() === 0 ? 6 : d.getDay() - 1];
+        const items = [
+          ...tmEvents.map((e) => ({ sort: e.start || "00:00", html: eventRow(e) })),
+          ...tmCourses.map((c) => ({ sort: c.start_time || "99:99", html: courseRow(c) })),
+        ].sort((a, b) => a.sort.localeCompare(b.sort));
+        $("#tomorrowDate").textContent =
+          `${d.getMonth() + 1} 月 ${d.getDate()} 日 ${dow}`;
+        $("#tomorrowList").innerHTML = items.length
           ? items.map((x) => x.html).join("")
-          : `<div class="empty"><div class="empty-title">今天没有课程和日程</div><div class="empty-sub">可以安心安排自己的时间，或去「日程」页添加一条安排。</div></div>`;
+          : `<div class="empty-sub" style="text-align:center">明天暂时没有课程和日程，点击下方按钮提前安排。</div>`;
+        block.classList.remove("hidden");
+      }
+
+      function openTomorrowEvent() {
+        // 打开日程编辑，日期默认填明天
+        const now = new Date();
+        const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+        const iso = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}`;
+        openEventEditor();
+        $("#eventDate").value = iso;
+        $("#eventEditorTitle").textContent = "添加明日日程";
       }
 
       /* ---------- 个人日程 ---------- */
@@ -4252,6 +4377,7 @@
       }
 
       $("#addEventBtn").addEventListener("click", () => openEventEditor());
+      $("#addTomorrowEventBtn").addEventListener("click", openTomorrowEvent);
       $("#closeEventEditorBtn").addEventListener("click", closeEventEditor);
       $("#eventEditor").addEventListener("click", (e) => {
         if (e.target.id === "eventEditor") closeEventEditor();
@@ -4725,6 +4851,163 @@
           resetCourseForm();
       });
 
+      /* ---------- 编辑考试 ---------- */
+      let examAdjustData = null;
+      let editingExamUid = "";
+
+      function resetExamForm() {
+        editingExamUid = "";
+        $("#examForm").reset();
+        $("#saveExamAdjustBtn").textContent = "添加考试";
+      }
+
+      function openExamEditor() {
+        $("#examEditor").classList.remove("hidden");
+        document.body.style.overflow = "hidden";
+        loadExamEditor();
+      }
+
+      function closeExamEditor() {
+        $("#examEditor").classList.add("hidden");
+        document.body.style.overflow = "";
+        resetExamForm();
+      }
+
+      function fillExamForm(uid) {
+        const x = (examAdjustData?.exams || []).find((e) => e.uid === uid);
+        if (!x) return;
+        editingExamUid = uid;
+        $("#examName").value = x.name || "";
+        $("#examDate").value = x.date || "";
+        $("#examStart").value = x.start || "";
+        $("#examEnd").value = x.end || "";
+        $("#examRoom").value = x.room || "";
+        $("#examSeat").value = x.seat || "";
+        $("#examNote").value = x.note || "";
+        $("#saveExamAdjustBtn").textContent = "保存修改";
+        $(".sheet-panel").scrollTop = 0;
+        $("#examName").focus();
+      }
+
+      async function loadExamEditor() {
+        try {
+          examAdjustData = await api("/api/exams");
+        } catch (e) {
+          toast(e.message, 4000);
+          return;
+        }
+        const list = examAdjustData.exams || [];
+        const counts = [];
+        if (examAdjustData.added_count) counts.push(`手动添加 ${examAdjustData.added_count}`);
+        if (examAdjustData.edited_count) counts.push(`修改 ${examAdjustData.edited_count}`);
+        if (examAdjustData.hidden_count) counts.push(`隐藏 ${examAdjustData.hidden_count}`);
+        $("#examAdjustCount").textContent =
+          `${list.length} 场考试` + (counts.length ? " · " + counts.join(" / ") : "");
+        $("#resetExamsBtn").disabled = !examAdjustData.has_overrides;
+        $("#restoreHiddenExamsBtn").classList.toggle(
+          "hidden",
+          !examAdjustData.hidden_count,
+        );
+        $("#restoreHiddenExamsBtn").textContent = `恢复隐藏（${examAdjustData.hidden_count}）`;
+        const box = $("#examAdjustList");
+        if (!list.length) {
+          box.innerHTML = `<div class="empty">暂无考试，先同步或在上方手动添加</div>`;
+          return;
+        }
+        box.innerHTML = list
+          .map(
+            (e) => `<div class="editor-row${e.finished ? " done" : ""}">
+        <div class="info">
+          <div class="nm">${esc(e.name)}${e.manual ? ' <span class="muted" style="font-size:11px">手动</span>' : ""}</div>
+          <div class="meta">${esc(e.display_time || "")}${e.room ? " · " + esc(e.room) : ""}${e.seat ? " · 座位 " + esc(e.seat) : ""}${e.note ? " · " + esc(e.note) : ""}</div>
+        </div>
+        <div class="acts">
+          <button type="button" data-edit-exam="${esc(e.uid)}">修改</button>
+          <button type="button" data-del-exam="${esc(e.uid)}">${e.manual ? "删除" : "隐藏"}</button>
+        </div>
+      </div>`,
+          )
+          .join("");
+      }
+
+      async function applyExamAction(action, uid, exam) {
+        try {
+          await api("/api/exams", {
+            method: "POST",
+            body: JSON.stringify({
+              action,
+              uid: uid || null,
+              exam: exam || null,
+            }),
+          });
+          const msg = {
+            add: "已添加考试",
+            update: "已保存修改",
+            delete: "已从考试列表移除",
+            restore_hidden: "已恢复隐藏的考试",
+            reset: "已恢复自动考试",
+          };
+          toast(msg[action] || "已更新", 3000);
+          await loadExamEditor();
+          await Promise.all([loadStatus(), loadExams(), loadToday()]);
+          return true;
+        } catch (e) {
+          toast(e.message, 4000);
+          return false;
+        }
+      }
+
+      $("#editExamsBtn").addEventListener("click", openExamEditor);
+      $("#closeExamEditorBtn").addEventListener("click", closeExamEditor);
+      $("#cancelExamAdjustBtn").addEventListener("click", resetExamForm);
+      $("#examEditor").addEventListener("click", (e) => {
+        if (e.target.id === "examEditor") closeExamEditor();
+      });
+      document.addEventListener("keydown", (e) => {
+        if (
+          e.key === "Escape" &&
+          !$("#examEditor").classList.contains("hidden")
+        )
+          closeExamEditor();
+      });
+      $("#examAdjustList").addEventListener("click", (ev) => {
+        const edit = ev.target.closest("[data-edit-exam]");
+        const del = ev.target.closest("[data-del-exam]");
+        if (edit) fillExamForm(edit.dataset.editExam);
+        else if (del) applyExamAction("delete", del.dataset.delExam);
+      });
+      $("#resetExamsBtn").addEventListener("click", () => {
+        if (confirm("恢复自动考试？会清除所有手动添加、修改和隐藏的考试。"))
+          applyExamAction("reset");
+      });
+      $("#restoreHiddenExamsBtn").addEventListener("click", () =>
+        applyExamAction("restore_hidden"),
+      );
+      $("#examForm").addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        const body = {
+          name: $("#examName").value.trim(),
+          date: $("#examDate").value,
+          start: $("#examStart").value,
+          end: $("#examEnd").value,
+          room: $("#examRoom").value.trim(),
+          seat: $("#examSeat").value.trim(),
+          note: $("#examNote").value.trim(),
+        };
+        if (!body.name) {
+          toast("请填写考试名称");
+          $("#examName").focus();
+          return;
+        }
+        if (!body.date) {
+          toast("请选择考试日期");
+          $("#examDate").focus();
+          return;
+        }
+        if (await applyExamAction(editingExamUid ? "update" : "add", editingExamUid, body))
+          resetExamForm();
+      });
+
       /* ---------- 考试 ---------- */
       let examData = null;
       function examRow(e) {
@@ -4770,7 +5053,7 @@
               ? `<div class="empty">门户只提供课表；填写正方账号后，同步会额外拉取考试<br><button class="small" id="examToSettings" style="margin-top:12px">去课表来源填写正方账号</button></div>`
               : `<div class="empty">当前数据源不支持考试查询，请在课表来源接入正方教务<br><button class="small" id="examToSettings" style="margin-top:12px">去课表来源</button></div>`;
           $("#examHint").textContent = examData.supported
-            ? "考试数据来自正方教务，随每次同步更新；临时调考以教务系统为准。"
+            ? "考试数据来自正方教务，随每次同步更新；点「编辑考试」可手动添加或调整，临时调考以教务系统为准。"
             : "";
           return;
         }
@@ -4788,8 +5071,8 @@
           group("即将进行", examData.upcoming) +
           group("已结束", examData.finished);
         $("#examHint").textContent = examData.is_demo
-          ? "当前为演示考试数据，接入正方教务后自动替换。"
-          : "考试数据来自正方教务，随每次同步更新；临时调考以教务系统为准。";
+          ? "当前为演示考试数据，接入正方教务后自动替换；点「编辑考试」可手动添加或调整。"
+          : "考试数据来自正方教务，随每次同步更新；点「编辑考试」可手动添加或调整，临时调考以教务系统为准。";
       }
 
       /* ---------- AI ---------- */
@@ -5780,6 +6063,7 @@
           $("#tab-" + t).classList.toggle("hidden", t !== tab),
         );
         if (tab === "events") loadEvents();
+        if (tab === "today") loadToday();
         if (tab === "rooms" && !roomMeta) loadRooms();
         if (tab === "week")
           loadWeek(viewWeek ?? Math.max(status?.week || 1, 1));

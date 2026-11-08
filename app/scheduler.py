@@ -11,7 +11,8 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from . import db
 from .config import load_config
-from .models import (Course, Event, Exam, apply_course_overrides, current_week,
+from .models import (Course, Event, Exam, apply_course_overrides, apply_exam_overrides,
+                     current_week,
                      diff_courses, event_line, DEFAULT_SECTION_TIMES, DEFAULT_SECTION_ENDS)
 from .providers import get_provider
 from .push import push_all
@@ -214,8 +215,10 @@ async def run_reminders(now: datetime | None = None) -> list[dict]:
 
     exam_snap = db.get_exam_snapshot()
     if exam_snap:
-        for d in exam_snap["exams"]:
-            e = Exam.from_dict(d)
+        day_exams = apply_exam_overrides(
+            [Exam.from_dict(d) for d in exam_snap["exams"]],
+            cfg.get("exam_overrides"))
+        for e in day_exams:
             if e.date != day_s or not e.start:
                 continue
             start_at = _parse_hhmm(day_s, e.start)

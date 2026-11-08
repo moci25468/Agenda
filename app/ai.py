@@ -14,7 +14,10 @@ import httpx
 
 from . import db
 from .config import load_config, zhengfang_configured
-from .models import Course, Event, Exam, apply_course_overrides, current_week, event_line
+from .models import (
+    Course, Event, Exam, apply_course_overrides, apply_exam_overrides,
+    current_week, event_line,
+)
 from .scheduler import WEEKDAY_CN, course_line, courses_on, section_time
 
 try:
@@ -140,7 +143,9 @@ def build_context(cfg: dict, extra_weeks: list[int] | None = None) -> str:
     if exam_snap is None:
         lines.append("考试数据尚未同步；被问到考试安排时说明需要先在设置中同步。")
     else:
-        exams = [Exam.from_dict(d) for d in exam_snap["exams"]]
+        exams = apply_exam_overrides(
+            [Exam.from_dict(d) for d in exam_snap["exams"]],
+            cfg.get("exam_overrides"))
         upcoming = sorted(
             [e for e in exams if not e.is_finished()],
             key=lambda e: (e.date or "9999-12-31", e.start or "23:59"),

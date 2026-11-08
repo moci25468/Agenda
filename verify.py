@@ -111,6 +111,29 @@ check("课表.新增课程", len(_eff) == 2 and _eff[1].name == "自习"
       and _eff[1].uid == _eff[1].source_id, str(_eff[1].to_dict()))
 check("课表.原始快照不变", _auto[0].name == "高数" and _auto[0].room == "1-101")
 
+# 3b-2. 考试手动调整叠加：隐藏 / 修改 / 新增，不改动原始快照
+from app.models import apply_exam_overrides, exam_uid  # noqa: E402
+_auto_exam = [Exam.from_dict({"name": "高等数学", "time": "2026-11-12 09:00-11:00",
+                              "room": "1-101", "seat": "12", "source_id": "e1"})]
+_euid = exam_uid(_auto_exam[0])
+_eff = apply_exam_overrides(_auto_exam, {})
+check("考试.稳定 uid", len(_eff) == 1 and _eff[0].uid == _euid
+      and exam_uid(_eff[0]) == _euid)
+check("考试.隐藏考试", apply_exam_overrides(_auto_exam, {"hidden": [_euid]}) == [])
+_eff = apply_exam_overrides(_auto_exam, {"edited": {_euid: {
+    "room": "2-202", "date": "2026-11-13", "start": "14:00", "end": "16:00"}}})
+check("考试.修改保留原字段", len(_eff) == 1 and _eff[0].room == "2-202"
+      and _eff[0].date == "2026-11-13" and _eff[0].start == "14:00"
+      and _eff[0].name == "高等数学" and _eff[0].seat == "12"
+      and exam_uid(_eff[0]) == _euid, str(_eff[0].to_dict()))
+_eff = apply_exam_overrides(_auto_exam, {"added": [{
+    "name": "英语四级", "date": "2026-12-01", "start": "09:00", "end": "11:20"}]})
+check("考试.新增考试", len(_eff) == 2 and _eff[1].name == "英语四级"
+      and _eff[1].source_id.startswith("manual:")
+      and _eff[1].uid == _eff[1].source_id, str(_eff[1].to_dict()))
+check("考试.原始快照不变", _auto_exam[0].room == "1-101"
+      and _auto_exam[0].date == "2026-11-12")
+
 # 3b. 考试时间解析与状态
 check("考试.标准时间解析",
       parse_exam_time("2026-11-12 09:00-11:00") == ("2026-11-12", "09:00", "11:00"))
@@ -809,6 +832,75 @@ async def http_tests(port: int):
         check("课表.恢复自动课表", fin["count"] == base_count
               and not fin["has_overrides"]
               and not any(c["name"] == "手动自习（改）" for c in fin["courses"]),
+              str(fin)[:200])
+
+        # 手动改考试：校验 → 添加 → 修改 → 隐藏 → 恢复 → 改同步考试 → 重置
+        ex_list = (await ca.get(f"{base}/api/exams")).json()
+        check("考试.列表带稳定标识", len(ex_list.get("exams", [])) >= 2
+              and all(e.get("uid") for e in ex_list.get("exams", [])),
+              str(ex_list)[:180])
+        ex_base = len(ex_list["exams"])
+        sync_exam = next(e for e in ex_list["exams"] if not e["finished"])
+        bad = await ca.post(f"{base}/api/exams", json={
+            "action": "add", "exam": {"name": "  ", "date": "2026-12-01"}})
+        check("考试.空名称被拒", bad.status_code == 400, str(bad.status_code))
+        bad = await ca.post(f"{base}/api/exams", json={
+            "action": "add", "exam": {"name": "测试", "date": "2026-13-40"}})
+        check("考试.非法日期被拒", bad.status_code == 400, str(bad.status_code))
+        bad = await ca.post(f"{base}/api/exams", json={
+            "action": "add", "exam": {"name": "测试", "date": "2026-12-01",
+                                       "start": "10:00", "end": "09:00"}})
+        check("考试.结束早于开始被拒", bad.status_code == 400, str(bad.status_code))
+        add = (await ca.post(f"{base}/api/exams", json={
+            "action": "add", "exam": {"name": "英语四级", "date": "2026-12-14",
+                                       "start": "09:00", "end": "11:20",
+                                       "room": "3-101", "seat": "8"}})).json()
+        lst = (await ca.get(f"{base}/api/exams")).json()
+        manual_ex = next((e for e in lst["exams"] if e["name"] == "英语四级"), None)
+        st_e = (await ca.get(f"{base}/api/status")).json()
+        check("考试.手动添加生效", add.get("ok") and manual_ex is not None
+              and manual_ex["manual"] and len(lst["exams"]) == ex_base + 1
+              and st_e.get("exam_count") == ex_base + 1
+              and manual_ex["display_time"] == "2026-12-14 09:00-11:20",
+              str(manual_ex)[:200])
+        upd = (await ca.post(f"{base}/api/exams", json={
+            "action": "update", "uid": manual_ex["uid"],
+            "exam": {"name": "英语四级（改）", "date": "2026-12-15",
+                     "start": "14:00", "end": "16:00", "room": "3-102"}})).json()
+        lst = (await ca.get(f"{base}/api/exams")).json()
+        check("考试.修改手动考试", upd.get("ok") and any(
+            e["name"] == "英语四级（改）" and e["date"] == "2026-12-15"
+            and e["room"] == "3-102" for e in lst["exams"]),
+            str(lst.get("exams"))[:200])
+        await ca.post(f"{base}/api/exams", json={
+            "action": "delete", "uid": sync_exam["uid"]})
+        lst = (await ca.get(f"{base}/api/exams")).json()
+        check("考试.隐藏同步考试", all(e["uid"] != sync_exam["uid"]
+                                   for e in lst["exams"])
+              and lst["hidden_count"] == 1, str(lst)[:200])
+        await ca.post(f"{base}/api/exams", json={"action": "restore_hidden"})
+        lst = (await ca.get(f"{base}/api/exams")).json()
+        check("考试.恢复隐藏考试", any(e["uid"] == sync_exam["uid"]
+                                   for e in lst["exams"])
+              and lst["hidden_count"] == 0, str(lst)[:160])
+        upd2 = (await ca.post(f"{base}/api/exams", json={
+            "action": "update", "uid": sync_exam["uid"],
+            "exam": {"name": sync_exam["name"], "date": sync_exam["date"],
+                     "start": sync_exam.get("start", ""),
+                     "end": sync_exam.get("end", ""),
+                     "room": "改后考场"}})).json()
+        lst = (await ca.get(f"{base}/api/exams")).json()
+        edited_ex = next((e for e in lst["exams"] if e["uid"] == sync_exam["uid"]),
+                         None)
+        check("考试.修改同步考试保留时间", upd2.get("ok") and edited_ex is not None
+              and edited_ex["room"] == "改后考场"
+              and edited_ex["start"] == sync_exam.get("start"),
+              f"upd={upd2} edited={edited_ex}")
+        await ca.post(f"{base}/api/exams", json={"action": "reset"})
+        fin = (await ca.get(f"{base}/api/exams")).json()
+        check("考试.恢复自动考试", len(fin["exams"]) == ex_base
+              and not fin["has_overrides"]
+              and not any(e["room"] == "改后考场" for e in fin["exams"]),
               str(fin)[:200])
 
         # 个人日程：校验 → 增改查 → 今日汇总 → 状态计数 → 多用户隔离 → 删除

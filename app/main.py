@@ -6,7 +6,7 @@ import json
 import re
 import uuid
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -22,7 +22,8 @@ from .config import (
 )
 from .user_context import current_user_id, get_current_user, set_current_user
 from .models import (
-    Course, Event, Exam, apply_course_overrides, course_uid, current_week, parse_weeks,
+    Course, Event, Exam, apply_course_overrides, apply_exam_overrides,
+    course_uid, current_week, exam_uid, parse_weeks,
     week_dates, DEFAULT_SECTION_TIMES, DEFAULT_SECTION_ENDS,
 )
 from .providers import get_provider
@@ -181,8 +182,10 @@ async def status():
     exam_snap = db.get_exam_snapshot()
     upcoming_exams = []
     if exam_snap:
-        for d in exam_snap["exams"]:
-            e = Exam.from_dict(d)
+        all_exams = apply_exam_overrides(
+            [Exam.from_dict(d) for d in exam_snap["exams"]],
+            cfg.get("exam_overrides"))
+        for e in all_exams:
             if not e.is_finished():
                 upcoming_exams.append(e)
         upcoming_exams.sort(key=lambda e: (e.date or "9999-12-31", e.start or "23:59"))
@@ -210,7 +213,7 @@ async def status():
         "has_source": bool(portal_ok or zf_ok),
         "is_demo": resolved == "mock",
         "course_count": len(all_courses),
-        "exam_count": len(exam_snap["exams"]) if exam_snap else 0,
+        "exam_count": len(all_exams) if exam_snap else 0,
         "upcoming_exam_count": len(upcoming_exams),
         "upcoming_event_count": upcoming_event_count,
         "next_exam": upcoming_exams[0].to_dict() if upcoming_exams else None,
@@ -245,11 +248,16 @@ async def timetable(week: int | None = None):
     today_s = today.isoformat()
     today_events = [d | {"display_time": Event.from_dict(d).display_time()}
                     for d in db.list_events(date_from=today_s, date_to=today_s)]
+    tomorrow = today + timedelta(days=1)
+    tomorrow_s = tomorrow.isoformat()
+    tomorrow_events = [d | {"display_time": Event.from_dict(d).display_time()}
+                       for d in db.list_events(date_from=tomorrow_s, date_to=tomorrow_s)]
     return {
         "week": week,
         "current_week": cur_week,
         "dates": [d.isoformat() for d in dates],
         "today": today.isoformat(),
+        "tomorrow": tomorrow_s,
         "is_demo": (snap or {}).get("source") == "mock",
         "fetched_at": (snap or {}).get("fetched_at"),
         "section_times": {str(i): section_time(cfg, i) for i in range(1, 13)},
@@ -259,6 +267,10 @@ async def timetable(week: int | None = None):
             "start_time": section_time(cfg, c.start), "end_time": section_time(cfg, c.end, end=True),
         } for c in courses_on(cfg, courses, today)],
         "today_events": today_events,
+        "tomorrow_courses": [c.to_dict() | {
+            "start_time": section_time(cfg, c.start), "end_time": section_time(cfg, c.end, end=True),
+        } for c in courses_on(cfg, courses, tomorrow)],
+        "tomorrow_events": tomorrow_events,
     }
 
 
@@ -548,11 +560,12 @@ async def rooms_free(date_s: str = "", start: int = 1, end: int = 2,
 
 @app.get("/api/exams")
 async def exams():
-    """考试安排：未结束的按时间升序在前，已结束的置后。"""
+    """考试安排：未结束的按时间升序在前，已结束的置后（含手动调整）。"""
     cfg = load_config()
     p = cfg.get("provider", {})
     ptype = p.get("type", "mock")
     supported = ptype in ("zhengfang", "mock") or zhengfang_configured(cfg)
+    overrides = _exam_overrides(cfg)
     snap = db.get_exam_snapshot()
     if not snap:
         return {
@@ -561,13 +574,23 @@ async def exams():
             "provider": ptype,
             "is_demo": ptype == "mock",
             "supported": supported,
+            "hidden_count": len(overrides["hidden"]),
+            "edited_count": len(overrides["edited"]),
+            "added_count": len(overrides["added"]),
+            "has_overrides": bool(overrides["hidden"] or overrides["edited"]
+                                  or overrides["added"]),
         }
-    items = [Exam.from_dict(d) for d in snap["exams"]]
+    items = apply_exam_overrides(
+        [Exam.from_dict(d) for d in snap["exams"]], overrides)
     items.sort(key=lambda e: (e.is_finished(), e.date or "9999-12-31",
                               e.start or "23:59", e.name))
+    manual_ids = {str(x.get("source_id") or x.get("uid") or "")
+                  for x in overrides["added"]}
     out = []
     for e in items:
         d = e.to_dict()
+        d["uid"] = exam_uid(e)
+        d["manual"] = d["uid"] in manual_ids
         d["finished"] = e.is_finished()
         d["display_time"] = e.display_time()
         out.append(d)
@@ -583,7 +606,123 @@ async def exams():
         "fetched_at": snap["fetched_at"],
         "is_demo": snap["source"] == "mock",
         "supported": supported,
+        "hidden_count": len(overrides["hidden"]),
+        "edited_count": len(overrides["edited"]),
+        "added_count": len(overrides["added"]),
+        "has_overrides": bool(overrides["hidden"] or overrides["edited"]
+                              or overrides["added"]),
     }
+
+
+def _exam_overrides(cfg: dict) -> dict:
+    ov = cfg.get("exam_overrides") or {}
+    return {
+        "hidden": list(dict.fromkeys(ov.get("hidden") or [])),
+        "edited": dict(ov.get("edited") or {}),
+        "added": [dict(x) for x in (ov.get("added") or []) if isinstance(x, dict)],
+    }
+
+
+def _exam_form(data: dict) -> dict:
+    """校验并规范化手动考试表单。"""
+    name = str(data.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "考试名称不能为空")
+    if len(name) > 100:
+        raise HTTPException(400, "考试名称太长（最多 100 字）")
+    date_s = str(data.get("date") or "").strip()
+    try:
+        date.fromisoformat(date_s)
+    except ValueError:
+        raise HTTPException(400, "日期格式应为 YYYY-MM-DD")
+    start = str(data.get("start") or "").strip()
+    end = str(data.get("end") or "").strip()
+    for t in (start, end):
+        if t and not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", t):
+            raise HTTPException(400, "时间格式应为 HH:MM（24 小时制）")
+    if end and not start:
+        raise HTTPException(400, "填结束时间前请先填开始时间")
+    if start and end and end < start:
+        raise HTTPException(400, "结束时间不能早于开始时间")
+    room = str(data.get("room") or "").strip()
+    seat = str(data.get("seat") or "").strip()
+    if len(room) > 100 or len(seat) > 50:
+        raise HTTPException(400, "考场或座位信息太长")
+    note = str(data.get("note") or "").strip()
+    if len(note) > 500:
+        raise HTTPException(400, "备注太长")
+    return {"name": name, "date": date_s, "start": start, "end": end,
+            "room": room, "seat": seat,
+            "campus": str(data.get("campus") or "").strip(), "note": note}
+
+
+def _save_exam_overrides(cfg: dict, overrides: dict) -> dict:
+    save_config(dict(cfg, exam_overrides=overrides))
+    return {
+        "ok": True,
+        "hidden_count": len(overrides["hidden"]),
+        "edited_count": len(overrides["edited"]),
+        "added_count": len(overrides["added"]),
+        "has_overrides": bool(overrides["hidden"] or overrides["edited"]
+                              or overrides["added"]),
+    }
+
+
+class ExamEditRequest(BaseModel):
+    action: str                 # add | update | delete | restore | restore_hidden | reset
+    uid: str | None = None
+    exam: dict | None = None
+
+
+@app.post("/api/exams")
+async def edit_exam(req: ExamEditRequest):
+    """手动增删改考试：改动单独存进配置，下次同步照常更新原始快照。"""
+    cfg = load_config()
+    overrides = _exam_overrides(cfg)
+    action = (req.action or "").strip()
+    if action == "reset":
+        overrides = {"hidden": [], "edited": {}, "added": []}
+    elif action == "restore_hidden":
+        overrides["hidden"] = []
+    elif action == "add":
+        data = _exam_form(req.exam or {})
+        sid = f"manual:{uuid.uuid4().hex[:12]}"
+        data.update({"source_id": sid, "uid": sid, "time": ""})
+        overrides["added"].append(data)
+    elif action in ("update", "delete", "restore"):
+        uid = (req.uid or "").strip()
+        if not uid:
+            raise HTTPException(400, "缺少考试标识")
+        target = next((item for item in overrides["added"]
+                       if uid in (item.get("uid"), item.get("source_id"))), None)
+        if action == "delete":
+            if target is not None:
+                overrides["added"].remove(target)
+            else:
+                overrides["edited"].pop(uid, None)
+                if uid not in overrides["hidden"]:
+                    overrides["hidden"].append(uid)
+        elif action == "restore":
+            overrides["hidden"] = [x for x in overrides["hidden"] if x != uid]
+            overrides["edited"].pop(uid, None)
+        else:
+            # 以当前生效考试为底，未提交的字段保持原值
+            snap = db.get_exam_snapshot()
+            raw = [Exam.from_dict(d) for d in snap["exams"]] if snap else []
+            current = next((e for e in apply_exam_overrides(raw, overrides)
+                            if exam_uid(e) == uid), None)
+            base = current.to_dict() if current is not None else {}
+            data = _exam_form({**base, **(req.exam or {})})
+            if target is not None:
+                sid = target.get("source_id") or uid
+                target.clear()
+                target.update(data, source_id=sid, uid=sid, time="")
+            else:
+                data.update({"source_id": "", "uid": uid})
+                overrides["edited"][uid] = data
+    else:
+        raise HTTPException(400, "未知操作")
+    return _save_exam_overrides(cfg, overrides)
 
 
 @app.post("/api/sync")

@@ -118,6 +118,7 @@ class Exam:
     campus: str = ""
     note: str = ""
     source_id: str = ""
+    uid: str = ""              # 手动调整用的稳定标识（不参与同步 diff）
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -137,6 +138,7 @@ class Exam:
             campus=d.get("campus", ""),
             note=d.get("note", ""),
             source_id=str(d.get("source_id", "") or ""),
+            uid=str(d.get("uid", "") or ""),
         )
 
     def key(self) -> tuple:
@@ -160,6 +162,52 @@ class Exam:
         elif self.start:
             day = f"{day} {self.start}"
         return day.strip()
+
+
+def exam_uid(e: Exam) -> str:
+    """考试列表里的稳定标识，用于手动增删改；手动添加的考试直接用自身 ID。"""
+    if e.uid:
+        return e.uid
+    if e.source_id.startswith("manual:"):
+        return e.source_id
+    raw = "|".join([e.source_id, e.name, e.date, e.start, e.end, e.room, e.seat])
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def apply_exam_overrides(exams: list[Exam],
+                         overrides: dict | None) -> list[Exam]:
+    """把用户手动添加 / 修改 / 删除的考试叠加到同步快照上。
+
+    与课程一致：同步仍照常更新快照，手动调整单独保存在配置里，
+    不会被下次同步覆盖。
+    """
+    ov = overrides or {}
+    hidden = set(ov.get("hidden") or [])
+    edited = ov.get("edited") or {}
+    out: list[Exam] = []
+    for e in exams:
+        uid = exam_uid(e)
+        if uid in hidden:
+            continue
+        data = edited.get(uid)
+        if isinstance(data, dict):
+            merged = e.to_dict()
+            merged.update(data)
+            merged["source_id"] = e.source_id
+            merged["uid"] = uid
+            out.append(Exam.from_dict(merged))
+        else:
+            e.uid = uid
+            out.append(e)
+    for data in ov.get("added") or []:
+        if isinstance(data, dict):
+            e = Exam.from_dict(data)
+            if not e.source_id:
+                raw = "|".join([e.name, e.date, e.start])
+                e.source_id = f"manual:{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:12]}"
+            e.uid = e.source_id
+            out.append(e)
+    return out
 
 
 @dataclass
