@@ -46,6 +46,17 @@ def _hour_key(day_s: str, hhmm: str) -> str:
     return f"{day_s}T{hour:02d}:00"
 
 
+def _params(lat: float, lon: float) -> dict:
+    """Open-Meteo 请求参数；纬度在前、经度在后，避免写反。"""
+    return {
+        "latitude": round(float(lat), 2),
+        "longitude": round(float(lon), 2),
+        "hourly": "temperature_2m,weather_code,precipitation_probability",
+        "timezone": "Asia/Shanghai",
+        "forecast_days": 2,
+    }
+
+
 async def fetch_hourly(lat: float, lon: float) -> dict:
     """拉取未来 2 天的逐小时天气，返回 {"YYYY-MM-DDTHH:00": {...}}。"""
     key = (round(float(lat), 2), round(float(lon), 2))
@@ -53,13 +64,7 @@ async def fetch_hourly(lat: float, lon: float) -> dict:
     now = time.monotonic()
     if hit and now - hit[0] < (CACHE_TTL if hit[1] else FAIL_TTL):
         return hit[1]
-    params = {
-        "latitude": key[1],
-        "longitude": key[0],
-        "hourly": "temperature_2m,weather_code,precipitation_probability",
-        "timezone": "Asia/Shanghai",
-        "forecast_days": 2,
-    }
+    params = _params(lat, lon)
     try:
         async with httpx.AsyncClient(timeout=8, trust_env=False) as client:
             r = await client.get(API, params=params)

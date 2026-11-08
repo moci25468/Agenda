@@ -494,6 +494,9 @@ save_config(_orig_cfg)
 # 天气模块：WMO 中文、逐小时取数、关闭开关（不走真实网络）
 check("天气.WMO 中文映射", describe_code(0) == "晴" and describe_code(61) == "小雨"
       and describe_code(95) == "雷阵雨")
+_wp = _weather._params(35.96, 120.20)
+check("天气.经纬度参数顺序", _wp["latitude"] == 35.96 and _wp["longitude"] == 120.2,
+      str(_wp))
 _orig_fetch = _weather.fetch_hourly
 
 
