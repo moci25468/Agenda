@@ -28,8 +28,12 @@ from app.config import load_config as _load_cfg, save_config as _save_cfg
 from app import db as _db
 from datetime import date, datetime
 from app.push import push_all, send_wecom, _wecom_url, WECOM_API
-from app.scheduler import run_sync, format_changes, courses_on, section_time, run_reminders, TZ
+from app.scheduler import (run_sync, format_changes, courses_on, section_time,
+                           run_reminders, push_exam_reviews, TZ)
 import app.scheduler as _sched
+import app.weather as _weather
+from app.weather import describe_code, weather_line
+from app.study import advice_for, review_message
 from app.user_context import current_user_id, set_current_user
 from app.config import load_config, save_config
 from app import db
@@ -324,6 +328,14 @@ async def _fake_push(cfg, title, body):
 
 
 _sched.push_all = _fake_push
+_orig_weather = _sched.weather_line
+
+
+async def _fake_weather(cfg, day_s, hhmm):
+    return "上课时天气（青岛黄岛区）：多云 15℃"
+
+
+_sched.weather_line = _fake_weather   # 提醒用例不访问真实天气接口
 _orig_snap = db.get_snapshot()
 _orig_esnap = db.get_exam_snapshot()
 _orig_cfg = load_config()
@@ -344,6 +356,8 @@ db.save_snapshot([c.to_dict() for c in [
     Course("周二课", day=2, start=1, end=2, weeks=[11]),
     Course("周三课", day=3, start=1, end=2, weeks=[11]),
     Course("周四课", day=4, start=1, end=2, weeks=[11]),
+    Course("连堂第一课", day=6, start=1, end=2, weeks=[11]),
+    Course("连堂第二课", day=6, start=3, end=4, weeks=[11]),
 ]], "test")
 _rem_ev = db.add_event({"title": "提醒测试日程", "date": "2026-11-09",
                         "start": "12:00", "end": "13:00", "location": "活动中心"})
@@ -357,6 +371,8 @@ asyncio.run(run_reminders(now=_at("2026-11-09T07:50:00")))
 check("提醒.课前15分钟内推送", len(_push_calls) == 1 and _push_calls[0][0] == "上课提醒"
       and "还有 10 分钟" in _push_calls[0][1] and "提醒测试课" in _push_calls[0][1]
       and "@1-101" in _push_calls[0][1], str(_push_calls))
+check("提醒.上课附当堂天气", len(_push_calls) == 1
+      and "上课时天气（青岛黄岛区）" in _push_calls[0][1], str(_push_calls))
 _push_calls.clear()
 asyncio.run(run_reminders(now=_at("2026-11-09T07:51:00")))
 check("提醒.同一事项只推一次", not _push_calls, str(_push_calls))
@@ -397,6 +413,41 @@ asyncio.run(run_reminders(now=_at("2026-11-11T07:56:00")))
 check("提醒.自定义提前量生效", len(_push_calls) == 1
       and "还有 4 分钟" in _push_calls[0][1], str(_push_calls))
 
+# 连堂课只在第一节提醒里带天气
+_rcfg = load_config()
+_rcfg["push"]["reminder_advance"] = 15
+save_config(_rcfg)
+_push_calls.clear()
+asyncio.run(run_reminders(now=_at("2026-11-14T07:50:00")))
+check("提醒.连堂第一节带天气", len(_push_calls) == 1
+      and "连堂第一课" in _push_calls[0][1] and "天气" in _push_calls[0][1],
+      str(_push_calls))
+_push_calls.clear()
+asyncio.run(run_reminders(now=_at("2026-11-14T09:56:00")))
+check("提醒.连堂第二节不带天气", len(_push_calls) == 1
+      and "连堂第二课" in _push_calls[0][1] and "天气" not in _push_calls[0][1],
+      str(_push_calls))
+
+# 考试复习提醒：考前 15 天推一次，按考试名称给建议
+db.save_exam_snapshot([{"name": "高等数学（上）", "time": "2026-11-24 09:00-11:00",
+                        "room": "1-201", "seat": "8"}], "test")
+_push_calls.clear()
+asyncio.run(run_reminders(now=_at("2026-11-09T07:50:00")))
+check("复习.早八点前不推", not _push_calls, str(_push_calls))
+_push_calls.clear()
+asyncio.run(run_reminders(now=_at("2026-11-09T09:00:00")))
+check("复习.考前15天推送", len(_push_calls) == 1
+      and _push_calls[0][0] == "考试复习提醒"
+      and "高等数学（上）" in _push_calls[0][1]
+      and "还有 15 天" in _push_calls[0][1]
+      and "公式" in _push_calls[0][1], str(_push_calls))
+_push_calls.clear()
+asyncio.run(run_reminders(now=_at("2026-11-09T09:01:00")))
+check("复习.同一场只推一次", not _push_calls, str(_push_calls))
+check("复习.数学建议命中", "公式" in advice_for("高等数学"))
+check("复习.代码建议命中", "代码" in advice_for("数据结构"))
+check("复习.陌生科目有通用建议", advice_for("神秘学导论").strip() != "")
+
 # 用户隔离：999 的配置 / 快照 / 去重记录独立于默认用户
 _ctx999 = set_current_user(999)
 try:
@@ -433,11 +484,32 @@ db.delete_user(999)   # 清掉隔离用户的配置 / 快照 / 提醒记录
 with db.get_conn() as conn:
     conn.execute("DELETE FROM reminders WHERE user_id = 1")
 _sched.push_all = _orig_push
+_sched.weather_line = _orig_weather
 if _orig_snap:
     db.save_snapshot(_orig_snap["courses"], _orig_snap["source"])
 if _orig_esnap:
     db.save_exam_snapshot(_orig_esnap["exams"], _orig_esnap["source"])
 save_config(_orig_cfg)
+
+# 天气模块：WMO 中文、逐小时取数、关闭开关（不走真实网络）
+check("天气.WMO 中文映射", describe_code(0) == "晴" and describe_code(61) == "小雨"
+      and describe_code(95) == "雷阵雨")
+_orig_fetch = _weather.fetch_hourly
+
+
+async def _fake_hourly(lat, lon):
+    return {"2026-11-09T08:00": {"temp": 14.6, "code": 2, "pop": 40}}
+
+
+_weather.fetch_hourly = _fake_hourly
+_wcfg = load_config()
+_wline = asyncio.run(weather_line(_wcfg, "2026-11-09", "08:00"))
+check("天气.生成上课天气行", "青岛黄岛区" in _wline and "多云" in _wline
+      and "15℃" in _wline and "降水概率 40%" in _wline, _wline)
+_wcfg["weather"]["enabled"] = False
+check("天气.关闭后不取数",
+      asyncio.run(weather_line(_wcfg, "2026-11-09", "08:00")) == "")
+_weather.fetch_hourly = _orig_fetch
 
 # 企业微信 / 钉钉群机器人：本地 mock webhook（负载 / 失败 / 日志）
 import threading

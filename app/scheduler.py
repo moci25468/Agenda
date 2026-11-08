@@ -16,6 +16,8 @@ from .models import (Course, Event, Exam, apply_course_overrides, apply_exam_ove
                      diff_courses, event_line, DEFAULT_SECTION_TIMES, DEFAULT_SECTION_ENDS)
 from .providers import get_provider
 from .push import push_all
+from .study import review_message
+from .weather import weather_line
 
 TZ = ZoneInfo("Asia/Shanghai")
 WEEKDAY_CN = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
@@ -170,22 +172,39 @@ def _parse_hhmm(day_s: str, hhmm: str) -> datetime | None:
         return None
 
 
+def _push_ready(cfg: dict) -> bool:
+    """是否至少配置了一个推送通道（Bark / 群机器人）。"""
+    p = cfg.get("push", {})
+    return bool(p.get("bark_enabled")
+                or (p.get("wecom_enabled") and (p.get("wecom_webhook") or "").strip()))
+
+
 async def run_reminders(now: datetime | None = None) -> list[dict]:
     """每分钟检查一次：课程 / 日程 / 考试开始前 N 分钟各推一次。
 
     reminders 表按 (用户, 日期, 事项) 去重，推过就不再推；提前量在设置里调。
+    上课提醒会附带当堂天气；同一天连续两节（上一节结束+1 = 本节开始）只在
+    第一节提醒里带天气。
     """
     cfg = load_config()
     p = cfg.get("push", {})
-    if not p.get("bark_enabled") or not p.get("reminder_enabled", True):
+    if not _push_ready(cfg):
         return []
+    now = now or datetime.now(TZ)
+    now = now.replace(tzinfo=TZ) if now.tzinfo is None else now.astimezone(TZ)
+    pushed: list[dict] = []
+    if p.get("reminder_enabled", True):
+        pushed += await _push_upcoming(cfg, p, now)
+    pushed += await push_exam_reviews(cfg, now)
+    return pushed
+
+
+async def _push_upcoming(cfg: dict, p: dict, now: datetime) -> list[dict]:
     try:
         advance = int(p.get("reminder_advance") or 15)
     except (TypeError, ValueError):
         advance = 15
     advance = max(1, min(advance, 180))
-    now = now or datetime.now(TZ)
-    now = now.replace(tzinfo=TZ) if now.tzinfo is None else now.astimezone(TZ)
     day_s = now.date().isoformat()
     window = timedelta(minutes=advance)
 
@@ -195,7 +214,8 @@ async def run_reminders(now: datetime | None = None) -> list[dict]:
     if snap:
         courses = apply_course_overrides(
             [Course.from_dict(d) for d in snap["courses"]], cfg.get("course_overrides"))
-        for c in courses_on(cfg, courses, now.date()):
+        day_courses = courses_on(cfg, courses, now.date())
+        for c in day_courses:
             start_at = _parse_hhmm(day_s, section_time(cfg, c.start))
             if not start_at:
                 continue
@@ -203,6 +223,13 @@ async def run_reminders(now: datetime | None = None) -> list[dict]:
             teacher = f"（{c.teacher}）" if c.teacher else ""
             body = (f"{c.start}-{c.end}节 {section_time(cfg, c.start)}"
                     f"-{section_time(cfg, c.end, end=True)} {c.name}{room}{teacher}")
+            # 连堂课只在第一节带天气：本节紧接前一节（上一节结束 + 1 = 本节开始）
+            adjacent = any(o is not c and o.end + 1 == c.start for o in day_courses)
+            in_window = start_at - window <= now < start_at
+            if in_window and not adjacent:
+                line = await weather_line(cfg, day_s, section_time(cfg, c.start))
+                if line:
+                    body += "\n" + line
             items.append(("上课提醒", f"course:{c.name}:{c.start}:{c.room}", start_at, body))
 
     for d in db.list_events(date_from=day_s, date_to=day_s):
@@ -238,6 +265,48 @@ async def run_reminders(now: datetime | None = None) -> list[dict]:
         remaining = max(1, int((start_at - now).total_seconds() // 60))
         results = await push_all(cfg, title, f"还有 {remaining} 分钟\n{body}")
         pushed.append({"title": title, "key": key, "results": results})
+    return pushed
+
+
+async def push_exam_reviews(cfg: dict, now: datetime | None = None) -> list[dict]:
+    """考试前 N 天推一次复习提醒（默认 15 天），同一场考试只推一次。
+
+    去重键用考试日期作为 day，跨天轮询也不会重复；早上 8 点后才推，
+    避免半夜响铃。手动添加 / 修改的考试同样生效。
+    """
+    p = cfg.get("push", {})
+    if not p.get("exam_review_enabled", True):
+        return []
+    now = now or datetime.now(TZ)
+    now = now.replace(tzinfo=TZ) if now.tzinfo is None else now.astimezone(TZ)
+    if now.hour < 8:
+        return []
+    try:
+        days = int(p.get("exam_review_days") or 15)
+    except (TypeError, ValueError):
+        days = 15
+    days = max(1, min(days, 60))
+    snap = db.get_exam_snapshot()
+    if not snap:
+        return []
+    exams = apply_exam_overrides(
+        [Exam.from_dict(d) for d in snap["exams"]], cfg.get("exam_overrides"))
+    pushed: list[dict] = []
+    for e in exams:
+        if not e.date:
+            continue
+        try:
+            left = (date.fromisoformat(e.date) - now.date()).days
+        except ValueError:
+            continue
+        if not (1 <= left <= days):
+            continue
+        key = f"review:{e.name}:{e.start}"
+        if db.reminder_sent(e.date, key):
+            continue
+        db.mark_reminder(e.date, key)
+        results = await push_all(cfg, "考试复习提醒", review_message(e, left))
+        pushed.append({"title": "考试复习提醒", "key": key, "results": results})
     return pushed
 
 

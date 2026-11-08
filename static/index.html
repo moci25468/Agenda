@@ -3657,7 +3657,7 @@
         <div class="card">
           <h2>课表数据来源</h2>
           <p class="hint">
-            课表优先使用「融合门户」，门户没接时自动用「正方教务」。后期接入门户后，下次同步会自动以门户数据整体覆盖正方。
+            两套数据源各有取舍：门户只提供课表，但同步的是调课后的最新课表；正方教务提供课表、空教室和考试时间，但课表是排课数据，不包含老师临时调课后的安排。课表优先使用门户，门户没接时自动用正方。
           </p>
           <div class="source-cards">
             <!-- 门户卡片 -->
@@ -3666,7 +3666,7 @@
                 <strong>融合门户（推荐）</strong>
                 <span class="badge" id="portalBadge">未配置</span>
               </div>
-              <p class="hint">扫码登录门户，自动发现并接入课表接口，无需抓包、无需填 Cookie。</p>
+              <p class="hint">扫码登录门户，自动发现并接入课表接口，无需抓包、无需填 Cookie。门户只提供课表数据，但能反映调课后的课表；考试与空教室需要另接正方教务。</p>
               <div class="form-actions">
                 <button class="primary" id="browserLoginBtn">一键扫码登录</button>
                 <button id="browserLoginStopBtn" class="hidden">取消</button>
@@ -3696,7 +3696,7 @@
                 <strong>正方教务（学号+密码）</strong>
                 <span class="badge" id="zfBadge">未配置</span>
               </div>
-              <p class="hint">填学号+密码即可，后端自动模拟登录正方，无需 Cookie。</p>
+              <p class="hint">填学号+密码即可，后端自动模拟登录正方，无需 Cookie。正方提供课表、空教室与考试时间；课表来自教务排课数据，不包含调课后的安排。</p>
               <div class="form-grid">
                 <label class="field full"><span>教务地址</span><input id="zfBase" placeholder="https://jxgl.qut.edu.cn/jwglxt" /></label>
                 <label class="field"><span>学号</span><input id="zfUsername" /></label>
@@ -3831,6 +3831,44 @@
               >
             </div>
           </div>
+        </div>
+
+        <div class="card">
+          <h2>天气与复习提醒</h2>
+          <div class="check">
+            <input type="checkbox" id="weatherEnabled" /><span
+              >上课提醒里附上当堂天气</span
+            >
+          </div>
+          <div class="form-grid">
+            <label class="field"
+              ><span>位置名称</span
+              ><input name="weather.place" placeholder="青岛黄岛区"
+            /></label>
+            <label class="field"
+              ><span>纬度</span
+              ><input name="weather.lat" type="number" step="0.01" placeholder="35.96"
+            /></label>
+            <label class="field"
+              ><span>经度</span
+              ><input name="weather.lon" type="number" step="0.01" placeholder="120.20"
+            /></label>
+          </div>
+          <p class="hint">
+            天气来自 Open-Meteo（免费、无需 Key），默认青岛黄岛区。连续两节连上的课只在第一节提醒里带天气。
+          </p>
+          <div class="check">
+            <input type="checkbox" id="examReviewEnabled" /><span
+              >考试前推送复习提醒</span
+            >
+          </div>
+          <label class="field"
+            ><span>提前天数</span
+            ><input name="push.exam_review_days" type="number" min="1" max="60" placeholder="15"
+          /></label>
+          <p class="hint">
+            按考试名称给出复习建议，同一场考试只提醒一次；早上 8 点后推送。
+          </p>
         </div>
 
         <div class="card">
@@ -5994,6 +6032,8 @@
         $("#barkEnabled").checked = !!cfg.push?.bark_enabled;
         $("#wecomEnabled").checked = !!cfg.push?.wecom_enabled;
         $("#reminderEnabled").checked = cfg.push?.reminder_enabled !== false;
+        $("#weatherEnabled").checked = cfg.weather?.enabled !== false;
+        $("#examReviewEnabled").checked = cfg.push?.exam_review_enabled !== false;
         $("#aiEnabled").checked = !!cfg.ai?.enabled;
       }
       function collectSettings() {
@@ -6008,6 +6048,9 @@
         cfg.push.bark_enabled = $("#barkEnabled").checked;
         cfg.push.wecom_enabled = $("#wecomEnabled").checked;
         cfg.push.reminder_enabled = $("#reminderEnabled").checked;
+        cfg.weather = cfg.weather || {};
+        cfg.weather.enabled = $("#weatherEnabled").checked;
+        cfg.push.exam_review_enabled = $("#examReviewEnabled").checked;
         cfg.ai = cfg.ai || {};
         cfg.ai.enabled = $("#aiEnabled").checked;
         return cfg;

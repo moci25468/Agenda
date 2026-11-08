@@ -75,6 +75,14 @@ DEFAULT_CONFIG = {
         "wecom_webhook": "",        # 企业微信 / 钉钉群机器人完整地址，或只填 key
         "reminder_enabled": True,   # 课程/日程/考试开始前推送
         "reminder_advance": 15,     # 提前多少分钟
+        "exam_review_enabled": True,  # 考试前推送复习提醒
+        "exam_review_days": 15,     # 提前多少天
+    },
+    "weather": {
+        "enabled": True,            # 课前提醒附带上课时天气
+        "place": "青岛黄岛区",       # 展示用位置名称
+        "lat": 35.96,               # 纬度
+        "lon": 120.20,              # 经度
     },
     "ai": {
         "enabled": False,
