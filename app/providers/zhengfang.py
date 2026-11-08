@@ -333,3 +333,173 @@ class ZhengfangProvider(TimetableProvider):
                 self.last_exam_error = str(e)
                 exams = None
             return courses, exams
+
+    # ---------- 空教室查询（cdjy/cdjy_cxKxcdlb，2026-11-08 实测协议） ----------
+    #
+    # 页面：/cdjy/cdjy_cxKxcdlb.html?gnmkdm=N2155（菜单 N2155「查询空闲教室」）
+    # 查询：POST 同路径 ?doType=query，jyfs=0 按周次节次；
+    #       zcd/jcd 为位掩码（第 10 周 → 2^9；第 1-2 节 → 1+2），xqj 为 1-7。
+    # 元数据：POST cdjy_cxQtlb（学期日期范围/最大周次），
+    #         GET  cdjy_cxXqjc（按校区的节次时刻表 + 教学楼列表）。
+
+    ROOM_GNMK = "N2155"
+    # 交互查询复用登录会话，避免每次点击都重新登录（风控只针对连续失败）
+    _room_cookies: dict[tuple, tuple[str, float]] = {}
+    _room_campuses: list[dict] = []
+    ROOM_COOKIE_TTL = 600
+
+    @asynccontextmanager
+    async def _room_session(self):
+        key = (self.base, self.username)
+        cached = self._room_cookies.get(key)
+        if not self.cookie and cached and cached[1] > time.time():
+            async with httpx.AsyncClient(
+                follow_redirects=True, trust_env=False, timeout=30,
+                headers={"User-Agent": UA, "Cookie": cached[0]},
+            ) as client:
+                yield client
+            return
+        async with self._session() as client:
+            yield client
+            if not self.cookie:
+                jar = "; ".join(f"{k}={v}" for k, v in client.cookies.items())
+                if jar:
+                    self._room_cookies[key] = (jar, time.time() + self.ROOM_COOKIE_TTL)
+
+    async def _room_call(self, coro_factory):
+        """缓存会话失效（返回登录页）时清缓存重登一次；新登录失败不重试。"""
+        key = (self.base, self.username)
+        used_cache = bool(not self.cookie and self._room_cookies.get(key)
+                          and self._room_cookies[key][1] > time.time())
+        try:
+            async with self._room_session() as client:
+                return await coro_factory(client)
+        except AuthExpiredError:
+            if not used_cache:
+                raise
+            self._room_cookies.pop(key, None)
+            async with self._room_session() as client:
+                return await coro_factory(client)
+
+    async def fetch_room_meta(self, campus: str = "") -> dict:
+        """校区/教学楼/节次时刻表/学期范围。campus 为空时用第一个校区。"""
+        async def _call(client: httpx.AsyncClient) -> dict:
+            if not self._room_campuses:
+                r = await client.get(
+                    f"{self.base}/cdjy/cdjy_cxKxcdlb.html",
+                    params={"gnmkdm": self.ROOM_GNMK, "layout": "default"}, timeout=30)
+                r.raise_for_status()
+                m = re.search(r'<select[^>]*\bid=["\']xqh_id["\'][^>]*>(.*?)</select>',
+                              r.text, re.S)
+                if not m:
+                    raise AuthExpiredError(LOGIN_EXPIRED_MSG)
+                opts = re.findall(
+                    r'<option[^>]*value=["\']([^"\']+)["\'][^>]*>([^<]+)</option>', m.group(1))
+                self._room_campuses = [
+                    {"id": v.strip(), "name": n.strip()} for v, n in opts if v.strip()]
+            campuses = self._room_campuses
+            xqh = campus or (campuses[0]["id"] if campuses else "05")
+            r = await client.post(
+                f"{self.base}/cdjy/cdjy_cxQtlb.html",
+                headers={"X-Requested-With": "XMLHttpRequest",
+                         "Referer": f"{self.base}/cdjy/cdjy_cxKxcdlb.html"
+                                    f"?gnmkdm={self.ROOM_GNMK}"},
+                data={"xnm": self.year, "xqm": self.term, "xqh_id": xqh, "flag": "0"},
+                timeout=30)
+            r.raise_for_status()
+            try:
+                qtlb = r.json()
+            except ValueError:
+                raise AuthExpiredError(LOGIN_EXPIRED_MSG)
+            dq = qtlb.get("dqzcxq") or {}
+            r = await client.get(
+                f"{self.base}/cdjy/cdjy_cxXqjc.html",
+                params={"xqh_id": xqh, "xnm": self.year, "xqm": self.term},
+                headers={"X-Requested-With": "XMLHttpRequest",
+                         "Referer": f"{self.base}/cdjy/cdjy_cxKxcdlb.html"
+                                    f"?gnmkdm={self.ROOM_GNMK}"},
+                timeout=30)
+            r.raise_for_status()
+            try:
+                xqjc = r.json()
+            except ValueError:
+                raise AuthExpiredError(LOGIN_EXPIRED_MSG)
+            return {
+                "campuses": campuses,
+                "campus": xqh,
+                "buildings": [{"id": str(b.get("JXLDM") or ""),
+                               "name": str(b.get("JXLMC") or "").strip()}
+                              for b in xqjc.get("lhList") or []],
+                "periods": [{"jc": _to_int(p.get("JCMC")),
+                             "time": str(p.get("SJD") or ""),
+                             "segment": str(p.get("RSDMC") or "")}
+                            for p in xqjc.get("jcList") or []],
+                "max_week": _to_int(dq.get("ZDKXZC") or dq.get("ZDZC"), 20),
+                "term_start": str(dq.get("ZXRQ") or ""),
+                "term_end": str(dq.get("ZDRQ") or ""),
+            }
+        return await self._room_call(_call)
+
+    async def fetch_free_rooms(self, week: int, day: int, jc_start: int, jc_end: int,
+                               campus: str = "", building: str = "") -> list[dict]:
+        """查第 week 周星期 day（1-7）第 jc_start..jc_end 节没课的教室。"""
+        async def _call(client: httpx.AsyncClient) -> list[dict]:
+            rooms: list[dict] = []
+            page = 1
+            while True:
+                data = room_query_data(self.year, self.term, week, day, jc_start, jc_end,
+                                       campus, building, page)
+                r = await client.post(
+                    f"{self.base}/cdjy/cdjy_cxKxcdlb.html",
+                    params={"doType": "query", "gnmkdm": self.ROOM_GNMK},
+                    headers={"X-Requested-With": "XMLHttpRequest",
+                             "Referer": f"{self.base}/cdjy/cdjy_cxKxcdlb.html"
+                                        f"?gnmkdm={self.ROOM_GNMK}&layout=default"},
+                    data=data, timeout=30)
+                r.raise_for_status()
+                try:
+                    payload = r.json()
+                except ValueError:
+                    raise AuthExpiredError(LOGIN_EXPIRED_MSG)
+                items = payload.get("items") or []
+                rooms.extend(parse_room(it) for it in items if isinstance(it, dict))
+                total_page = _to_int(payload.get("totalPage"), 1)
+                if page >= total_page or not items or len(rooms) >= 2000:
+                    break
+                page += 1
+            rooms.sort(key=lambda x: (x["building"], x["code"]))
+            return rooms
+        return await self._room_call(_call)
+
+
+def room_query_data(year: str, term: str, week: int, day: int,
+                    jc_start: int, jc_end: int, campus: str, building: str,
+                    page: int = 1) -> dict:
+    """空教室查询表单：zcd/jcd 用位掩码（正方页面 JS 的构造方式，实测）。"""
+    return {
+        "xnm": year, "xqm": term, "jyfs": "0",
+        "zcd": str(1 << (week - 1)),
+        "xqj": str(day),
+        "jcd": str(sum(1 << (j - 1) for j in range(jc_start, jc_end + 1))),
+        "xqh_id": campus, "lh": building,
+        "cdlb_id": "", "cdejlb_id": "", "cdmc": "", "qszws": "", "jszws": "",
+        "cdjylx": "", "gnmkdm": ZhengfangProvider.ROOM_GNMK,
+        "_search": "false", "nd": str(int(time.time() * 1000)),
+        "queryModel.showCount": "500",
+        "queryModel.currentPage": str(page),
+        "queryModel.sortName": "cdbh", "queryModel.sortOrder": "asc",
+    }
+
+
+def parse_room(item: dict) -> dict:
+    """正方空闲场地行 → 前端展示结构（cdbh 常带前导空格）。"""
+    return {
+        "id": str(item.get("cd_id") or ""),
+        "name": str(item.get("cdmc") or "").strip() or "未命名教室",
+        "code": str(item.get("cdbh") or "").strip(),
+        "building": str(item.get("jxlmc") or "").strip(),
+        "campus": str(item.get("xqmc") or "").strip(),
+        "category": str(item.get("cdlbmc") or "").strip(),
+        "seats": _to_int(item.get("zws"), 0),
+        "exam_seats": _to_int(item.get("kszws1"), 0),
+    }

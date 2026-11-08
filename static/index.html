@@ -275,6 +275,49 @@
         color: var(--sub);
         margin: 20px 0 2px;
       }
+      /* 空教室 */
+      .room-filters {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 10px 12px;
+        align-items: end;
+        margin-bottom: 6px;
+      }
+      .room-filters .field span {
+        display: block;
+        margin-bottom: 4px;
+      }
+      .room-filters input,
+      .room-filters select {
+        width: 100%;
+      }
+      .room-query button {
+        width: 100%;
+      }
+      .room-result-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        margin: 10px 0 2px;
+      }
+      .room-result-bar select {
+        max-width: 180px;
+      }
+      .room-row .course-name {
+        font-size: 15px;
+      }
+      @media (max-width: 720px) {
+        .room-filters {
+          grid-template-columns: 1fr 1fr;
+        }
+        .room-query {
+          grid-column: 1 / -1;
+        }
+        .room-query span {
+          display: none;
+        }
+      }
       .exam-group:first-child {
         margin-top: 2px;
       }
@@ -1436,6 +1479,117 @@
       .chat-head {
         padding: 19px 24px;
         border-bottom: 1px solid var(--line);
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+      }
+      .chat-head-actions {
+        display: flex;
+        gap: 8px;
+        flex-shrink: 0;
+      }
+      /* 对话消息操作：编辑 / 重试 */
+      .msg-actions {
+        margin-top: 6px;
+        display: flex;
+        gap: 12px;
+        opacity: 0;
+        transition: opacity 0.15s;
+      }
+      .msg:hover .msg-actions,
+      .msg.editing .msg-actions {
+        opacity: 1;
+      }
+      @media (hover: none) {
+        .msg-actions {
+          opacity: 1;
+        }
+      }
+      .msg-actions button {
+        background: none;
+        border: 0;
+        padding: 0;
+        font-size: 11px;
+        color: var(--sub);
+        cursor: pointer;
+      }
+      .msg-actions button:hover {
+        color: var(--accent);
+      }
+      .msg.user .msg-actions {
+        justify-content: flex-end;
+      }
+      .msg.user .msg-actions button {
+        color: inherit;
+        opacity: 0.75;
+      }
+      .msg.user.editing {
+        background: var(--card);
+        color: var(--text);
+        border: 1px solid var(--line);
+        max-width: 100%;
+      }
+      .msg.editing textarea {
+        width: 100%;
+        min-height: 64px;
+        border: 0;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        line-height: 1.7;
+        resize: vertical;
+        padding: 0;
+      }
+      .msg.editing textarea:focus {
+        outline: none;
+      }
+      .msg-edit-actions {
+        margin-top: 8px;
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+      /* 长期记忆 */
+      .memory-chip {
+        margin-top: 10px;
+        padding: 8px 12px;
+        border: 1px solid var(--line);
+        border-left: 2px solid var(--accent);
+        border-radius: 6px;
+        font-size: 12px;
+        color: var(--sub);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+      }
+      .memory-add {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 8px;
+      }
+      .memory-add input {
+        flex: 1;
+      }
+      .memory-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .memory-row:last-child {
+        border-bottom: 0;
+      }
+      .memory-row .m-content {
+        font-size: 14px;
+      }
+      .memory-row .m-date {
+        font-size: 11px;
+        color: var(--sub);
+        margin-top: 2px;
       }
       .chat-head h2 {
         margin: 0;
@@ -2775,6 +2929,7 @@
         <button data-tab="events">日程</button>
         <button data-tab="week">本周课表</button>
         <button data-tab="exams">考试</button>
+        <button data-tab="rooms">空教室</button>
         <button data-tab="ai">AI 助手</button>
         <button data-tab="source">课表来源</button>
         <button data-tab="admin" id="adminNavBtn" class="hidden">用户管理</button>
@@ -2843,15 +2998,49 @@
         </p>
       </section>
 
+      <!-- 空教室 -->
+      <section id="tab-rooms" class="hidden">
+        <div class="card">
+          <div class="day-head">
+            <span class="date">空教室查询</span>
+            <span class="muted" id="roomSub"></span>
+          </div>
+          <div class="room-filters">
+            <label class="field"><span>日期</span><input type="date" id="roomDate" /></label>
+            <label class="field"><span>开始节次</span><select id="roomStart"></select></label>
+            <label class="field"><span>结束节次</span><select id="roomEnd"></select></label>
+            <label class="field"><span>校区</span><select id="roomCampus"></select></label>
+            <label class="field"><span>教学楼</span><select id="roomBuilding"></select></label>
+            <div class="field room-query"><span>&nbsp;</span><button class="primary" id="roomQueryBtn">查询</button></div>
+          </div>
+          <div class="room-result-bar hidden" id="roomResultBar">
+            <span class="muted" id="roomCount"></span>
+            <select id="roomCategory" aria-label="按类别筛选"></select>
+          </div>
+          <div id="roomResult">
+            <div class="empty"><div class="empty-title">查自习、找空教室</div><div class="empty-sub">选择日期与节次后点击查询，数据来自正方教务，实时更新。</div></div>
+          </div>
+        </div>
+        <p class="hint">
+          需要在「课表来源」配置正方教务学号密码。教室可能被临时借用或用于考试，使用前以现场安排为准。
+        </p>
+      </section>
+
       <!-- AI -->
       <section id="tab-ai" class="hidden">
         <div class="card chat-box">
           <div class="chat-head">
-            <h2>问问知序</h2>
-            <p>回答基于你的课表、考试与个人日程；也可以让我帮你记日程</p>
+            <div>
+              <h2>问问知序</h2>
+              <p>回答基于你的课表、考试与个人日程；对话自动保存，说「记住我…」可形成长期记忆</p>
+            </div>
+            <div class="chat-head-actions">
+              <button class="small" id="memoryBtn">记忆</button>
+              <button class="small" id="chatClearBtn">清空</button>
+            </div>
           </div>
           <div class="chat-msgs" id="chatMsgs">
-            <div class="msg ai">课程、教室、考试和个人日程，都可以直接问我。说「帮我记一下明天下午三点开会」，我会生成确认卡片，一键存入日程。</div>
+            <div class="msg ai">课程、教室、考试和个人日程，都可以直接问我。说「帮我记一下明天下午三点开会」，我会生成确认卡片，一键存入日程；说「记住我喜欢坐前排」，我会长期记住。对话会保存在你的账号里，刷新不丢。</div>
           </div>
           <div class="chips" id="chatChips">
             <button>我明天有什么安排？</button>
@@ -2860,6 +3049,7 @@
             <button>现在是第几周？</button>
             <button>我最近有什么考试？</button>
             <button>帮我记一下：周五晚7点社团聚餐</button>
+            <button>记住：我喜欢坐前排</button>
           </div>
           <div class="chat-input">
             <input
@@ -3263,6 +3453,26 @@
       </div>
     </div>
 
+    <!-- 长期记忆管理 -->
+    <div id="memorySheet" class="sheet hidden">
+      <div class="sheet-panel" role="dialog" aria-modal="true" aria-label="长期记忆">
+        <div class="sheet-head">
+          <div>
+            <h2>长期记忆</h2>
+            <p class="hint">知序记住的长期事实，会注入每次 AI 问答；清空对话不会清除记忆。</p>
+          </div>
+          <button class="small" id="memoryCloseBtn">关闭</button>
+        </div>
+        <div class="memory-add">
+          <input id="memoryInput" placeholder="例如：我喜欢坐前排" autocomplete="off" maxlength="200" />
+          <button class="primary" id="memoryAddBtn">添加</button>
+        </div>
+        <p class="hint" id="memoryCount"></p>
+        <div id="memoryList"></div>
+        <p class="hint" id="memoryError" style="color:var(--fail)"></p>
+      </div>
+    </div>
+
     <!-- 注销账号 -->
     <div id="deleteAccountSheet" class="sheet hidden">
       <div class="sheet-panel" role="dialog" aria-modal="true" aria-label="注销账号">
@@ -3551,6 +3761,142 @@
         } catch (err) {
           toast(err.message, 4000);
         }
+      });
+
+      /* ---------- 空教室 ---------- */
+      let roomMeta = null;
+      let roomCache = [];
+      let roomBusy = false;
+      let roomLastQuery = null;
+
+      function roomFillSelect(sel, options, keepValue) {
+        const prev = keepValue ? sel.value : "";
+        sel.innerHTML = options
+          .map((o) => `<option value="${esc(String(o.v))}">${esc(o.t)}</option>`)
+          .join("");
+        if (prev && options.some((o) => String(o.v) === prev)) sel.value = prev;
+      }
+
+      function roomFillMeta(keepSelections = false) {
+        const m = roomMeta;
+        roomFillSelect($("#roomCampus"),
+          m.campuses.map((c) => ({ v: c.id, t: c.name })), true);
+        $("#roomCampus").value = m.campus;
+        roomFillSelect($("#roomBuilding"),
+          [{ v: "", t: "全部教学楼" }, ...m.buildings.map((b) => ({ v: b.id, t: b.name }))],
+          keepSelections);
+        const periods = m.periods.length
+          ? m.periods
+          : Array.from({ length: 10 }, (_, i) => ({ jc: i + 1, time: "", segment: "" }));
+        const opts = periods.map((p) => ({
+          v: p.jc, t: `第 ${p.jc} 节${p.time ? " · " + p.time.split("-")[0] : ""}`,
+        }));
+        roomFillSelect($("#roomStart"), opts, keepSelections);
+        roomFillSelect($("#roomEnd"), opts, keepSelections);
+        if (!keepSelections) {
+          $("#roomStart").value = "1";
+          $("#roomEnd").value = "2";
+        }
+        if (!$("#roomDate").value) $("#roomDate").value = m.today;
+        if (m.semester_start) {
+          $("#roomDate").min = m.semester_start;
+          const maxD = new Date(m.semester_start + "T00:00:00");
+          maxD.setDate(maxD.getDate() + m.max_week * 7 - 1);
+          const pad = (n) => String(n).padStart(2, "0");
+          $("#roomDate").max =
+            `${maxD.getFullYear()}-${pad(maxD.getMonth() + 1)}-${pad(maxD.getDate())}`;
+        }
+      }
+
+      async function loadRooms(campus = "") {
+        try {
+          roomMeta = await api("/api/rooms/meta" + (campus ? "?campus=" + encodeURIComponent(campus) : ""));
+          roomFillMeta(!!campus);
+          if (!roomLastQuery) await queryRooms();
+        } catch (e) {
+          $("#roomResult").innerHTML =
+            `<div class="empty"><div class="empty-title">空教室暂不可用</div><div class="empty-sub">${esc(e.message)}</div></div>`;
+        }
+      }
+
+      function roomRow(r) {
+        const meta = [r.category, r.seats ? `${r.seats} 座` : "", r.campus]
+          .filter(Boolean).map(esc).join(" · ");
+        return `<div class="course-row room-row">
+    <div class="course-main">
+      <div class="course-name">${esc(r.name)}${r.code && r.code !== r.name ? `<span class="event-tag">${esc(r.code)}</span>` : ""}</div>
+      ${meta ? `<div class="course-meta">${meta}</div>` : ""}
+    </div>
+  </div>`;
+      }
+
+      function renderRooms() {
+        const cat = $("#roomCategory").value;
+        const rooms = cat ? roomCache.filter((r) => r.category === cat) : roomCache;
+        $("#roomCount").textContent = cat
+          ? `${rooms.length} 间（共 ${roomCache.length} 间）`
+          : `共 ${roomCache.length} 间`;
+        if (!rooms.length) {
+          $("#roomResult").innerHTML =
+            `<div class="empty"><div class="empty-title">没有符合条件的空教室</div><div class="empty-sub">换个节次、教学楼或校区试试。</div></div>`;
+          return;
+        }
+        const groups = new Map();
+        rooms.forEach((r) => {
+          const key = r.building || "其他";
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key).push(r);
+        });
+        let html = "";
+        for (const [building, list] of groups) {
+          html += `<div class="exam-group">${esc(building)} · ${list.length} 间</div>`
+            + list.map(roomRow).join("");
+        }
+        $("#roomResult").innerHTML = html;
+      }
+
+      async function queryRooms() {
+        if (roomBusy || !roomMeta) return;
+        const params = new URLSearchParams({
+          date_s: $("#roomDate").value || roomMeta.today,
+          start: $("#roomStart").value || "1",
+          end: $("#roomEnd").value || "2",
+          campus: $("#roomCampus").value || "",
+          building: $("#roomBuilding").value || "",
+        });
+        roomBusy = true;
+        $("#roomQueryBtn").disabled = true;
+        $("#roomQueryBtn").textContent = "查询中…";
+        $("#roomResultBar").classList.add("hidden");
+        $("#roomResult").innerHTML =
+          `<div class="empty"><div class="empty-title">正在查询正方教务…</div><div class="empty-sub">首次查询需要登录教务，约几秒钟。</div></div>`;
+        try {
+          const data = await api("/api/rooms/free?" + params.toString());
+          roomCache = data.rooms;
+          roomLastQuery = data;
+          const cats = [...new Set(roomCache.map((r) => r.category).filter(Boolean))];
+          roomFillSelect($("#roomCategory"),
+            [{ v: "", t: "全部类别" }, ...cats.map((c) => ({ v: c, t: c }))], true);
+          $("#roomSub").textContent =
+            `第 ${data.week} 周 ${WEEKDAY[data.day - 1]} · 第 ${data.start}–${data.end} 节`;
+          $("#roomResultBar").classList.remove("hidden");
+          renderRooms();
+        } catch (e) {
+          $("#roomResult").innerHTML =
+            `<div class="empty"><div class="empty-title">查询失败</div><div class="empty-sub">${esc(e.message)}</div></div>`;
+        } finally {
+          roomBusy = false;
+          $("#roomQueryBtn").disabled = false;
+          $("#roomQueryBtn").textContent = "查询";
+        }
+      }
+
+      $("#roomQueryBtn").addEventListener("click", queryRooms);
+      $("#roomCategory").addEventListener("change", renderRooms);
+      $("#roomCampus").addEventListener("change", (e) => loadRooms(e.target.value));
+      $("#roomStart").addEventListener("change", () => {
+        if (parseInt($("#roomEnd").value, 10) < parseInt($("#roomStart").value, 10))
+          $("#roomEnd").value = $("#roomStart").value;
       });
 
       /* ---------- 周视图 ---------- */
@@ -3923,17 +4269,116 @@
           .map((x) => (x === "" ? "<br>" : /^<(div|pre)/.test(x) ? x : x + "<br>"))
           .join("");
       }
-      function addMsg(role, text, isError = false) {
+      function addMsg(role, text, isError = false, hidx = null) {
         const div = document.createElement("div");
         div.className =
           "msg " +
           (role === "user" ? "user" : "ai" + (isError ? " error" : ""));
         div.textContent = text;
+        if (hidx !== null) {
+          div.dataset.hidx = hidx;
+          attachMsgActions(div, role);
+        }
         $("#chatMsgs").appendChild(div);
         $("#chatMsgs").scrollTop = $("#chatMsgs").scrollHeight;
         return div;
       }
+      function attachMsgActions(div, role) {
+        const bar = document.createElement("div");
+        bar.className = "msg-actions";
+        bar.innerHTML =
+          role === "user"
+            ? '<button data-mact="edit">编辑</button>'
+            : '<button data-mact="retry">重试</button>';
+        div.appendChild(bar);
+      }
       let chatBusy = false;
+      const CHAT_WELCOME =
+        "课程、教室、考试和个人日程，都可以直接问我。说「帮我记一下明天下午三点开会」，我会生成确认卡片，一键存入日程；说「记住我喜欢坐前排」，我会长期记住。对话会保存在你的账号里，刷新不丢。";
+
+      // 编辑重发：从某条消息起截断历史与 DOM，再重新发送
+      function truncateChat(k) {
+        if (k < chatHistory.length) chatHistory.length = k;
+        $$("#chatMsgs .msg[data-hidx]").forEach((d) => {
+          if (parseInt(d.dataset.hidx, 10) >= k) d.remove();
+        });
+      }
+      function startEditMsg(div, hidx) {
+        const original = chatHistory[hidx]?.content;
+        if (original == null) return;
+        div.classList.add("editing");
+        div.innerHTML = `<textarea>${esc(original)}</textarea>
+          <div class="msg-edit-actions">
+            <button class="small" data-edit="no">取消</button>
+            <button class="small primary" data-edit="ok">重发</button>
+          </div>`;
+        const ta = div.querySelector("textarea");
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+      }
+      function cancelEditMsg(div, hidx) {
+        div.classList.remove("editing");
+        div.textContent = chatHistory[hidx]?.content || "";
+        attachMsgActions(div, "user");
+      }
+      function retryFrom(hidx) {
+        const userMsg = chatHistory[hidx - 1];
+        if (!userMsg || userMsg.role !== "user") return;
+        truncateChat(hidx);
+        sendChat(userMsg.content, { resend: true });
+      }
+      $("#chatMsgs").addEventListener("click", (e) => {
+        const btn = e.target.closest("button");
+        if (!btn || chatBusy) return;
+        const div = btn.closest(".msg");
+        if (!div || div.dataset.hidx === undefined) return;
+        const hidx = parseInt(div.dataset.hidx, 10);
+        if (btn.dataset.mact === "edit") startEditMsg(div, hidx);
+        else if (btn.dataset.mact === "retry") retryFrom(hidx);
+        else if (btn.dataset.edit === "no") cancelEditMsg(div, hidx);
+        else if (btn.dataset.edit === "ok") {
+          const text = div.querySelector("textarea").value.trim();
+          if (!text) return;
+          truncateChat(hidx);
+          sendChat(text);
+        }
+      });
+
+      // 对话落库：每轮结束整体回存（客户端为准），刷新后从服务器恢复
+      function persistChat() {
+        api("/api/chat/history", {
+          method: "POST",
+          body: JSON.stringify({ messages: chatHistory }),
+        }).catch(() => {});
+      }
+      async function loadChatHistory() {
+        try {
+          const r = await api("/api/chat/history");
+          const msgs = r.messages || [];
+          if (!msgs.length) return;
+          chatHistory = msgs;
+          $("#chatMsgs").innerHTML = "";
+          msgs.forEach((m, i) => {
+            if (m.role === "user") {
+              addMsg("user", m.content, false, i);
+            } else {
+              const bubble = addMsg("ai", "", false, i);
+              renderAiContent(bubble, m.content, true);
+            }
+          });
+        } catch (e) {}
+      }
+      // 渲染一条 AI 回复：日程标记 → 确认卡片；记忆标记 → 已记住 chips
+      function renderAiContent(bubble, acc, fromHistory = false) {
+        const { text: t1, proposal } = extractEventProposal(acc);
+        const { text: cleanText, memory } = extractMemory(t1);
+        bubble.innerHTML = renderReply(
+          cleanText || (proposal ? "为你整理了一条日程，确认后存入：" : acc));
+        attachMsgActions(bubble, "ai");
+        if (proposal) appendEventProposal(bubble, proposal);
+        if (memory) appendMemoryChip(bubble, memory, fromHistory);
+      }
+
       // AI 回复末尾的 [添加日程] {json} 标记 → 确认卡片，用户点击后才真正保存
       function extractEventProposal(text) {
         const m = text.match(/\[添加日程\]\s*(\{[^\n]*\})/);
@@ -3956,6 +4401,61 @@
           }
         } catch (e) {}
         return { text, proposal: null };
+      }
+      // [记住] {json} 标记 → 自动存入长期记忆，可撤销
+      function extractMemory(text) {
+        const m = text.match(/\[记住\]\s*(\{[^\n]*\})/);
+        if (!m) return { text, memory: null };
+        try {
+          const obj = JSON.parse(m[1]);
+          if (obj && typeof obj.content === "string" && obj.content.trim()) {
+            return {
+              text: text.replace(m[0], "").trim(),
+              memory: obj.content.trim().slice(0, 200),
+            };
+          }
+        } catch (e) {}
+        return { text, memory: null };
+      }
+      async function appendMemoryChip(bubble, content, alreadySaved = false) {
+        const chip = document.createElement("div");
+        chip.className = "memory-chip";
+        chip.innerHTML = `<span>已记住：${esc(content)}</span><button class="small" data-mem="undo">撤销</button>`;
+        bubble.appendChild(chip);
+        let memId = null;
+        if (!alreadySaved) {
+          try {
+            const r = await api("/api/memories", {
+              method: "POST",
+              body: JSON.stringify({ action: "add", content }),
+            });
+            memId = r.memory.id;
+          } catch (e) {
+            chip.innerHTML = `<span>记忆未保存：${esc(e.message)}</span>`;
+            return;
+          }
+        }
+        chip.addEventListener("click", async (e) => {
+          if (!e.target.closest('button[data-mem="undo"]')) return;
+          try {
+            if (!memId) {
+              const r = await api("/api/memories");
+              const found = r.memories.find((m) => m.content === content);
+              if (!found) {
+                chip.innerHTML = "<span>这条记忆已不存在</span>";
+                return;
+              }
+              memId = found.id;
+            }
+            await api("/api/memories", {
+              method: "POST",
+              body: JSON.stringify({ action: "delete", id: memId }),
+            });
+            chip.innerHTML = "<span>已撤销这条记忆</span>";
+          } catch (err) {
+            toast(err.message, 4000);
+          }
+        });
       }
       function appendEventProposal(bubble, p) {
         const card = document.createElement("div");
@@ -3998,13 +4498,16 @@
           }
         });
       }
-      async function sendChat(text) {
+      async function sendChat(text, opts = {}) {
         if (chatBusy) return;
         text = (text || $("#chatInput").value).trim();
         if (!text) return;
         $("#chatInput").value = "";
-        addMsg("user", text);
-        chatHistory.push({ role: "user", content: text });
+        // 重发模式：用户消息已在历史里，只补一条新的 AI 回复
+        if (!opts.resend) {
+          chatHistory.push({ role: "user", content: text });
+          addMsg("user", text, false, chatHistory.length - 1);
+        }
         chatBusy = true;
         $("#chatSend").disabled = true;
         const bubble = addMsg("ai", "正在思考…");
@@ -4052,35 +4555,110 @@
               if (payload.error) throw new Error(payload.error);
               if (payload.delta) {
                 acc += payload.delta;
-                // 流式过程中先隐藏日程标记行，结束后渲染成确认卡片
-                bubble.innerHTML = renderReply(acc.replace(/\[添加日程\][\s\S]*$/, ""));
+                // 流式过程中先隐藏日程/记忆标记行，结束后再渲染成卡片
+                bubble.innerHTML = renderReply(acc.replace(/\[(添加日程|记住)\][\s\S]*$/, ""));
                 $("#chatMsgs").scrollTop = $("#chatMsgs").scrollHeight;
               }
             }
           }
           if (!acc) throw new Error("AI 没有返回内容");
           chatHistory.push({ role: "assistant", content: acc });
-          const { text: cleanText, proposal } = extractEventProposal(acc);
-          bubble.innerHTML = renderReply(
-            cleanText || (proposal ? "为你整理了一条日程，确认后存入：" : acc));
-          if (proposal) appendEventProposal(bubble, proposal);
+          bubble.dataset.hidx = chatHistory.length - 1;
+          renderAiContent(bubble, acc);
         } catch (e) {
           if (acc) {
-            bubble.innerHTML =
-              renderReply(acc) +
-              `<div class="hint" style="color:var(--fail)">（已中断：${esc(e.message)}）</div>`;
             chatHistory.push({ role: "assistant", content: acc });
+            bubble.dataset.hidx = chatHistory.length - 1;
+            renderAiContent(bubble, acc);
+            bubble.innerHTML +=
+              `<div class="hint" style="color:var(--fail)">（已中断：${esc(e.message)}）</div>`;
           } else {
             bubble.classList.add("error");
             bubble.textContent = e.message;
+            // 占位序号：编辑更早的消息时这条错误气泡也会被清掉；重试仍可用
+            bubble.dataset.hidx = chatHistory.length;
+            attachMsgActions(bubble, "ai");
           }
         } finally {
           bubble.classList.remove("streaming", "thinking");
           chatBusy = false;
           $("#chatSend").disabled = false;
           $("#chatMsgs").scrollTop = $("#chatMsgs").scrollHeight;
+          persistChat();
         }
       }
+
+      /* ---------- 清空对话与长期记忆管理 ---------- */
+      $("#chatClearBtn").addEventListener("click", async () => {
+        if (chatBusy) return;
+        if (!chatHistory.length) { toast("对话已经是空的"); return; }
+        if (!confirm("清空全部对话？长期记忆会保留。")) return;
+        try {
+          await api("/api/chat/clear", { method: "POST" });
+          chatHistory = [];
+          $("#chatMsgs").innerHTML = `<div class="msg ai">${CHAT_WELCOME}</div>`;
+          toast("对话已清空");
+        } catch (e) { toast(e.message, 4000); }
+      });
+      async function loadMemories() {
+        const r = await api("/api/memories");
+        $("#memoryCount").textContent = `${r.memories.length} / 50 条`;
+        $("#memoryList").innerHTML = r.memories.length
+          ? r.memories.map((m) => `<div class="memory-row" data-id="${esc(m.id)}">
+              <div>
+                <div class="m-content">${esc(m.content)}</div>
+                <div class="m-date">${esc((m.created_at || "").slice(0, 10))}</div>
+              </div>
+              <button class="small" data-mem-del>删除</button>
+            </div>`).join("")
+          : `<div class="empty"><div class="empty-title">还没有长期记忆</div><div class="empty-sub">对知序说「记住我……」，或在上方手动添加。</div></div>`;
+      }
+      function closeMemorySheet() {
+        $("#memorySheet").classList.add("hidden");
+      }
+      $("#memoryBtn").addEventListener("click", async () => {
+        $("#memorySheet").classList.remove("hidden");
+        $("#memoryError").textContent = "";
+        try { await loadMemories(); } catch (e) { $("#memoryError").textContent = e.message; }
+      });
+      $("#memoryCloseBtn").addEventListener("click", closeMemorySheet);
+      $("#memorySheet").addEventListener("click", (e) => {
+        if (e.target.id === "memorySheet") closeMemorySheet();
+      });
+      $("#memoryAddBtn").addEventListener("click", async () => {
+        const content = $("#memoryInput").value.trim();
+        if (!content) return;
+        $("#memoryError").textContent = "";
+        try {
+          await api("/api/memories", {
+            method: "POST",
+            body: JSON.stringify({ action: "add", content }),
+          });
+          $("#memoryInput").value = "";
+          await loadMemories();
+          toast("已记住");
+        } catch (e) { $("#memoryError").textContent = e.message; }
+      });
+      $("#memoryInput").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") $("#memoryAddBtn").click();
+      });
+      $("#memoryList").addEventListener("click", async (e) => {
+        const btn = e.target.closest("button[data-mem-del]");
+        if (!btn) return;
+        const row = btn.closest(".memory-row");
+        if (!confirm("删除这条记忆？")) return;
+        try {
+          await api("/api/memories", {
+            method: "POST",
+            body: JSON.stringify({ action: "delete", id: row.dataset.id }),
+          });
+          await loadMemories();
+        } catch (err) { toast(err.message, 4000); }
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && !$("#memorySheet").classList.contains("hidden"))
+          closeMemorySheet();
+      });
 
       /* ---------- 日志（已移除独立页，保留空实现避免引用报错） ---------- */
       async function loadLogs() {}
@@ -4296,10 +4874,11 @@
         $$("#nav button").forEach((b) =>
           b.classList.toggle("active", b.dataset.tab === tab),
         );
-        ["today", "events", "week", "exams", "ai", "source", "admin", "settings"].forEach((t) =>
+        ["today", "events", "week", "exams", "rooms", "ai", "source", "admin", "settings"].forEach((t) =>
           $("#tab-" + t).classList.toggle("hidden", t !== tab),
         );
         if (tab === "events") loadEvents();
+        if (tab === "rooms" && !roomMeta) loadRooms();
         if (tab === "week")
           loadWeek(viewWeek ?? Math.max(status?.week || 1, 1));
         if (tab === "exams") loadExams();
@@ -4730,6 +5309,7 @@
           $("#adminNavBtn").classList.toggle("hidden", currentUser.role !== "admin");
           await loadStatus();
           await loadToday();
+          await loadChatHistory();
           pollBrowserLogin();
           if (currentUser.role === "admin") refreshInvites();
           // 首次进入且未配置任何数据源时，引导去「课表来源」

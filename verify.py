@@ -175,6 +175,48 @@ check("日程.提示词模板可渲染", "占位上下文" in _prompt and "[添�
 db.delete_event(_saved_ev["id"])
 check("日程.删除后不可读", db.get_event(_saved_ev["id"]) is None)
 
+# 长期记忆：落库、去重、注入 AI 上下文、删除
+_mem = db.add_memory("我喜欢坐前排")
+check("记忆.落库", bool(_mem["id"]) and not _mem["duplicate"], str(_mem)[:160])
+_mem2 = db.add_memory("我喜欢坐前排")
+check("记忆.重复去重", _mem2["duplicate"] and _mem2["id"] == _mem["id"])
+_ctx_mem = build_context(load_config())
+check("记忆.AI 上下文包含", "我喜欢坐前排" in _ctx_mem and "长期记忆" in _ctx_mem,
+      _ctx_mem[-200:])
+_prompt_mem = SYSTEM_PROMPT.format(context="占位上下文")
+check("记忆.提示词模板可渲染", "[记住]" in _prompt_mem and '"content"' in _prompt_mem)
+check("记忆.删除与幂等", db.delete_memory(_mem["id"])
+      and not db.delete_memory(_mem["id"]))
+check("记忆.删除后上下文不含", "我喜欢坐前排" not in build_context(load_config()))
+
+# 对话短期记忆：整体替换（编辑截断）、读取、清空
+db.replace_chat_history([{"role": "user", "content": "你好"},
+                         {"role": "assistant", "content": "你好呀"}])
+check("对话.落库读取", db.get_chat_history() == [
+    {"role": "user", "content": "你好"},
+    {"role": "assistant", "content": "你好呀"}], str(db.get_chat_history())[:160])
+db.replace_chat_history([{"role": "user", "content": "截断后"}])
+check("对话.整体替换即截断", db.get_chat_history() == [
+    {"role": "user", "content": "截断后"}])
+db.clear_chat_history()
+check("对话.清空", db.get_chat_history() == [])
+
+# 空教室：位掩码参数与响应解析（2026-11-08 正方实测协议）
+from app.providers.zhengfang import room_query_data, parse_room
+_rq = room_query_data("2026", "3", 10, 1, 1, 2, "05", "5011")
+check("空教室.周次节次位掩码",
+      _rq["zcd"] == "512" and _rq["jcd"] == "3" and _rq["xqj"] == "1"
+      and _rq["jyfs"] == "0" and _rq["lh"] == "5011", str(_rq)[:200])
+_rq2 = room_query_data("2026", "3", 1, 7, 9, 11, "", "")
+check("空教室.多节位掩码", _rq2["zcd"] == "1"
+      and _rq2["jcd"] == str(2**8 + 2**9 + 2**10), str(_rq2)[:200])
+_room = parse_room({"cd_id": "x", "cdbh": " C2-4-114", "cdmc": "虚拟仿真教室",
+                    "jxlmc": "环境实验楼", "xqmc": "黄岛校区", "cdlbmc": "实验室",
+                    "zws": "100", "kszws1": "80"})
+check("空教室.响应解析", _room["code"] == "C2-4-114" and _room["seats"] == 100
+      and _room["building"] == "环境实验楼" and _room["campus"] == "黄岛校区",
+      str(_room)[:200])
+
 # 流式回复的 SSE 行解析（OpenAI 兼容格式）
 check("流式.SSE 解析增量",
       _sse_delta('data: {"choices":[{"delta":{"content":"你好"}}]}') == "你好")
@@ -651,6 +693,78 @@ async def http_tests(port: int):
         lst = (await ca.get(f"{base}/api/events")).json()
         check("日程.删除", d.get("ok") and lst.get("count") == 0, str(lst)[:160])
 
+        # 空教室：未配置正方 → 400；参数校验先于数据源检查
+        r = await ca.get(f"{base}/api/rooms/meta")
+        check("空教室.未配置正方被拒", r.status_code == 400
+              and "正方" in r.json().get("detail", ""), str(r.text)[:160])
+        r = await ca.get(f"{base}/api/rooms/free", params={"date_s": today_iso})
+        check("空教室.查询需正方凭证", r.status_code == 400, str(r.text)[:160])
+        r = await ca.get(f"{base}/api/rooms/free", params={"date_s": "11/09"})
+        check("空教室.非法日期被拒", r.status_code == 400, str(r.status_code))
+        r = await ca.get(f"{base}/api/rooms/free",
+                         params={"date_s": today_iso, "start": 5, "end": 2})
+        check("空教室.节次倒置被拒", r.status_code == 400, str(r.status_code))
+        r = await ca.get(f"{base}/api/rooms/free", params={"date_s": "2020-01-01"})
+        check("空教室.开学前被拒", r.status_code == 400, str(r.status_code))
+
+        # 对话落库：读取 → 回存（过滤非法角色）→ 截断式回存 → 清空
+        h = (await ca.get(f"{base}/api/chat/history")).json()
+        check("对话.初始为空", h.get("messages") == [], str(h)[:160])
+        r = await ca.post(f"{base}/api/chat/history", json={"messages": [
+            {"role": "user", "content": "明天有什么课"},
+            {"role": "assistant", "content": "明天有高数"},
+            {"role": "system", "content": "应被过滤"},
+            {"role": "user", "content": "   "}]})
+        check("对话.回存过滤非法角色", r.status_code == 200
+              and r.json().get("count") == 2, str(r.text)[:160])
+        h = (await ca.get(f"{base}/api/chat/history")).json()
+        check("对话.刷新后恢复", [m["content"] for m in h.get("messages", [])]
+              == ["明天有什么课", "明天有高数"], str(h)[:200])
+        await ca.post(f"{base}/api/chat/history", json={"messages": [
+            {"role": "user", "content": "明天有什么课"}]})
+        h = (await ca.get(f"{base}/api/chat/history")).json()
+        check("对话.编辑截断回存", len(h.get("messages", [])) == 1, str(h)[:160])
+        await ca.post(f"{base}/api/chat/clear")
+        h = (await ca.get(f"{base}/api/chat/history")).json()
+        check("对话.清空", h.get("messages") == [], str(h)[:160])
+
+        # 长期记忆：添加 → 去重 → 列表 → 校验 → 多用户隔离 → 删除
+        r = await ca.post(f"{base}/api/memories",
+                          json={"action": "add", "content": "我喜欢坐前排"})
+        mem_id = r.json().get("memory", {}).get("id")
+        check("记忆.添加", r.status_code == 200 and bool(mem_id), str(r.text)[:160])
+        r = await ca.post(f"{base}/api/memories",
+                          json={"action": "add", "content": "我喜欢坐前排"})
+        check("记忆.接口去重", r.json().get("memory", {}).get("duplicate") is True
+              and r.json().get("memory", {}).get("id") == mem_id, str(r.text)[:160])
+        m = (await ca.get(f"{base}/api/memories")).json()
+        check("记忆.列表", len(m.get("memories", [])) == 1, str(m)[:160])
+        r = await ca.post(f"{base}/api/memories", json={"action": "add", "content": " "})
+        check("记忆.空内容被拒", r.status_code == 400, str(r.status_code))
+        r = await ca.post(f"{base}/api/memories",
+                          json={"action": "add", "content": "字" * 201})
+        check("记忆.超长被拒", r.status_code == 400, str(r.status_code))
+        async with _hx.AsyncClient(timeout=30, trust_env=False,
+                                   cookies={"qut_session": token_b}) as cb_mem:
+            m = (await cb_mem.get(f"{base}/api/memories")).json()
+            check("记忆.隔离.他人不可见", m.get("memories") == [], str(m)[:160])
+            r = await cb_mem.post(f"{base}/api/memories",
+                                  json={"action": "delete", "id": mem_id})
+            check("记忆.隔离.不能删他人记忆", r.status_code == 404, str(r.status_code))
+            r = await cb_mem.post(f"{base}/api/memories",
+                                  json={"action": "add", "content": "B 的记忆"})
+            check("记忆.隔离.各自可添加", r.status_code == 200, str(r.text)[:160])
+            await cb_mem.post(f"{base}/api/chat/history", json={"messages": [
+                {"role": "user", "content": "B 的对话"}]})
+        r = await ca.post(f"{base}/api/memories",
+                          json={"action": "delete", "id": mem_id})
+        m = (await ca.get(f"{base}/api/memories")).json()
+        check("记忆.删除", r.status_code == 200 and m.get("memories") == [],
+              str(m)[:160])
+        r = await ca.post(f"{base}/api/memories",
+                          json={"action": "delete", "id": mem_id})
+        check("记忆.重复删除404", r.status_code == 404, str(r.status_code))
+
         # 门户课表 + 正方考试：不切数据源也能识别考试能力
         await ca.post(f"{base}/api/settings", json={"provider": {
             "type": "portal", "zf_base": "http://example.invalid/jwglxt",
@@ -704,7 +818,13 @@ async def http_tests(port: int):
         with db.get_conn() as conn:
             n_ev = conn.execute("SELECT COUNT(*) FROM events WHERE user_id = ?",
                                 (bob_id,)).fetchone()[0]
+            n_chat = conn.execute("SELECT COUNT(*) FROM chat_messages WHERE user_id = ?",
+                                  (bob_id,)).fetchone()[0]
+            n_mem = conn.execute("SELECT COUNT(*) FROM user_memories WHERE user_id = ?",
+                                 (bob_id,)).fetchone()[0]
         check("注销.个人日程一并删除", n_ev == 0, str(n_ev))
+        check("注销.对话与记忆一并删除", n_chat == 0 and n_mem == 0,
+              f"chat={n_chat} mem={n_mem}")
         # 管理员注销时把权限交给最早注册的其他账号
         code2 = (await ca2.post(f"{base}/api/auth/invites")).json().get("code")
         r = await ca2.post(f"{base}/api/auth/register", json={

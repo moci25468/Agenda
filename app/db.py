@@ -119,6 +119,21 @@ def init_db():
             updated_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_events_user_date ON events(user_id, date);
+        CREATE TABLE IF NOT EXISTS chat_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_chat_user ON chat_messages(user_id, id);
+        CREATE TABLE IF NOT EXISTS user_memories (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_mem_user ON user_memories(user_id);
         """)
         # 旧版本迁移：snapshot 只有 id=1 一行；日志表没有 user_id
         cols = {r[1] for r in conn.execute("PRAGMA table_info(snapshot)")}
@@ -292,6 +307,85 @@ def delete_event(event_id: str) -> bool:
         return bool(cur.rowcount)
 
 
+# ---------- AI 对话短期记忆（按用户落库，前端为准整体替换） ----------
+
+CHAT_HISTORY_CAP = 200
+
+
+def get_chat_history(limit: int = CHAT_HISTORY_CAP) -> list[dict]:
+    """最近 limit 条对话，按时间升序返回。"""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT role, content FROM (
+                 SELECT id, role, content FROM chat_messages
+                 WHERE user_id = ? ORDER BY id DESC LIMIT ?
+               ) ORDER BY id""",
+            (_uid(), limit)).fetchall()
+    return [{"role": r["role"], "content": r["content"]} for r in rows]
+
+
+def replace_chat_history(messages: list[dict]):
+    """整体替换当前用户的对话快照（编辑重发后截断也走这里）。"""
+    ts = now_str()
+    with get_conn() as conn:
+        conn.execute("DELETE FROM chat_messages WHERE user_id = ?", (_uid(),))
+        conn.executemany(
+            """INSERT INTO chat_messages (user_id, role, content, created_at)
+               VALUES (?, ?, ?, ?)""",
+            [(_uid(), m["role"], m["content"], ts)
+             for m in messages[-CHAT_HISTORY_CAP:]],
+        )
+
+
+def clear_chat_history():
+    with get_conn() as conn:
+        conn.execute("DELETE FROM chat_messages WHERE user_id = ?", (_uid(),))
+
+
+# ---------- AI 长期记忆（按用户的事实条目） ----------
+
+MEMORY_CAP = 50
+
+
+def list_memories() -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM user_memories WHERE user_id = ? ORDER BY created_at, id",
+            (_uid(),)).fetchall()
+    return [{"id": r["id"], "content": r["content"], "created_at": r["created_at"]}
+            for r in rows]
+
+
+def add_memory(content: str) -> dict:
+    """新增一条记忆；完全重复的内容直接返回已有条目。"""
+    import uuid
+    content = content.strip()
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM user_memories WHERE user_id = ? AND content = ?",
+            (_uid(), content)).fetchone()
+        if row:
+            return {"id": row["id"], "content": row["content"],
+                    "created_at": row["created_at"], "duplicate": True}
+        count = conn.execute(
+            "SELECT COUNT(*) FROM user_memories WHERE user_id = ?", (_uid(),)).fetchone()[0]
+        if count >= MEMORY_CAP:
+            raise ValueError(f"记忆已满（{MEMORY_CAP} 条），请先在 AI 助手的记忆里删除一些")
+        mem_id = uuid.uuid4().hex[:16]
+        ts = now_str()
+        conn.execute(
+            "INSERT INTO user_memories (id, user_id, content, created_at) VALUES (?, ?, ?, ?)",
+            (mem_id, _uid(), content, ts))
+    return {"id": mem_id, "content": content, "created_at": ts, "duplicate": False}
+
+
+def delete_memory(mem_id: str) -> bool:
+    with get_conn() as conn:
+        cur = conn.execute("DELETE FROM user_memories WHERE id = ? AND user_id = ?",
+                           (mem_id, _uid()))
+        return bool(cur.rowcount)
+
+
 # ---------- 用户配置（按用户存的完整 config dict） ----------
 
 def get_user_config(user_id: int) -> dict:
@@ -431,7 +525,8 @@ def delete_user(user_id: int):
     """注销账号：用户行和各表里属于他的数据一起删除，避免留孤儿数据。"""
     with get_conn() as conn:
         for table in ("sessions", "snapshot", "exam_snapshot",
-                      "sync_log", "push_log", "user_config", "events"):
+                      "sync_log", "push_log", "user_config", "events",
+                      "chat_messages", "user_memories"):
             conn.execute(f"DELETE FROM {table} WHERE user_id = ?", (user_id,))
         conn.execute("DELETE FROM invites WHERE used_by = ?", (user_id,))
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))

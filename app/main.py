@@ -480,6 +480,72 @@ async def edit_event(req: EventEditRequest):
     raise HTTPException(400, "未知操作")
 
 
+# ---------- 空教室查询（正方教务，实时） ----------
+
+def _rooms_provider() -> ZhengfangProvider:
+    cfg = load_config()
+    if not zhengfang_configured(cfg):
+        raise HTTPException(400, "空教室查询需要正方教务：请先在「课表来源」填写学号密码")
+    return ZhengfangProvider(cfg)
+
+
+@app.get("/api/rooms/meta")
+async def rooms_meta(campus: str = ""):
+    """校区/教学楼/节次时刻表 + 学期周次范围（日期换算用应用自己的开学日期）。"""
+    from .providers.base import AuthExpiredError
+    provider = _rooms_provider()
+    try:
+        meta = await provider.fetch_room_meta(campus.strip())
+    except AuthExpiredError as e:
+        raise HTTPException(400, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"空教室查询失败: {e}")
+    cfg = load_config()
+    today = date.today()
+    semester_start = cfg.get("semester_start", "")
+    meta.update({
+        "semester_start": semester_start,
+        "current_week": current_week(semester_start, today, 40),
+        "today": today.isoformat(),
+        "today_weekday": today.isoweekday(),
+    })
+    return meta
+
+
+@app.get("/api/rooms/free")
+async def rooms_free(date_s: str = "", start: int = 1, end: int = 2,
+                     campus: str = "", building: str = ""):
+    """某天某节次范围的空教室。日期 → 教学周/星期按开学日期换算。"""
+    from .providers.base import AuthExpiredError
+    date_s = (date_s or date.today().isoformat()).strip()
+    try:
+        d = date.fromisoformat(date_s)
+    except ValueError:
+        raise HTTPException(400, "日期格式应为 YYYY-MM-DD")
+    if not (1 <= start <= end <= 12):
+        raise HTTPException(400, "节次范围无效")
+    cfg = load_config()
+    week = current_week(cfg.get("semester_start", ""), d, 40)
+    if week < 1:
+        raise HTTPException(400, "该日期还没开学，查不了空教室")
+    if week > 30:
+        raise HTTPException(400, "该日期超出本学期范围")
+    provider = _rooms_provider()
+    try:
+        rooms = await provider.fetch_free_rooms(
+            week, d.isoweekday(), start, end, campus.strip(), building.strip())
+    except AuthExpiredError as e:
+        raise HTTPException(400, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"空教室查询失败: {e}")
+    return {"rooms": rooms, "count": len(rooms), "date": date_s,
+            "week": week, "day": d.isoweekday(), "start": start, "end": end}
+
+
 @app.get("/api/exams")
 async def exams():
     """考试安排：未结束的按时间升序在前，已结束的置后。"""
@@ -807,6 +873,69 @@ async def ai_models():
         return {"models": await ai.list_models()}
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, str(e))
+
+
+# ---------- AI 对话落库（短期记忆）与长期记忆 ----------
+
+class ChatHistoryRequest(BaseModel):
+    messages: list[dict] = []
+
+
+@app.get("/api/chat/history")
+async def chat_history():
+    """当前用户的对话快照，刷新/换设备后恢复。"""
+    return {"messages": db.get_chat_history()}
+
+
+@app.post("/api/chat/history")
+async def save_chat_history(req: ChatHistoryRequest):
+    """前端在每轮对话结束、编辑截断后整体回存（客户端为准）。"""
+    cleaned = []
+    for m in req.messages[:db.CHAT_HISTORY_CAP]:
+        role = m.get("role")
+        content = str(m.get("content") or "")[:4000]
+        if role in ("user", "assistant") and content.strip():
+            cleaned.append({"role": role, "content": content})
+    db.replace_chat_history(cleaned)
+    return {"ok": True, "count": len(cleaned)}
+
+
+@app.post("/api/chat/clear")
+async def clear_chat():
+    db.clear_chat_history()
+    return {"ok": True}
+
+
+class MemoryRequest(BaseModel):
+    action: str                 # add | delete
+    content: str = ""
+    id: str | None = None
+
+
+@app.get("/api/memories")
+async def list_memories():
+    return {"memories": db.list_memories()}
+
+
+@app.post("/api/memories")
+async def edit_memory(req: MemoryRequest):
+    action = (req.action or "").strip()
+    if action == "add":
+        content = req.content.strip()
+        if not content:
+            raise HTTPException(400, "记忆内容不能为空")
+        if len(content) > 200:
+            raise HTTPException(400, "记忆太长（最多 200 字）")
+        try:
+            return {"ok": True, "memory": db.add_memory(content)}
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+    if action == "delete":
+        mem_id = (req.id or "").strip()
+        if not mem_id or not db.delete_memory(mem_id):
+            raise HTTPException(404, "记忆不存在")
+        return {"ok": True}
+    raise HTTPException(400, "未知操作")
 
 
 @app.post("/api/ai/test")
