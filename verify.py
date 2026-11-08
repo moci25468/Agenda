@@ -806,6 +806,23 @@ async def http_tests(port: int):
                 bad = await anon_sub.get(
                     f"{base}/api/export/calendar.ics?token=wrong")
                 check("订阅.错误 token 被拒", bad.status_code == 404, str(bad.status_code))
+
+            # 考试也进订阅日历：手动添加一场考试，凭 token 拉取应包含该考试事件
+            await ca.post(f"{base}/api/exams", json={
+                "action": "add",
+                "exam": {"name": "订阅测试考试", "date": "2026-11-20",
+                         "start": "14:00", "end": "16:00", "room": "3-101",
+                         "seat": "8"}})
+            async with _hx.AsyncClient(timeout=30, trust_env=False) as anon_exam:
+                ics_exam = await anon_exam.get(
+                    f"{base}/api/export/calendar.ics?token={stok}")
+                check("订阅.考试进入日历", ics_exam.status_code == 200
+                      and "订阅测试考试" in ics_exam.text
+                      and "考试：订阅测试考试" in ics_exam.text,
+                      str(ics_exam.status_code))
+            # 清理手动添加的考试，避免影响后续用例
+            await ca.post(f"{base}/api/exams", json={"action": "reset"})
+
             # 重新生成后旧 token 失效
             await ca.post(f"{base}/api/export/subscribe/regenerate")
             sinfo2 = (await ca.get(f"{base}/api/export/subscribe")).json()

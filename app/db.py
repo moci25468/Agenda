@@ -209,6 +209,17 @@ def get_exam_snapshot() -> dict | None:
             "fetched_at": row["fetched_at"]}
 
 
+def get_exam_snapshot_for(user_id: int) -> dict | None:
+    """按指定用户读考试快照（供日历订阅等无 Cookie 上下文的场景）。"""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM exam_snapshot WHERE user_id = ?", (user_id,)).fetchone()
+    if not row:
+        return None
+    return {"exams": json.loads(row["data"]), "source": row["source"],
+            "fetched_at": row["fetched_at"]}
+
+
 def save_exam_snapshot(exams: list[dict], source: str):
     with get_conn() as conn:
         conn.execute(

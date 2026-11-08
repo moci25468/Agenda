@@ -312,6 +312,7 @@ async def export_calendar(request: Request):
         cfg = json.loads(json.dumps(_deep_merge(DEFAULT_CONFIG, raw_cfg)))
         cfg["provider"] = normalize_provider(cfg.get("provider", {}))
         courses = ical.courses_for_export(cfg, user_id=user_id)
+        exams = ical.exams_for_export(cfg, user_id=user_id)
     else:
         # 无 token：必须已登录（下载场景）。端点虽在公开白名单（供 webcal 无 Cookie 拉取），
         # 但绝不能回落到全局模板/默认用户，否则会泄露他人课表。
@@ -319,9 +320,10 @@ async def export_calendar(request: Request):
             raise HTTPException(401, "请先登录，或使用有效的订阅链接")
         cfg = load_config()
         courses = ical.courses_for_export(cfg)
-    if not courses:
+        exams = ical.exams_for_export(cfg)
+    if not courses and not exams:
         raise HTTPException(404, "课表尚未同步，请先在「课表来源」页同步数据")
-    body = ical.build_ical(cfg, courses)
+    body = ical.build_ical(cfg, courses, exams)
     school = (cfg.get("school", "") or "课程表").replace("/", "-")
     from urllib.parse import quote
     filename = f"{school}-课表.ics"

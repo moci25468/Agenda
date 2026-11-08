@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 from datetime import date, datetime, timedelta
 
-from .models import Course, current_week, week_dates
+from .models import Course, Exam, current_week, week_dates
 from .scheduler import section_time
 
 TZID = "Asia/Shanghai"
@@ -89,8 +89,48 @@ def _desc(c: Course) -> str:
     return "；".join(p for p in parts if p)
 
 
-def build_ical(cfg: dict, courses: list[Course]) -> str:
-    """生成完整的 iCalendar 文本。"""
+def _exam_desc(e: Exam) -> str:
+    parts = []
+    if e.room:
+        parts.append(f"考场：{e.room}")
+    if e.seat:
+        parts.append(f"座位号：{e.seat}")
+    if e.campus:
+        parts.append(f"校区：{e.campus}")
+    if e.note:
+        parts.append(e.note)
+    return "；".join(p for p in parts if p)
+
+
+def _exam_events(exams: list[Exam]) -> list[dict]:
+    """把考试展开成带具体日期/时间的 VEVENT（考试是固定时间，非按周）。"""
+    events: list[dict] = []
+    for e in exams:
+        if not e.date:
+            continue
+        # 缺省时间兜底：没有起止就全天/占 09:00-11:00，避免生成非法事件
+        start_hhmm = e.start or "09:00"
+        end_hhmm = e.end or start_hhmm
+        try:
+            d = date.fromisoformat(e.date)
+        except ValueError:
+            continue
+        raw = f"exam|{e.name}|{e.date}|{e.start}|{e.end}|{e.room}|{e.seat}"
+        uid = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:24]
+        events.append({
+            "uid": uid,
+            "dtstart": _fmt_dt(d, start_hhmm),
+            "dtend": _fmt_dt(d, end_hhmm),
+            "summary": f"考试：{e.name}",
+            "location": e.room,
+            "description": _exam_desc(e),
+        })
+    events.sort(key=lambda x: (x["dtstart"], x["summary"]))
+    return events
+
+
+def build_ical(cfg: dict, courses: list[Course], exams: list[Exam] | None = None) -> str:
+    """生成完整的 iCalendar 文本（课程 + 可选考试合并到同一日历）。"""
     now = datetime.now()
     dtstamp = now.strftime("%Y%m%dT%H%M%SZ")
     school = cfg.get("school", "") or "课程表"
@@ -111,7 +151,9 @@ def build_ical(cfg: dict, courses: list[Course]) -> str:
         "END:STANDARD",
         "END:VTIMEZONE",
     ]
-    for e in _course_events(cfg, courses):
+    all_events = _course_events(cfg, courses) + _exam_events(exams or [])
+    all_events.sort(key=lambda x: (x["dtstart"], x["summary"]))
+    for e in all_events:
         lines += [
             "BEGIN:VEVENT",
             f"UID:{e['uid']}@zhi-xu",
@@ -141,3 +183,15 @@ def courses_for_export(cfg: dict, user_id: int | None = None) -> list[Course]:
     snap = db.get_snapshot_for(user_id) if user_id is not None else db.get_snapshot()
     courses = [Course.from_dict(d) for d in snap["courses"]] if snap else []
     return apply_course_overrides(courses, cfg.get("course_overrides"))
+
+
+def exams_for_export(cfg: dict, user_id: int | None = None) -> list[Exam]:
+    """从考试快照叠加手动调整（隐藏/修改/新增），供导出接口复用。
+
+    user_id 非空时按指定用户读快照（日历订阅无 Cookie 上下文）。
+    """
+    from . import db
+    from .models import apply_exam_overrides
+    snap = db.get_exam_snapshot_for(user_id) if user_id is not None else db.get_exam_snapshot()
+    exams = [Exam.from_dict(d) for d in snap["exams"]] if snap else []
+    return apply_exam_overrides(exams, cfg.get("exam_overrides"))
