@@ -512,6 +512,13 @@ check("天气.生成上课天气行", "青岛黄岛区" in _wline and "多云" i
 _wcfg["weather"]["enabled"] = False
 check("天气.关闭后不取数",
       asyncio.run(weather_line(_wcfg, "2026-11-09", "08:00")) == "")
+_wcfg["weather"]["enabled"] = True
+_hm = asyncio.run(_weather.hours_map(_wcfg))
+check("天气.逐小时数据可用",
+      _hm.get("2026-11-09T08:00") == {"text": "多云", "temp": 15, "pop": 40},
+      str(_hm))
+_wcfg["weather"]["enabled"] = False
+check("天气.关闭后逐小时为空", asyncio.run(_weather.hours_map(_wcfg)) == {})
 _weather.fetch_hourly = _orig_fetch
 
 # 企业微信 / 钉钉群机器人：本地 mock webhook（负载 / 失败 / 日志）
@@ -790,6 +797,8 @@ async def http_tests(port: int):
     anon = _hx.AsyncClient(timeout=30, trust_env=False)
     check("鉴权.未登录访问被拒",
           (await anon.get(f"{base}/api/status")).status_code == 401)
+    check("鉴权.天气接口未登录被拒",
+          (await anon.get(f"{base}/api/weather")).status_code == 401)
     st = (await anon.get(f"{base}/api/auth/status")).json()
     check("注册.首次需初始化", st.get("needs_setup") is True
           and st.get("invite_required") is False, str(st))
@@ -812,6 +821,11 @@ async def http_tests(port: int):
               str(d.get("list_path")))
 
         tt = (await ca.get(f"{base}/api/timetable")).json()
+        await ca.post(f"{base}/api/settings", json={"weather": {"enabled": False}})
+        w = (await ca.get(f"{base}/api/weather")).json()
+        check("天气.接口关闭返回空表", w.get("ok") is True
+              and w.get("enabled") is False and w.get("hours") == {}, str(w)[:200])
+        await ca.post(f"{base}/api/settings", json={"weather": {"enabled": True}})
         r = await ca.post(f"{base}/api/ingest",
                           json={"payload": {"code": 200, "data": {"courses": tt["courses"]}},
                                 "push": False, "source": "test"})

@@ -34,6 +34,7 @@ from .scheduler import (
     WEEKDAY_CN, apply_snapshot, courses_on, next_run_time, reschedule, run_sync,
     section_time, shutdown_scheduler, start_scheduler,
 )
+from .weather import hours_map
 from .version import get_version, get_full_version
 from . import ical
 
@@ -292,6 +293,17 @@ async def timetable(week: int | None = None):
         } for c in courses_on(cfg, courses, tomorrow)],
         "tomorrow_events": tomorrow_events,
     }
+
+
+@app.get("/api/weather")
+async def get_weather():
+    """今明两天的逐小时天气，供课表卡片展示；接口不可用时返回空表。"""
+    cfg = load_config()
+    w = cfg.get("weather") or {}
+    place = str(w.get("place") or "青岛黄岛区").strip() or "青岛黄岛区"
+    if w.get("enabled") is False:
+        return {"ok": True, "enabled": False, "place": place, "hours": {}}
+    return {"ok": True, "enabled": True, "place": place, "hours": await hours_map(cfg)}
 
 
 @app.get("/api/export/calendar.ics")

@@ -480,6 +480,12 @@
         font-size: 12px;
         color: var(--sub);
       }
+      .mini-course .w {
+        margin-top: 3px;
+        font-size: 11px;
+        color: var(--sub);
+        font-variant-numeric: tabular-nums;
+      }
 
       /* AI 聊天 */
       .chat-box {
@@ -1585,6 +1591,13 @@
         color: #5c695e;
         font-size: 11px;
         line-height: 1.45;
+      }
+      .mini-course .w {
+        margin-top: 3px;
+        color: #5c695e;
+        font-size: 10px;
+        line-height: 1.4;
+        font-variant-numeric: tabular-nums;
       }
 
       /* 问答：减少气泡感，保留清晰对话层级 */
@@ -3555,6 +3568,7 @@
           <button class="small" id="prevWeek">上一周</button>
           <span class="label" id="weekLabel"></span>
           <button class="small" id="nextWeek">下一周</button>
+          <button class="small hidden" id="backTodayBtn">回到本周</button>
           <button class="small" id="editCoursesBtn">编辑课表</button>
           <button class="small" id="exportIcsBtn">导出日历</button>
           <button class="small" id="subscribeIcsBtn">一键订阅</button>
@@ -4249,6 +4263,9 @@
       let status = null,
         weekData = null,
         viewWeek = null,
+        weatherData = null,
+        weatherLoading = false,
+        weekRender = null,
         chatHistory = [];
 
       async function api(path, opts = {}) {
@@ -4666,12 +4683,34 @@
       });
 
       /* ---------- 周视图 ---------- */
-      async function loadWeek(week) {
-        const data = await api("/api/timetable?week=" + week);
-        viewWeek = data.week;
+      async function loadWeather() {
+        if (weatherLoading || weatherData) return;
+        weatherLoading = true;
+        try {
+          weatherData = await api("/api/weather");
+        } catch (e) {
+          weatherData = { enabled: false, hours: {} };
+        } finally {
+          weatherLoading = false;
+        }
+        // 天气比课表晚到时补画一次当前周
+        if (weekRender && viewWeek === weekRender.current_week) renderWeek(weekRender);
+      }
+
+      function weatherAt(iso, hhmm) {
+        if (!weatherData || !weatherData.enabled || !weatherData.hours) return null;
+        const hour = String(hhmm || "").slice(0, 2);
+        if (!hour) return null;
+        return weatherData.hours[`${iso}T${hour}:00`] || null;
+      }
+
+      function renderWeek(data) {
+        weekRender = data;
         $("#weekLabel").textContent =
           `第 ${data.week} 周` +
           (data.week === data.current_week ? "（本周）" : "");
+        const backWeek = Math.max(data.current_week, 1);
+        $("#backTodayBtn").classList.toggle("hidden", data.week === backWeek);
         $("#weekHint").textContent = data.is_demo
           ? "当前为演示课表，接入真实数据源后自动替换。"
           : `数据来源：${data.fetched_at || ""} 同步`;
@@ -4684,7 +4723,7 @@
         for (let s = 11; s <= maxEnd; s += 2)
           blocks.push({ s, e: Math.min(s + 1, maxEnd) });
         const blockOf = (section) => Math.floor((section - 1) / 2);
-        const cellHtml = (day, bi, isToday) => {
+        const cellHtml = (day, bi, isToday, iso) => {
           const list = data.courses
             .filter((c) => c.day === day && blockOf(c.start) === bi)
             .sort(
@@ -4696,13 +4735,20 @@
           return `<div class="week-cell${isToday ? " today" : ""}">${
             list.length
               ? list
-                  .map(
-                    (c) => `<div class="mini-course">
+                  .map((c) => {
+                    const w = weatherAt(iso, c.start_time);
+                    const wline = w
+                      ? `<div class="w">${esc(w.text)}${
+                          w.temp != null ? " " + w.temp + "℃" : ""
+                        }${w.pop >= 30 ? " · " + w.pop + "%" : ""}</div>`
+                      : "";
+                    return `<div class="mini-course">
         <div class="t">${esc(c.start_time)}–${esc(c.end_time)} · ${c.start}-${c.end}节</div>
         <div class="n">${esc(c.name)}</div>
         <div class="r">${esc(c.room || "教室待定")}${c.note ? " · " + esc(c.note) : ""}</div>
-      </div>`,
-                  )
+        ${wline}
+      </div>`;
+                  })
                   .join("")
               : ""
           }</div>`;
@@ -4721,10 +4767,17 @@
             const endTime = data.section_ends[String(b.e)] || "";
             return `<div class="week-period">
         <div class="p">第 ${b.s}-${b.e} 节</div><div class="t">${esc(startTime)}–${esc(endTime)}</div>
-      </div>` + data.dates.map((iso, i) => cellHtml(i + 1, bi, iso === data.today)).join("");
+      </div>` + data.dates.map((iso, i) => cellHtml(i + 1, bi, iso === data.today, iso)).join("");
           })
           .join("");
         $("#weekGrid").innerHTML = `<div></div>${heads}${rows}`;
+      }
+
+      async function loadWeek(week) {
+        const data = await api("/api/timetable?week=" + week);
+        viewWeek = data.week;
+        renderWeek(data);
+        if (data.week === data.current_week) loadWeather();
       }
 
       /* ---------- 编辑课表 ---------- */
@@ -6066,6 +6119,8 @@
           });
           toast("设置已保存");
           await loadStatus();
+          weatherData = null;   // 位置可能改过，重新取一次天气
+          loadWeather();
           if (syncAfter) await doSync();
           else {
             await loadToday();
@@ -6375,6 +6430,9 @@
       $("#nextWeek").addEventListener("click", () =>
         loadWeek(Math.min(status?.total_weeks || 30, viewWeek + 1)),
       );
+      $("#backTodayBtn").addEventListener("click", () =>
+        loadWeek(Math.max(weekRender?.current_week || status?.week || 1, 1)),
+      );
       $("#chatSend").addEventListener("click", () => sendChat());
       $("#chatInput").addEventListener("keydown", (e) => {
         if (e.key === "Enter") sendChat();
@@ -6665,6 +6723,7 @@
           $("#adminNavBtn").classList.toggle("hidden", currentUser.role !== "admin");
           await loadStatus();
           await loadToday();
+          loadWeather();
           await loadChatHistory();
           pollBrowserLogin();
           if (currentUser.role === "admin") refreshInvites();

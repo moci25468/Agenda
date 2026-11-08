@@ -88,6 +88,41 @@ async def fetch_hourly(lat: float, lon: float) -> dict:
     return out
 
 
+def _summary(item: dict | None) -> dict | None:
+    """把一小时的数据整理成前端/推送都能用的短描述。"""
+    if not item:
+        return None
+    out = {"text": describe_code(item.get("code"))}
+    try:
+        out["temp"] = round(float(item["temp"]))
+    except (KeyError, TypeError, ValueError):
+        pass
+    try:
+        out["pop"] = int(float(item["pop"]))
+    except (KeyError, TypeError, ValueError):
+        pass
+    return out
+
+
+async def hours_map(cfg: dict) -> dict:
+    """按小时返回未来两天的天气，键为 'YYYY-MM-DDTHH:00'。"""
+    w = cfg.get("weather") or {}
+    if w.get("enabled") is False:
+        return {}
+    try:
+        lat = float(w.get("lat") or 35.96)
+        lon = float(w.get("lon") or 120.20)
+    except (TypeError, ValueError):
+        return {}
+    hourly = await fetch_hourly(lat, lon)
+    out: dict[str, dict] = {}
+    for key, item in hourly.items():
+        summary = _summary(item)
+        if summary:
+            out[str(key)] = summary
+    return out
+
+
 async def weather_line(cfg: dict, day_s: str, hhmm: str) -> str:
     """生成「上课时天气（青岛黄岛区）：多云 15℃，降水概率 40%」这样一行。
 
@@ -102,23 +137,16 @@ async def weather_line(cfg: dict, day_s: str, hhmm: str) -> str:
     except (TypeError, ValueError):
         return ""
     hourly = await fetch_hourly(lat, lon)
-    item = hourly.get(_hour_key(day_s, hhmm))
-    if not item:
+    summary = _summary(hourly.get(_hour_key(day_s, hhmm)))
+    if not summary:
         return ""
-    parts = [describe_code(item.get("code"))]
-    if item.get("temp") is not None:
-        try:
-            parts.append(f"{round(float(item['temp']))}℃")
-        except (TypeError, ValueError):
-            pass
+    parts = [summary["text"]]
+    if "temp" in summary:
+        parts.append(f"{summary['temp']}℃")
     place = str(w.get("place") or "青岛黄岛区").strip() or "青岛黄岛区"
     line = f"上课时天气（{place}）：" + " ".join(parts)
-    try:
-        pop = float(item.get("pop"))
-    except (TypeError, ValueError):
-        pop = -1
-    if pop >= 30:
-        line += f"，降水概率 {int(pop)}%"
+    if summary.get("pop", -1) >= 30:
+        line += f"，降水概率 {summary['pop']}%"
     return line
 
 
