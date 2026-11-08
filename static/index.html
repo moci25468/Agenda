@@ -598,6 +598,80 @@
       .msg.ai .md-li.num::before {
         content: none;
       }
+      /* Markdown 增强：段落 / 表格 / 引用 / 分隔线 / 代码块 */
+      .msg.ai .md-h.lv1 { font-size: 16px; }
+      .msg.ai .md-h.lv2 { font-size: 15px; }
+      .msg.ai .md-h.lv3,
+      .msg.ai .md-h.lv4 { font-size: 14px; color: var(--sub); }
+      .msg.ai .md-p { margin: 4px 0; }
+      .msg.ai .md-p:first-child { margin-top: 0; }
+      .msg.ai .md-quote {
+        margin: 6px 0;
+        padding: 2px 0 2px 10px;
+        border-left: 3px solid var(--line);
+        color: var(--sub);
+      }
+      .msg.ai .md-hr {
+        border: 0;
+        border-top: 1px solid var(--line);
+        margin: 10px 0;
+      }
+      .msg.ai .md-table {
+        width: 100%;
+        margin: 8px 0;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+      .msg.ai .md-table th,
+      .msg.ai .md-table td {
+        padding: 5px 9px;
+        border: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+      }
+      .msg.ai .md-table th {
+        background: var(--bg);
+        font-weight: 600;
+      }
+      .msg.ai .md-table tbody tr:nth-child(even) td {
+        background: rgba(127, 127, 127, 0.04);
+      }
+      .msg.ai .md-code {
+        margin: 8px 0;
+        border-radius: 8px;
+        overflow: hidden;
+        background: #1f2430;
+      }
+      .msg.ai .md-code-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 4px 10px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        color: #9aa4b2;
+        font-size: 11px;
+      }
+      .msg.ai .md-code-head button {
+        background: none;
+        border: 0;
+        padding: 0;
+        color: inherit;
+        font-size: 11px;
+        cursor: pointer;
+      }
+      .msg.ai .md-code-head button:hover { color: #fff; }
+      .msg.ai .md-code pre {
+        margin: 0;
+        border-radius: 0;
+        background: transparent;
+      }
+      .msg.ai a {
+        color: var(--accent);
+        text-decoration: underline;
+        text-underline-offset: 2px;
+      }
+      .msg.ai del { opacity: 0.6; }
+      .msg.ai em { font-style: italic; }
       .chips {
         display: flex;
         gap: 8px;
@@ -4276,54 +4350,120 @@
       }
 
       /* ---------- AI ---------- */
+      // 行内 Markdown（输入已整体转义）：代码 / 粗体 / 斜体 / 删除线 / 链接
       function renderInline(s) {
-        return s
-          .replace(/`([^`\n]+)`/g, "<code>$1</code>")
-          .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+        const stash = [];
+        let t = s.replace(/`([^`\n]+)`/g, (_, code) => {
+          stash.push(`<code>${code}</code>`);
+          return `\u0001${stash.length - 1}\u0001`;
+        });
+        t = t
+          .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+          .replace(/~~([^~\n]+)~~/g, "<del>$1</del>")
+          .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>")
+          .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (m, label, url) => {
+            // 只允许 http/https/mailto，避免 javascript: 之类的链接注入
+            if (!/^(https?:\/\/|mailto:)/i.test(url.replace(/&amp;/g, "&"))) return m;
+            // esc 只转义 & < >，引号需单独处理，防止提前闭合 href 属性
+            const safe = url.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+            return `<a href="${safe}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+          });
+        return t.replace(/\u0001(\d+)\u0001/g, (_, i) => stash[Number(i)] || "");
       }
-      // 轻量 Markdown：标题 / 列表 / 粗体 / 行内代码 / 代码块，先转义再渲染
+      // 流式输出时先隐藏未写完的动作标记，结束后再渲染成卡片
+      function stripPendingMarkers(s) {
+        return (s || "").replace(/\[(添加日程|记住|查空教室)\][\s\S]*$/, "");
+      }
+      // 轻量 Markdown：标题 / 列表 / 表格 / 引用 / 分隔线 / 代码块，先整体转义再渲染
       function renderReply(raw) {
-        const src = esc(raw);
+        const lines = esc(raw || "").split("\n");
         const out = [];
-        let inCode = false;
-        const codeBuf = [];
-        for (const line of src.split("\n")) {
-          if (line.trimStart().startsWith("```")) {
+        let para = [];
+        let inCode = false, codeLang = "", codeBuf = [];
+        const flushPara = () => {
+          if (!para.length) return;
+          out.push(`<div class="md-p">${para.map(renderInline).join("<br>")}</div>`);
+          para = [];
+        };
+        const isTableSep = (l) =>
+          /^[\s|:-]+$/.test(l) && l.includes("-") && l.includes("|");
+        const isRow = (l) => l.includes("|") && l.trim().length > 1;
+        const cells = (l) => {
+          let v = l.trim();
+          if (v.startsWith("|")) v = v.slice(1);
+          if (v.endsWith("|")) v = v.slice(0, -1);
+          return v.split("|").map((x) => renderInline(x.trim()));
+        };
+        const codeBlock = () => {
+          const head = `<div class="md-code-head"><span>${codeLang || "代码"}</span><button type="button" data-mact="copy-code">复制</button></div>`;
+          return `<div class="md-code">${head}<pre><code>${codeBuf.join("\n")}</code></pre></div>`;
+        };
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+          const trimmed = line.trim();
+          if (trimmed.startsWith("```")) {
+            flushPara();
             if (inCode) {
-              out.push(`<pre><code>${codeBuf.join("\n")}</code></pre>`);
-              codeBuf.length = 0;
+              out.push(codeBlock());
+              codeBuf = [];
               inCode = false;
             } else {
               inCode = true;
+              codeLang = trimmed.slice(3).trim();
             }
             continue;
           }
-          if (inCode) {
-            codeBuf.push(line);
+          if (inCode) { codeBuf.push(line); continue; }
+          if (!trimmed) { flushPara(); continue; }
+          // 表格：当前行是表头，且下一行是 | --- | --- | 分隔行
+          if (isRow(line) && i + 1 < lines.length && isTableSep(lines[i + 1])) {
+            flushPara();
+            const head = `<thead><tr>${cells(line).map((c) => `<th>${c}</th>`).join("")}</tr></thead>`;
+            const body = [];
+            i += 2;
+            while (i < lines.length && isRow(lines[i]) && !isTableSep(lines[i])) {
+              body.push(`<tr>${cells(lines[i]).map((c) => `<td>${c}</td>`).join("")}</tr>`);
+              i++;
+            }
+            i--;
+            out.push(`<table class="md-table">${head}<tbody>${body.join("")}</tbody></table>`);
             continue;
           }
-          const h = line.match(/^#{1,4}\s+(.+)$/);
+          const h = line.match(/^\s*(#{1,4})\s+(.+)$/);
           if (h) {
-            out.push(`<div class="md-h">${renderInline(h[1])}</div>`);
+            flushPara();
+            out.push(`<div class="md-h lv${h[1].length}">${renderInline(h[2])}</div>`);
             continue;
           }
-          const ul = line.match(/^\s*[-*]\s+(.+)$/);
+          if (/^\s*([-*_])\s*\1\s*\1[\s-]*$/.test(line) || /^\s*-{3,}\s*$/.test(line)) {
+            flushPara();
+            out.push('<hr class="md-hr">');
+            continue;
+          }
+          // esc 后 > 会变成 &gt;，两种写法都要识别
+          const quote = line.match(/^\s*(?:>|&gt;)\s?(.*)$/);
+          if (quote) {
+            flushPara();
+            out.push(`<div class="md-quote">${renderInline(quote[1])}</div>`);
+            continue;
+          }
+          const ul = line.match(/^\s*[-*+]\s+(.+)$/);
           if (ul) {
+            flushPara();
             out.push(`<div class="md-li">${renderInline(ul[1])}</div>`);
             continue;
           }
           const ol = line.match(/^\s*(\d+)[.)]\s+(.+)$/);
           if (ol) {
+            flushPara();
             out.push(`<div class="md-li num">${ol[1]}. ${renderInline(ol[2])}</div>`);
             continue;
           }
-          out.push(line ? renderInline(line) : "");
+          para.push(line);
         }
-        if (inCode && codeBuf.length)
-          out.push(`<pre><code>${codeBuf.join("\n")}</code></pre>`);
-        return out
-          .map((x) => (x === "" ? "<br>" : /^<(div|pre)/.test(x) ? x : x + "<br>"))
-          .join("");
+        flushPara();
+        if (inCode && codeBuf.length) out.push(codeBlock());
+        return out.join("");
       }
       function addMsg(role, text, isError = false, hidx = null) {
         const div = document.createElement("div");
@@ -4345,8 +4485,28 @@
         bar.innerHTML =
           role === "user"
             ? '<button data-mact="edit">编辑</button>'
-            : '<button data-mact="retry">重试</button>';
+            : '<button data-mact="copy">复制</button><button data-mact="retry">重试</button>';
         div.appendChild(bar);
+      }
+      function copyText(s) {
+        if (!s) return;
+        const done = () => toast("已复制", 1500);
+        if (navigator.clipboard && window.isSecureContext) {
+          navigator.clipboard.writeText(s).then(done).catch(() => fallbackCopy(s, done));
+        } else {
+          fallbackCopy(s, done);
+        }
+      }
+      function fallbackCopy(s, done) {
+        const ta = document.createElement("textarea");
+        ta.value = s;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand("copy"); done(); }
+        catch (e) { toast("复制失败，请手动选择文本", 2500); }
+        ta.remove();
       }
       let chatBusy = false;
       const CHAT_WELCOME =
@@ -4385,11 +4545,21 @@
       }
       $("#chatMsgs").addEventListener("click", (e) => {
         const btn = e.target.closest("button");
-        if (!btn || chatBusy) return;
+        if (!btn) return;
+        // 代码块复制按钮可能出现在还没有历史序号的流式气泡里，先单独处理
+        if (btn.dataset.mact === "copy-code") {
+          const code = btn.closest(".md-code")?.querySelector("pre code");
+          if (code) copyText(code.textContent);
+          return;
+        }
+        if (chatBusy) return;
         const div = btn.closest(".msg");
         if (!div || div.dataset.hidx === undefined) return;
         const hidx = parseInt(div.dataset.hidx, 10);
-        if (btn.dataset.mact === "edit") startEditMsg(div, hidx);
+        if (btn.dataset.mact === "copy") {
+          const m = chatHistory[hidx];
+          if (m) copyText(stripPendingMarkers(m.content).trim());
+        } else if (btn.dataset.mact === "edit") startEditMsg(div, hidx);
         else if (btn.dataset.mact === "retry") retryFrom(hidx);
         else if (btn.dataset.edit === "no") cancelEditMsg(div, hidx);
         else if (btn.dataset.edit === "ok") {
@@ -4724,6 +4894,21 @@
         const bubble = addMsg("ai", "正在思考…");
         bubble.classList.add("thinking");
         let acc = "";
+        // 流式渲染按帧合并，用户向上翻阅时不强行拉回底部
+        const nearBottom = () => {
+          const box = $("#chatMsgs");
+          return box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+        };
+        let rafId = 0;
+        const scheduleRender = () => {
+          if (rafId) return;
+          rafId = requestAnimationFrame(() => {
+            rafId = 0;
+            const pinned = nearBottom();
+            bubble.innerHTML = renderReply(stripPendingMarkers(acc));
+            if (pinned) $("#chatMsgs").scrollTop = $("#chatMsgs").scrollHeight;
+          });
+        };
         try {
           const resp = await fetch("/api/chat/stream", {
             method: "POST",
@@ -4766,9 +4951,7 @@
               if (payload.error) throw new Error(payload.error);
               if (payload.delta) {
                 acc += payload.delta;
-                // 流式过程中先隐藏日程/记忆/空教室标记行，结束后再渲染成卡片
-                bubble.innerHTML = renderReply(acc.replace(/\[(添加日程|记住|查空教室)\][\s\S]*$/, ""));
-                $("#chatMsgs").scrollTop = $("#chatMsgs").scrollHeight;
+                scheduleRender();
               }
             }
           }
@@ -4781,8 +4964,9 @@
             chatHistory.push({ role: "assistant", content: acc });
             bubble.dataset.hidx = chatHistory.length - 1;
             renderAiContent(bubble, acc);
-            bubble.innerHTML +=
-              `<div class="hint" style="color:var(--fail)">（已中断：${esc(e.message)}）</div>`;
+            // 用 insertAdjacentHTML 追加，避免重建 DOM 导致卡片上已绑定的点击事件丢失
+            bubble.insertAdjacentHTML("beforeend",
+              `<div class="hint" style="color:var(--fail)">（已中断：${esc(e.message)}）</div>`);
           } else {
             bubble.classList.add("error");
             bubble.textContent = e.message;
@@ -4791,6 +4975,8 @@
             attachMsgActions(bubble, "ai");
           }
         } finally {
+          // 取消待执行的流式帧，避免它在最终卡片渲染之后覆盖掉卡片
+          if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
           bubble.classList.remove("streaming", "thinking");
           chatBusy = false;
           $("#chatSend").disabled = false;
