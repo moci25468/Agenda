@@ -106,6 +106,19 @@ def init_db():
             user_id INTEGER PRIMARY KEY,
             data TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS events (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            date TEXT NOT NULL,
+            start_time TEXT NOT NULL DEFAULT '',
+            end_time TEXT NOT NULL DEFAULT '',
+            location TEXT NOT NULL DEFAULT '',
+            note TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_events_user_date ON events(user_id, date);
         """)
         # 旧版本迁移：snapshot 只有 id=1 一行；日志表没有 user_id
         cols = {r[1] for r in conn.execute("PRAGMA table_info(snapshot)")}
@@ -207,6 +220,76 @@ def get_logs(limit: int = 50) -> dict:
         except json.JSONDecodeError:
             s["changes"] = {}
     return {"sync": sync, "push": push}
+
+
+# ---------- 个人日程（按当前用户） ----------
+
+def _event_dict(row: sqlite3.Row) -> dict:
+    return {
+        "id": row["id"], "title": row["title"], "date": row["date"],
+        "start": row["start_time"], "end": row["end_time"],
+        "location": row["location"], "note": row["note"],
+        "created_at": row["created_at"], "updated_at": row["updated_at"],
+    }
+
+
+def list_events(date_from: str = "", date_to: str = "") -> list[dict]:
+    sql = "SELECT * FROM events WHERE user_id = ?"
+    args: list = [_uid()]
+    if date_from:
+        sql += " AND date >= ?"
+        args.append(date_from)
+    if date_to:
+        sql += " AND date <= ?"
+        args.append(date_to)
+    sql += " ORDER BY date, start_time, created_at"
+    with get_conn() as conn:
+        return [_event_dict(r) for r in conn.execute(sql, args).fetchall()]
+
+
+def get_event(event_id: str) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM events WHERE id = ? AND user_id = ?",
+                           (event_id, _uid())).fetchone()
+    return _event_dict(row) if row else None
+
+
+def add_event(data: dict) -> dict:
+    import uuid
+    event_id = uuid.uuid4().hex[:16]
+    ts = now_str()
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO events (id, user_id, title, date, start_time, end_time,
+                                   location, note, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (event_id, _uid(), data["title"], data["date"],
+             data.get("start", ""), data.get("end", ""),
+             data.get("location", ""), data.get("note", ""), ts, ts),
+        )
+    return get_event(event_id)
+
+
+def update_event(event_id: str, data: dict) -> dict | None:
+    with get_conn() as conn:
+        cur = conn.execute(
+            """UPDATE events SET title = ?, date = ?, start_time = ?, end_time = ?,
+                                 location = ?, note = ?, updated_at = ?
+               WHERE id = ? AND user_id = ?""",
+            (data["title"], data["date"], data.get("start", ""), data.get("end", ""),
+             data.get("location", ""), data.get("note", ""), now_str(),
+             event_id, _uid()),
+        )
+        if not cur.rowcount:
+            return None
+    return get_event(event_id)
+
+
+def delete_event(event_id: str) -> bool:
+    with get_conn() as conn:
+        cur = conn.execute("DELETE FROM events WHERE id = ? AND user_id = ?",
+                           (event_id, _uid()))
+        return bool(cur.rowcount)
 
 
 # ---------- 用户配置（按用户存的完整 config dict） ----------
@@ -348,7 +431,7 @@ def delete_user(user_id: int):
     """注销账号：用户行和各表里属于他的数据一起删除，避免留孤儿数据。"""
     with get_conn() as conn:
         for table in ("sessions", "snapshot", "exam_snapshot",
-                      "sync_log", "push_log", "user_config"):
+                      "sync_log", "push_log", "user_config", "events"):
             conn.execute(f"DELETE FROM {table} WHERE user_id = ?", (user_id,))
         conn.execute("DELETE FROM invites WHERE used_by = ?", (user_id,))
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))

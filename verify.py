@@ -12,7 +12,7 @@ from pathlib import Path
 import time
 import subprocess
 import socket
-from app.ai import build_context, _request_headers, _sse_delta
+from app.ai import build_context, _request_headers, _sse_delta, SYSTEM_PROMPT
 from app.providers.httpjson import courses_from_payload
 from app.browser_login import (
     build_candidate, pick_best, _headers_for_config, _parse_body, _public_candidates,
@@ -32,7 +32,7 @@ from app.scheduler import run_sync, format_changes, courses_on, section_time
 from app.config import load_config, save_config
 from app import db
 from app.models import (
-    Course, Exam, apply_course_overrides, course_uid, diff_courses,
+    Course, Event, Exam, apply_course_overrides, course_uid, diff_courses,
     current_week, parse_exam_time, parse_weeks,
 )
 import asyncio
@@ -153,6 +153,27 @@ check("考试.快照落库", bool(esnap) and esnap["source"] == "test"
 ctx = build_context(load_config())
 check("考试.AI 上下文可回答教室座号",
       "高等数学" in ctx and "@1-201" in ctx and "座号 12" in ctx, ctx[-220:])
+
+# 个人日程：模型、落库、AI 上下文
+_ev = Event.from_dict({"title": "社团例会", "date": "2026-11-09",
+                       "start": "19:00", "end": "20:30", "location": "活动中心"})
+check("日程.时间描述", _ev.display_time() == "2026-11-09 19:00-20:30")
+check("日程.全天描述", Event.from_dict(
+    {"title": "休息", "date": "2026-11-09"}).display_time() == "2026-11-09 全天")
+check("日程.结束判定", _ev.is_finished(datetime(2026, 11, 9, 21, 0))
+      and not _ev.is_finished(datetime(2026, 11, 9, 18, 0))
+      and not _ev.is_finished(datetime(2026, 11, 8, 23, 0)))
+_saved_ev = db.add_event({"title": "社团例会", "date": "2099-12-31",
+                          "start": "19:00", "end": "20:30", "location": "活动中心"})
+check("日程.落库与读取", bool(_saved_ev["id"])
+      and db.get_event(_saved_ev["id"])["title"] == "社团例会", str(_saved_ev)[:160])
+_ctx_ev = build_context(load_config())
+check("日程.AI 上下文包含", "社团例会" in _ctx_ev and "@活动中心" in _ctx_ev, _ctx_ev[-200:])
+_prompt = SYSTEM_PROMPT.format(context="占位上下文")
+check("日程.提示词模板可渲染", "占位上下文" in _prompt and "[添加日程]" in _prompt
+      and '"title"' in _prompt)
+db.delete_event(_saved_ev["id"])
+check("日程.删除后不可读", db.get_event(_saved_ev["id"]) is None)
 
 # 流式回复的 SSE 行解析（OpenAI 兼容格式）
 check("流式.SSE 解析增量",
@@ -570,6 +591,66 @@ async def http_tests(port: int):
               and not any(c["name"] == "手动自习（改）" for c in fin["courses"]),
               str(fin)[:200])
 
+        # 个人日程：校验 → 增改查 → 今日汇总 → 状态计数 → 多用户隔离 → 删除
+        today_iso = date.today().isoformat()
+        bad = await ca.post(f"{base}/api/events", json={
+            "action": "add", "event": {"title": "  ", "date": today_iso}})
+        check("日程.空标题被拒", bad.status_code == 400, str(bad.status_code))
+        bad = await ca.post(f"{base}/api/events", json={
+            "action": "add", "event": {"title": "x", "date": "11/09"}})
+        check("日程.非法日期被拒", bad.status_code == 400, str(bad.status_code))
+        bad = await ca.post(f"{base}/api/events", json={
+            "action": "add", "event": {"title": "x", "date": today_iso, "start": "25:00"}})
+        check("日程.非法时间被拒", bad.status_code == 400, str(bad.status_code))
+        bad = await ca.post(f"{base}/api/events", json={
+            "action": "add", "event": {"title": "x", "date": today_iso,
+                                       "start": "20:00", "end": "19:00"}})
+        check("日程.结束早于开始被拒", bad.status_code == 400, str(bad.status_code))
+        # 无结束时间的今日日程在任何时刻都算未结束，用例不受运行时间影响
+        r = await ca.post(f"{base}/api/events", json={
+            "action": "add", "event": {"title": "社团例会", "date": today_iso,
+                                       "start": "19:00", "location": "活动中心"}})
+        d = r.json()
+        check("日程.添加", r.status_code == 200 and d.get("ok")
+              and bool(d.get("event", {}).get("id")), str(d)[:200])
+        ev_id = d["event"]["id"]
+        lst = (await ca.get(f"{base}/api/events")).json()
+        check("日程.列表与展示字段", lst.get("count") == 1
+              and lst["events"][0]["display_time"] == f"{today_iso} 19:00",
+              str(lst)[:200])
+        tt = (await ca.get(f"{base}/api/timetable")).json()
+        check("日程.并入今日安排", any(e["id"] == ev_id
+                                  for e in tt.get("today_events", [])),
+              str(tt.get("today_events"))[:200])
+        st_ev = (await ca.get(f"{base}/api/status")).json()
+        check("日程.状态栏计数", st_ev.get("upcoming_event_count") == 1,
+              str(st_ev)[:160])
+        upd = (await ca.post(f"{base}/api/events", json={
+            "action": "update", "id": ev_id,
+            "event": {"title": "社团例会（改）", "location": "活动中心 2"}})).json()
+        check("日程.修改保留未填字段", upd.get("ok")
+              and upd["event"]["title"] == "社团例会（改）"
+              and upd["event"]["start"] == "19:00"
+              and upd["event"]["date"] == today_iso, str(upd)[:200])
+        bob_id = db.get_user_by_username("bob")["id"]
+        async with _hx.AsyncClient(timeout=30, trust_env=False,
+                                   cookies={"qut_session": token_b}) as cb_ev:
+            lst_b = (await cb_ev.get(f"{base}/api/events")).json()
+            check("日程.隔离.他人不可见", lst_b.get("count") == 0, str(lst_b)[:160])
+            r = await cb_ev.post(f"{base}/api/events", json={
+                "action": "add", "event": {"title": "B 的日程", "date": today_iso}})
+            check("日程.隔离.各自可添加", r.status_code == 200, str(r.text)[:160])
+            bad = await cb_ev.post(f"{base}/api/events", json={
+                "action": "update", "id": ev_id, "event": {"title": "hack"}})
+            check("日程.隔离.不能改他人日程", bad.status_code == 404, str(bad.status_code))
+            bad = await cb_ev.post(f"{base}/api/events", json={
+                "action": "delete", "id": ev_id})
+            check("日程.隔离.不能删他人日程", bad.status_code == 404, str(bad.status_code))
+        d = (await ca.post(f"{base}/api/events",
+                           json={"action": "delete", "id": ev_id})).json()
+        lst = (await ca.get(f"{base}/api/events")).json()
+        check("日程.删除", d.get("ok") and lst.get("count") == 0, str(lst)[:160])
+
         # 门户课表 + 正方考试：不切数据源也能识别考试能力
         await ca.post(f"{base}/api/settings", json={"provider": {
             "type": "portal", "zf_base": "http://example.invalid/jwglxt",
@@ -620,6 +701,10 @@ async def http_tests(port: int):
         users = (await ca2.get(f"{base}/api/auth/users")).json().get("users", [])
         check("注销.用户从列表移除",
               all(u["username"] != "bob" for u in users), str(users)[:200])
+        with db.get_conn() as conn:
+            n_ev = conn.execute("SELECT COUNT(*) FROM events WHERE user_id = ?",
+                                (bob_id,)).fetchone()[0]
+        check("注销.个人日程一并删除", n_ev == 0, str(n_ev))
         # 管理员注销时把权限交给最早注册的其他账号
         code2 = (await ca2.post(f"{base}/api/auth/invites")).json().get("code")
         r = await ca2.post(f"{base}/api/auth/register", json={

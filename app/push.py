@@ -12,7 +12,7 @@ async def send_bark(cfg: dict, title: str, body: str, url: str = "") -> tuple[bo
     server = (p.get("bark_server") or "https://api.day.app").rstrip("/")
     if not key:
         return False, "未配置 Bark Key"
-    payload = {"title": title, "body": body, "group": "Horarium", "sound": "minuet"}
+    payload = {"title": title, "body": body, "group": "Agenda", "sound": "minuet"}
     if url:
         payload["url"] = url
     try:

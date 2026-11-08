@@ -10,8 +10,8 @@ from apscheduler.triggers.cron import CronTrigger
 
 from . import db
 from .config import load_config
-from .models import (Course, Exam, apply_course_overrides, current_week,
-                     diff_courses, DEFAULT_SECTION_TIMES, DEFAULT_SECTION_ENDS)
+from .models import (Course, Event, Exam, apply_course_overrides, current_week,
+                     diff_courses, event_line, DEFAULT_SECTION_TIMES, DEFAULT_SECTION_ENDS)
 from .providers import get_provider
 from .push import push_all
 
@@ -105,8 +105,13 @@ async def apply_snapshot(cfg: dict, courses: list[Course], source: str,
                              + "\n".join(course_line(cfg, c) for c in next_courses))
             else:
                 parts.append(f"【明日课表】{tomorrow.strftime('%m月%d日')} 没有课，好好休息。")
+            tomorrow_s = tomorrow.isoformat()
+            next_events = [Event.from_dict(d) for d in
+                           db.list_events(date_from=tomorrow_s, date_to=tomorrow_s)]
+            if next_events:
+                parts.append("【明日日程】\n" + "\n".join(event_line(e) for e in next_events))
             if not changes.get("has_change"):
-                title = "明日课表提醒"
+                title = "明日安排提醒" if next_events else "明日课表提醒"
         if parts:
             pushed = await push_all(cfg, title, "\n\n".join(parts))
     return {"ok": True, "message": summary, "changes": changes, "pushed": pushed}

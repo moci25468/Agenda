@@ -12,7 +12,7 @@ import httpx
 
 from . import db
 from .config import load_config
-from .models import Course, Exam, apply_course_overrides, current_week
+from .models import Course, Event, Exam, apply_course_overrides, current_week, event_line
 from .scheduler import WEEKDAY_CN, course_line, courses_on
 
 
@@ -77,18 +77,36 @@ def build_context(cfg: dict) -> str:
                 lines.append(f"- {exam_line(e)}")
         else:
             lines.append("暂无未结束的考试安排。")
+
+    events = [Event.from_dict(d) for d in db.list_events()]
+    upcoming_events = sorted(
+        [e for e in events if not e.is_finished()],
+        key=lambda e: (e.date, e.start or "00:00"),
+    )
+    if upcoming_events:
+        lines.append("个人日程（用户手动添加的安排）：")
+        for e in upcoming_events[:20]:
+            lines.append(f"- {event_line(e)}")
+    else:
+        lines.append("暂无个人日程。")
     return "\n".join(lines)
 
 
-SYSTEM_PROMPT = """你是「Horarium 知序」，青岛理工大学学生的校园 AI 助理。
-你可以基于下方提供的实时课表与考试上下文回答学生的课程、教室、时间、教学周、考试安排等问题。
+SYSTEM_PROMPT = """你是「Agenda 知序」，青岛理工大学学生的校园 AI 助理。
+你可以基于下方提供的实时课表、考试与个人日程上下文，回答学生的课程、教室、时间、教学周、考试与日程安排等问题。
 规则：
-1. 只依据上下文中的课表/考试数据回答相关问题；数据中没有的信息明确说不知道，不要编造。
+1. 只依据上下文中的课表/考试/日程数据回答相关问题；数据中没有的信息明确说不知道，不要编造。
 2. 回答简洁友好，用中文；涉及时间地点时给出具体日期、节次、时间、教室和座号。
 3. 可以做简单规划建议（如哪天没课、考试要带什么），但提醒以教务系统为准。
-4. 与课程、考试无关的通用问题也可以正常回答。
+4. 与课程、考试、日程无关的通用问题也可以正常回答。
+5. 当用户明确要求添加/记录一条日程时（如「明天下午三点提醒我开会」），从对话提取信息，
+   在回复末尾单独一行输出：
+   [添加日程] {{"title": "...", "date": "YYYY-MM-DD", "start": "HH:MM", "end": "HH:MM", "location": "...", "note": "..."}}
+   日期根据上下文中的今天推算（明天/后天/本周五等）；时间用 24 小时制；不确定的字段留空字符串；
+   全天安排 start/end 都留空；一次最多输出一行。系统会把这行渲染成确认卡片，用户点击后才真正保存，
+   所以回复里不要说「已添加」，可以说「确认后就会存入你的日程」。
 
-课表与考试上下文：
+课表、考试与日程上下文：
 {context}"""
 
 

@@ -4,8 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#315c49" />
-    <meta name="description" content="Horarium 知序 — 青岛理工大学课表、考试与校园问答。" />
-    <title>Horarium · 知序</title>
+    <meta name="description" content="Agenda 知序 — 青岛理工大学日程、课表、考试与校园问答。" />
+    <title>Agenda · 知序</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23365b49'/%3E%3Cpath d='M18 22h28M18 32h28M18 42h18' stroke='%23f7f7f4' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E" />
     <style>
       :root {
         --bg: #f5f5f7;
@@ -207,6 +208,65 @@
         font-size: 12px;
         color: var(--warn);
         margin-top: 2px;
+      }
+
+      /* 个人日程 */
+      .event-tag {
+        display: inline-block;
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--accent);
+        border: 1px solid var(--accent);
+        border-radius: 4px;
+        padding: 0 5px;
+        margin-left: 8px;
+        vertical-align: 2px;
+      }
+      .event-row.done {
+        opacity: 0.55;
+      }
+      .row-actions {
+        flex: 0 0 auto;
+        align-self: center;
+        display: flex;
+        gap: 6px;
+      }
+      .event-proposal {
+        border: 1px solid var(--line);
+        border-left: 2px solid var(--accent);
+        border-radius: 6px;
+        background: var(--card);
+        padding: 12px 14px;
+        margin-top: 10px;
+      }
+      .event-proposal .ep-head {
+        font-size: 12px;
+        color: var(--sub);
+        margin-bottom: 4px;
+      }
+      .event-proposal .ep-title {
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .event-proposal .ep-meta {
+        font-size: 13px;
+        color: var(--sub);
+        margin-top: 2px;
+      }
+      .event-proposal .ep-note {
+        font-size: 12px;
+        color: var(--sub);
+        margin-top: 2px;
+      }
+      .event-proposal .ep-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .event-proposal .ep-done {
+        font-size: 12px;
+        color: var(--accent);
+        margin-top: 10px;
       }
 
       /* 考试 */
@@ -893,7 +953,7 @@
         }
       }
 
-      /* Horarium — 纸质课表式视觉系统 */
+      /* Agenda — 纸质课表式视觉系统 */
       :root {
         --bg: #f3f3ee;
         --card: #fdfcf9;
@@ -2660,17 +2720,17 @@
       <div class="auth-layout">
         <section class="auth-intro" aria-label="产品介绍">
           <div class="auth-brand">
-            <h1 class="auth-title">Horarium <span>知序</span></h1>
+            <h1 class="auth-title">Agenda <span>知序</span></h1>
           </div>
           <p class="auth-intro-sub">所谓成长，就是经过不断的聚散离合，找到不太会伤害到彼此的距离</p>
           <dl class="auth-features">
-            <div><dt>课程</dt><dd>本周课表与每日安排</dd></div>
-            <div><dt>提醒</dt><dd>每日同步与次日课程推送</dd></div>
-            <div><dt>问答</dt><dd>直接查询课程、教室和考试</dd></div>
+            <div><dt>日程</dt><dd>课程、考试与个人安排</dd></div>
+            <div><dt>提醒</dt><dd>每日同步与次日安排推送</dd></div>
+            <div><dt>问答</dt><dd>AI 查询日程，一句话添加</dd></div>
           </dl>
         </section>
         <div class="auth-card">
-          <p class="auth-sub" id="authHint">知序 · 青理课表与考试</p>
+          <p class="auth-sub" id="authHint">知序 · 青理日程与考试</p>
           <div class="auth-tabs">
           <button type="button" id="authTabLogin" class="primary">登录</button>
           <button type="button" id="authTabRegister">注册</button>
@@ -2689,7 +2749,7 @@
           <button class="primary" type="submit">注册</button>
         </form>
           <p class="hint" id="authError" style="color:var(--fail)"></p>
-          <p class="auth-privacy">私有部署，账号与课表数据仅保存在你的服务器中。</p>
+          <p class="auth-privacy">私有部署，账号与日程数据仅保存在你的服务器中。</p>
         </div>
       </div>
     </div>
@@ -2697,7 +2757,7 @@
       <header>
         <div class="brand-lockup">
           <div>
-            <h1>Horarium <span class="brand-cn">知序</span></h1>
+            <h1>Agenda <span class="brand-cn">知序</span></h1>
             <div class="header-sub" id="headerSub">青岛理工大学</div>
           </div>
         </div>
@@ -2712,6 +2772,7 @@
       <div class="statusbar" id="statusbar"></div>
       <nav id="nav" aria-label="主导航">
         <button data-tab="today" class="active">今日</button>
+        <button data-tab="events">日程</button>
         <button data-tab="week">本周课表</button>
         <button data-tab="exams">考试</button>
         <button data-tab="ai">AI 助手</button>
@@ -2735,6 +2796,23 @@
           </div>
           <div id="todayList"></div>
         </div>
+      </section>
+
+      <!-- 个人日程 -->
+      <section id="tab-events" class="hidden">
+        <div class="card">
+          <div class="day-head">
+            <span class="date">个人日程</span>
+            <div class="day-meta">
+              <span class="muted" id="eventSub"></span>
+              <button class="small" id="addEventBtn">添加日程</button>
+            </div>
+          </div>
+          <div id="eventList"></div>
+        </div>
+        <p class="hint">
+          个人日程保存在你的服务器中，会并入今日安排、每日推送与 AI 问答；也可以在 AI 助手里说一句「明天下午三点开会」直接添加。
+        </p>
       </section>
 
       <!-- 周视图 -->
@@ -2770,18 +2848,18 @@
         <div class="card chat-box">
           <div class="chat-head">
             <h2>问问知序</h2>
-            <p>回答基于你已同步的课表与考试安排</p>
+            <p>回答基于你的课表、考试与个人日程；也可以让我帮你记日程</p>
           </div>
           <div class="chat-msgs" id="chatMsgs">
-            <div class="msg ai">课程、教室、教学周和考试安排，都可以直接问我。</div>
+            <div class="msg ai">课程、教室、考试和个人日程，都可以直接问我。说「帮我记一下明天下午三点开会」，我会生成确认卡片，一键存入日程。</div>
           </div>
           <div class="chips" id="chatChips">
-            <button>我明天有什么课？</button>
+            <button>我明天有什么安排？</button>
             <button>这周哪天没课？</button>
             <button>明天第一节课在哪上？</button>
             <button>现在是第几周？</button>
             <button>我最近有什么考试？</button>
-            <button>下一场考试在哪个教室？</button>
+            <button>帮我记一下：周五晚7点社团聚餐</button>
           </div>
           <div class="chat-input">
             <input
@@ -3141,6 +3219,50 @@
       </div>
     </div>
 
+    <!-- 添加 / 编辑日程 -->
+    <div id="eventEditor" class="sheet hidden">
+      <div class="sheet-panel" role="dialog" aria-modal="true" aria-label="编辑日程">
+        <div class="sheet-head">
+          <div>
+            <h2 id="eventEditorTitle">添加日程</h2>
+            <p class="hint">时间留空表示全天安排；日程会并入今日安排与 AI 问答。</p>
+          </div>
+          <button class="small" id="closeEventEditorBtn">取消</button>
+        </div>
+        <form id="eventForm" class="form-grid">
+          <input type="hidden" id="eventId" />
+          <label class="field full"
+            ><span>标题</span>
+            <input id="eventTitle" placeholder="例如 社团例会" autocomplete="off" required
+          /></label>
+          <label class="field full"
+            ><span>日期</span>
+            <input id="eventDate" type="date" required
+          /></label>
+          <label class="field"
+            ><span>开始时间（选填）</span>
+            <input id="eventStart" type="time"
+          /></label>
+          <label class="field"
+            ><span>结束时间（选填）</span>
+            <input id="eventEnd" type="time"
+          /></label>
+          <label class="field full"
+            ><span>地点（选填）</span>
+            <input id="eventLocation" placeholder="例如 大学生活动中心" autocomplete="off"
+          /></label>
+          <label class="field full"
+            ><span>备注（选填）</span>
+            <input id="eventNote" placeholder="例如 带电脑" autocomplete="off"
+          /></label>
+          <div class="full form-actions" style="margin-top: 0">
+            <button class="primary" type="submit" id="saveEventBtn">添加日程</button>
+          </div>
+          <p class="hint full" id="eventFormError" style="color:var(--fail)"></p>
+        </form>
+      </div>
+    </div>
+
     <!-- 注销账号 -->
     <div id="deleteAccountSheet" class="sheet hidden">
       <div class="sheet-panel" role="dialog" aria-modal="true" aria-label="注销账号">
@@ -3258,6 +3380,9 @@
           status.upcoming_exam_count
             ? `考试：${status.upcoming_exam_count} 场待考`
             : "",
+          status.upcoming_event_count
+            ? `日程：${status.upcoming_event_count} 项待办`
+            : "",
           `上次同步：${esc(status.last_sync || "尚未同步")}`,
           `下次同步：${esc(status.next_sync || "-")}（每日 ${esc(status.sync_time)}）`,
           `推送：${status.push_channels.length ? status.push_channels.join(" / ") : "未启用"}`,
@@ -3279,6 +3404,30 @@
   </div>`;
       }
 
+      function eventTimeText(e) {
+        if (e.start && e.end) return `${e.start}–${e.end}`;
+        if (e.start) return e.start;
+        return "全天";
+      }
+
+      function eventRow(e, withDate = false) {
+        const time = withDate
+          ? `<div class="range">${esc(e.date.slice(5).replace("-", "/"))}</div><div class="sections">${esc(eventTimeText(e))}</div>`
+          : `<div class="range">${esc(eventTimeText(e))}</div><div class="sections">日程</div>`;
+        const meta = [e.location, e.note].filter(Boolean).map(esc).join(" · ");
+        return `<div class="course-row event-row${e.finished ? " done" : ""}" data-id="${esc(e.id)}">
+    <div class="course-time">${time}</div>
+    <div class="course-main">
+      <div class="course-name">${esc(e.title)}${withDate ? "" : '<span class="event-tag">日程</span>'}</div>
+      ${meta ? `<div class="course-meta">${meta}</div>` : ""}
+    </div>
+    ${withDate ? `<div class="row-actions">
+      <button class="small" data-act="edit">编辑</button>
+      <button class="small" data-act="del">删除</button>
+    </div>` : ""}
+  </div>`;
+      }
+
       async function loadToday() {
         weekData = await api("/api/timetable");
         if (viewWeek === null) viewWeek = Math.max(weekData.current_week, 1);
@@ -3289,12 +3438,120 @@
           weekData.current_week > 0
             ? `第 ${weekData.current_week} 教学周`
             : "假期";
-        const list = weekData.today_courses;
-        $("#todayCount").textContent = list.length ? `${list.length} 门课程` : "今日无课";
-        $("#todayList").innerHTML = list.length
-          ? list.map(courseRow).join("")
-          : `<div class="empty"><div class="empty-title">今天没有课</div><div class="empty-sub">没有同步到今日课程，可以安心安排自己的时间。</div></div>`;
+        const courses = weekData.today_courses;
+        const events = weekData.today_events || [];
+        // 课程与日程按开始时间混排；全天日程排最前
+        const items = [
+          ...events.map((e) => ({ sort: e.start || "00:00", html: eventRow(e) })),
+          ...courses.map((c) => ({ sort: c.start_time || "99:99", html: courseRow(c) })),
+        ].sort((a, b) => a.sort.localeCompare(b.sort));
+        const countText = [
+          courses.length ? `${courses.length} 门课程` : "",
+          events.length ? `${events.length} 项日程` : "",
+        ].filter(Boolean).join(" · ");
+        $("#todayCount").textContent = countText || "今日无安排";
+        $("#todayList").innerHTML = items.length
+          ? items.map((x) => x.html).join("")
+          : `<div class="empty"><div class="empty-title">今天没有课程和日程</div><div class="empty-sub">可以安心安排自己的时间，或去「日程」页添加一条安排。</div></div>`;
       }
+
+      /* ---------- 个人日程 ---------- */
+      let eventsCache = [];
+      async function loadEvents() {
+        const data = await api("/api/events");
+        eventsCache = data.events;
+        const upcoming = data.events.filter((e) => !e.finished);
+        const past = data.events.filter((e) => e.finished);
+        $("#eventSub").textContent = upcoming.length ? `${upcoming.length} 项待办` : "";
+        let html = upcoming.map((e) => eventRow(e, true)).join("");
+        if (past.length)
+          html += `<div class="exam-group">已结束</div>` + past.map((e) => eventRow(e, true)).join("");
+        $("#eventList").innerHTML = html ||
+          `<div class="empty"><div class="empty-title">还没有个人日程</div><div class="empty-sub">点击右上角「添加日程」，或在 AI 助手里说一句「明天下午三点开会」。</div></div>`;
+      }
+
+      function openEventEditor(e = null) {
+        $("#eventEditorTitle").textContent = e ? "编辑日程" : "添加日程";
+        $("#saveEventBtn").textContent = e ? "保存修改" : "添加日程";
+        $("#eventId").value = e ? e.id : "";
+        $("#eventTitle").value = e ? e.title : "";
+        const now = new Date();
+        const localToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+        $("#eventDate").value = e ? e.date : (weekData?.today || localToday);
+        $("#eventStart").value = e ? e.start || "" : "";
+        $("#eventEnd").value = e ? e.end || "" : "";
+        $("#eventLocation").value = e ? e.location || "" : "";
+        $("#eventNote").value = e ? e.note || "" : "";
+        $("#eventFormError").textContent = "";
+        $("#eventEditor").classList.remove("hidden");
+        $("#eventTitle").focus();
+      }
+      function closeEventEditor() {
+        $("#eventEditor").classList.add("hidden");
+      }
+
+      $("#addEventBtn").addEventListener("click", () => openEventEditor());
+      $("#closeEventEditorBtn").addEventListener("click", closeEventEditor);
+      $("#eventEditor").addEventListener("click", (e) => {
+        if (e.target.id === "eventEditor") closeEventEditor();
+      });
+      $("#eventForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const id = $("#eventId").value;
+        const payload = {
+          action: id ? "update" : "add",
+          id: id || undefined,
+          event: {
+            title: $("#eventTitle").value.trim(),
+            date: $("#eventDate").value,
+            start: $("#eventStart").value,
+            end: $("#eventEnd").value,
+            location: $("#eventLocation").value.trim(),
+            note: $("#eventNote").value.trim(),
+          },
+        };
+        $("#eventFormError").textContent = "";
+        $("#saveEventBtn").disabled = true;
+        try {
+          await api("/api/events", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          closeEventEditor();
+          toast(id ? "日程已保存" : "日程已添加");
+          await Promise.all([loadStatus(), loadToday()]);
+          await loadEvents();
+        } catch (err) {
+          $("#eventFormError").textContent = err.message;
+        } finally {
+          $("#saveEventBtn").disabled = false;
+        }
+      });
+      $("#eventList").addEventListener("click", async (e) => {
+        const btn = e.target.closest("button[data-act]");
+        if (!btn) return;
+        const row = btn.closest(".event-row");
+        const item = eventsCache.find((x) => x.id === row.dataset.id);
+        if (!item) return;
+        if (btn.dataset.act === "edit") {
+          openEventEditor(item);
+          return;
+        }
+        if (!confirm(`删除日程「${item.title}」？`)) return;
+        try {
+          await api("/api/events", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "delete", id: item.id }),
+          });
+          toast("日程已删除");
+          await Promise.all([loadStatus(), loadToday()]);
+          await loadEvents();
+        } catch (err) {
+          toast(err.message, 4000);
+        }
+      });
 
       /* ---------- 周视图 ---------- */
       async function loadWeek(week) {
@@ -3677,6 +3934,70 @@
         return div;
       }
       let chatBusy = false;
+      // AI 回复末尾的 [添加日程] {json} 标记 → 确认卡片，用户点击后才真正保存
+      function extractEventProposal(text) {
+        const m = text.match(/\[添加日程\]\s*(\{[^\n]*\})/);
+        if (!m) return { text, proposal: null };
+        try {
+          const obj = JSON.parse(m[1]);
+          if (obj && typeof obj.title === "string" && obj.title.trim()) {
+            const str = (v) => (typeof v === "string" ? v.trim() : "");
+            return {
+              text: text.replace(m[0], "").trim(),
+              proposal: {
+                title: str(obj.title).slice(0, 100),
+                date: str(obj.date),
+                start: str(obj.start),
+                end: str(obj.end),
+                location: str(obj.location).slice(0, 100),
+                note: str(obj.note).slice(0, 500),
+              },
+            };
+          }
+        } catch (e) {}
+        return { text, proposal: null };
+      }
+      function appendEventProposal(bubble, p) {
+        const card = document.createElement("div");
+        card.className = "event-proposal";
+        const when = p.date
+          ? p.date + (p.start ? " " + p.start + (p.end ? "–" + p.end : "") : " 全天")
+          : "日期待定";
+        card.innerHTML = `
+          <div class="ep-head">添加到个人日程</div>
+          <div class="ep-title">${esc(p.title)}</div>
+          <div class="ep-meta">${esc(when)}${p.location ? " · " + esc(p.location) : ""}</div>
+          ${p.note ? `<div class="ep-note">${esc(p.note)}</div>` : ""}
+          <div class="ep-actions">
+            <button class="small primary" data-ep="ok">添加到日程</button>
+            <button class="small" data-ep="no">忽略</button>
+          </div>`;
+        bubble.appendChild(card);
+        card.addEventListener("click", async (e) => {
+          const btn = e.target.closest("button[data-ep]");
+          if (!btn) return;
+          if (btn.dataset.ep === "no") {
+            card.remove();
+            return;
+          }
+          btn.disabled = true;
+          try {
+            await api("/api/events", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "add", event: p }),
+            });
+            card.querySelector(".ep-actions").outerHTML =
+              '<div class="ep-done">已添加到日程</div>';
+            toast("日程已添加");
+            await Promise.all([loadStatus(), loadToday()]);
+            if (!$("#tab-events").classList.contains("hidden")) await loadEvents();
+          } catch (err) {
+            btn.disabled = false;
+            toast(err.message, 4000);
+          }
+        });
+      }
       async function sendChat(text) {
         if (chatBusy) return;
         text = (text || $("#chatInput").value).trim();
@@ -3731,13 +4052,18 @@
               if (payload.error) throw new Error(payload.error);
               if (payload.delta) {
                 acc += payload.delta;
-                bubble.innerHTML = renderReply(acc);
+                // 流式过程中先隐藏日程标记行，结束后渲染成确认卡片
+                bubble.innerHTML = renderReply(acc.replace(/\[添加日程\][\s\S]*$/, ""));
                 $("#chatMsgs").scrollTop = $("#chatMsgs").scrollHeight;
               }
             }
           }
           if (!acc) throw new Error("AI 没有返回内容");
           chatHistory.push({ role: "assistant", content: acc });
+          const { text: cleanText, proposal } = extractEventProposal(acc);
+          bubble.innerHTML = renderReply(
+            cleanText || (proposal ? "为你整理了一条日程，确认后存入：" : acc));
+          if (proposal) appendEventProposal(bubble, proposal);
         } catch (e) {
           if (acc) {
             bubble.innerHTML =
@@ -3970,9 +4296,10 @@
         $$("#nav button").forEach((b) =>
           b.classList.toggle("active", b.dataset.tab === tab),
         );
-        ["today", "week", "exams", "ai", "source", "admin", "settings"].forEach((t) =>
+        ["today", "events", "week", "exams", "ai", "source", "admin", "settings"].forEach((t) =>
           $("#tab-" + t).classList.toggle("hidden", t !== tab),
         );
+        if (tab === "events") loadEvents();
         if (tab === "week")
           loadWeek(viewWeek ?? Math.max(status?.week || 1, 1));
         if (tab === "exams") loadExams();
@@ -4650,6 +4977,9 @@
         if (e.key === "Escape" &&
             !$("#editUserSheet").classList.contains("hidden"))
           closeEditUser();
+        if (e.key === "Escape" &&
+            !$("#eventEditor").classList.contains("hidden"))
+          closeEventEditor();
       });
 
       boot();

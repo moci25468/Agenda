@@ -162,6 +162,69 @@ class Exam:
         return day.strip()
 
 
+@dataclass
+class Event:
+    """个人日程：用户手动添加的安排，独立于课表/考试快照，存 events 表。"""
+    title: str
+    date: str = ""             # YYYY-MM-DD
+    start: str = ""            # HH:MM，空表示全天
+    end: str = ""              # HH:MM，可空
+    location: str = ""
+    note: str = ""
+    id: str = ""
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @staticmethod
+    def from_dict(d: dict) -> "Event":
+        return Event(
+            title=str(d.get("title", "") or ""),
+            date=str(d.get("date", "") or ""),
+            start=str(d.get("start", "") or ""),
+            end=str(d.get("end", "") or ""),
+            location=str(d.get("location", "") or ""),
+            note=str(d.get("note", "") or ""),
+            id=str(d.get("id", "") or ""),
+        )
+
+    def is_finished(self, now: datetime | None = None) -> bool:
+        now = now or datetime.now()
+        if not self.date:
+            return False
+        try:
+            day = date.fromisoformat(self.date)
+        except ValueError:
+            return False
+        if day < now.date():
+            return True
+        if day > now.date() or not self.end:
+            return False
+        try:
+            hh, mm = self.end.split(":")[:2]
+            end_at = datetime.fromisoformat(f"{self.date}T{int(hh):02d}:{int(mm):02d}:00")
+        except ValueError:
+            return False
+        return end_at < now
+
+    def display_time(self) -> str:
+        """用于推送 / AI 的一行时间描述；无开始时间视为全天。"""
+        if self.start and self.end:
+            return f"{self.date} {self.start}-{self.end}"
+        if self.start:
+            return f"{self.date} {self.start}"
+        return f"{self.date} 全天"
+
+
+def event_line(e: Event) -> str:
+    parts = [e.display_time(), e.title]
+    if e.location:
+        parts.append(f"@{e.location}")
+    if e.note:
+        parts.append(e.note)
+    return " ".join(p for p in parts if p)
+
+
 def parse_exam_time(text: str) -> tuple[str, str, str]:
     """从教务时间文本中拆出 (日期, 开始, 结束)。
 

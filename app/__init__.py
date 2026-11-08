@@ -1,1 +1,1 @@
-"""Horarium 知序 backend package."""
+"""Agenda 知序 backend package."""

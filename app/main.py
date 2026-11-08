@@ -1,4 +1,4 @@
-"""Horarium 知序 — FastAPI 入口。版本号由 app.version（git tag）动态提供。"""
+"""Agenda 知序 — FastAPI 入口。版本号由 app.version（git tag）动态提供。"""
 from __future__ import annotations
 
 import asyncio
@@ -22,7 +22,7 @@ from .config import (
 )
 from .user_context import current_user_id, get_current_user, set_current_user
 from .models import (
-    Course, Exam, apply_course_overrides, course_uid, current_week, parse_weeks,
+    Course, Event, Exam, apply_course_overrides, course_uid, current_week, parse_weeks,
     week_dates, DEFAULT_SECTION_TIMES, DEFAULT_SECTION_ENDS,
 )
 from .providers import get_provider
@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
     shutdown_scheduler()
 
 
-app = FastAPI(title="Horarium 知序", version=get_version(), lifespan=lifespan)
+app = FastAPI(title="Agenda 知序", version=get_version(), lifespan=lifespan)
 
 # App 化时常见的 WebView / 本地来源
 ALLOWED_ORIGIN_RE = re.compile(
@@ -193,6 +193,8 @@ async def status():
     portal_ok = portal_configured(cfg)
     zf_ok = zhengfang_configured(cfg)
     push_cfg = cfg.get("push", {})
+    upcoming_event_count = sum(
+        1 for d in db.list_events() if not Event.from_dict(d).is_finished())
     return {
         "school": cfg.get("school", "青岛理工大学"),
         "today": today.isoformat(),
@@ -210,6 +212,7 @@ async def status():
         "course_count": len(all_courses),
         "exam_count": len(exam_snap["exams"]) if exam_snap else 0,
         "upcoming_exam_count": len(upcoming_exams),
+        "upcoming_event_count": upcoming_event_count,
         "next_exam": upcoming_exams[0].to_dict() if upcoming_exams else None,
         "exam_fetched_at": exam_snap["fetched_at"] if exam_snap else None,
         "last_sync": snap["fetched_at"] if snap else None,
@@ -239,6 +242,9 @@ async def timetable(week: int | None = None):
         d["end_time"] = section_time(cfg, c.end, end=True)
         out.append(d)
     dates = week_dates(cfg.get("semester_start", ""), week)
+    today_s = today.isoformat()
+    today_events = [d | {"display_time": Event.from_dict(d).display_time()}
+                    for d in db.list_events(date_from=today_s, date_to=today_s)]
     return {
         "week": week,
         "current_week": cur_week,
@@ -252,6 +258,7 @@ async def timetable(week: int | None = None):
         "today_courses": [c.to_dict() | {
             "start_time": section_time(cfg, c.start), "end_time": section_time(cfg, c.end, end=True),
         } for c in courses_on(cfg, courses, today)],
+        "today_events": today_events,
     }
 
 
@@ -404,6 +411,73 @@ async def edit_course(req: CourseEditRequest):
     else:
         raise HTTPException(400, "未知操作")
     return _save_course_overrides(cfg, overrides)
+
+
+@app.get("/api/events")
+async def list_events():
+    """个人日程：全部按日期升序，带 finished / display_time 展示字段。"""
+    today = date.today()
+    out = []
+    for d in db.list_events():
+        e = Event.from_dict(d)
+        out.append(d | {"finished": e.is_finished(), "display_time": e.display_time()})
+    return {"events": out, "count": len(out), "today": today.isoformat()}
+
+
+class EventEditRequest(BaseModel):
+    action: str                 # add | update | delete
+    id: str | None = None
+    event: dict | None = None
+
+
+def _event_form(data: dict) -> dict:
+    """校验并规范化个人日程表单。时间可留空（全天），日期必填。"""
+    title = str(data.get("title") or "").strip()
+    if not title:
+        raise HTTPException(400, "日程标题不能为空")
+    if len(title) > 100:
+        raise HTTPException(400, "标题太长（最多 100 字）")
+    date_s = str(data.get("date") or "").strip()
+    try:
+        date.fromisoformat(date_s)
+    except ValueError:
+        raise HTTPException(400, "日期格式应为 YYYY-MM-DD")
+    start = str(data.get("start") or "").strip()
+    end = str(data.get("end") or "").strip()
+    for t in (start, end):
+        if t and not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", t):
+            raise HTTPException(400, "时间格式应为 HH:MM（24 小时制）")
+    if end and not start:
+        raise HTTPException(400, "填结束时间前请先填开始时间")
+    if start and end and end < start:
+        raise HTTPException(400, "结束时间不能早于开始时间")
+    location = str(data.get("location") or "").strip()
+    note = str(data.get("note") or "").strip()
+    if len(location) > 100 or len(note) > 500:
+        raise HTTPException(400, "地点或备注太长")
+    return {"title": title, "date": date_s, "start": start, "end": end,
+            "location": location, "note": note}
+
+
+@app.post("/api/events")
+async def edit_event(req: EventEditRequest):
+    action = (req.action or "").strip()
+    if action == "add":
+        data = _event_form(req.event or {})
+        return {"ok": True, "event": db.add_event(data)}
+    if action in ("update", "delete"):
+        event_id = (req.id or "").strip()
+        if not event_id:
+            raise HTTPException(400, "缺少日程标识")
+        current = db.get_event(event_id)
+        if current is None:
+            raise HTTPException(404, "日程不存在")
+        if action == "delete":
+            db.delete_event(event_id)
+            return {"ok": True}
+        data = _event_form({**current, **(req.event or {})})
+        return {"ok": True, "event": db.update_event(event_id, data)}
+    raise HTTPException(400, "未知操作")
 
 
 @app.get("/api/exams")
@@ -681,7 +755,7 @@ async def provider_preview():
 @app.post("/api/push/test")
 async def push_test():
     cfg = load_config()
-    results = await push_all(cfg, "测试推送", "Horarium 推送通道测试成功。\n每日 12:00 将自动同步课表并推送变更与次日课表。")
+    results = await push_all(cfg, "测试推送", "Agenda 推送通道测试成功。\n每日定时同步后会推送课表变更与次日课程、日程安排。")
     return {"results": results}
 
 
