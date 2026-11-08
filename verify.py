@@ -12,7 +12,7 @@ from pathlib import Path
 import time
 import subprocess
 import socket
-from app.ai import build_context, _request_headers, _sse_delta, SYSTEM_PROMPT
+from app.ai import build_context, _request_headers, _sse_delta, SYSTEM_PROMPT, weeks_mentioned
 from app.providers.httpjson import courses_from_payload
 from app.browser_login import (
     build_candidate, pick_best, _headers_for_config, _parse_body, _public_candidates,
@@ -256,6 +256,38 @@ mon = courses_on(cfg, courses, date(2026, 11, 9))
 check("周日无课筛选", len(sun) == 0)
 check("周一有课筛选", bool(mon) and all(
     c.day == 1 for c in mon), str([c.name for c in mon]))
+
+# 4b. AI 上下文按周展开：问「下周的课」时必须能看到下周课程，且不能误答「课表未同步」
+_w_now = current_week(cfg.get("semester_start", ""), date.today(), cfg.get("total_weeks", 30))
+_w_total = cfg.get("total_weeks", 30) or 30
+# 学期最后一周没有「下周」，改用上周，保证用例在任何日期都成立
+_w_next = _w_now + 1 if _w_now < _w_total else max(1, _w_now - 1)
+_w_orig = db.get_snapshot()
+db.save_snapshot([
+    {"name": "相邻周专属课", "day": 1, "start": 3, "end": 4, "room": "C301",
+     "weeks": [_w_next]},
+    {"name": "本周常规课", "day": 2, "start": 1, "end": 2, "room": "A101",
+     "weeks": [_w_now]},
+], "portal")
+_ctx_weeks = build_context(cfg)
+check("AI 上下文.下周课程可见", "相邻周专属课" in _ctx_weeks, _ctx_weeks[:300])
+check("AI 上下文.本周课程可见", "本周常规课" in _ctx_weeks)
+check("AI 上下文.按周标注", f"第 {_w_next} 周" in _ctx_weeks and "下周" in _ctx_weeks)
+check("AI 上下文.已同步不误报", "课表已同步" in _ctx_weeks
+      and "课表尚未同步" not in _ctx_weeks)
+check("AI 上下文.范围外有说明", "上面只展开以下周次" in _ctx_weeks)
+check("AI 上下文.提取指定周次", weeks_mentioned("我第 20 周有什么课？") == [20],
+      str(weeks_mentioned("我第 20 周有什么课？")))
+_ctx_far = build_context(cfg, extra_weeks=[20])
+check("AI 上下文.按需展开指定周", "第20周" in _ctx_far and "第 20 周" in _ctx_far,
+      _ctx_far[:200])
+# 每周都上的课在 4 个周次里内容相同，应压缩成「与第 N 周完全相同」
+db.save_snapshot([
+    {"name": "每周固定课", "day": 3, "start": 1, "end": 2, "room": "B101", "weeks": []},
+], "portal")
+_ctx_dup = build_context(cfg)
+check("AI 上下文.重复周课表去重", _ctx_dup.count("与第") >= 3, _ctx_dup[:300])
+db.save_snapshot(_w_orig["courses"], _w_orig["source"])
 
 # 课前提醒：固定 now + mock 推送，验证窗口 / 去重 / 开关 / 提前量 / 用户隔离
 _orig_push = _sched.push_all
