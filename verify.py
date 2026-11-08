@@ -174,6 +174,7 @@ check("日程.AI 上下文包含", "社团例会" in _ctx_ev and "@活动中心"
 _prompt = SYSTEM_PROMPT.format(context="占位上下文")
 check("日程.提示词模板可渲染", "占位上下文" in _prompt and "[添加日程]" in _prompt
       and '"title"' in _prompt)
+check("AI.推荐追问标记可渲染", "[追问]" in _prompt and "2-3 个" in _prompt)
 db.delete_event(_saved_ev["id"])
 check("日程.删除后不可读", db.get_event(_saved_ev["id"]) is None)
 
