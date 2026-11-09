@@ -3,8 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#f5f5f7" />
-    <meta name="theme-color" content="#1e211c" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f5f5f7" id="themeColorMeta" />
     <meta name="description" content="Agenda 知序 — 青岛理工大学日程、课表、考试与校园问答。" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -3675,9 +3674,20 @@
         .exam-countdown b { font-size: 24px; }
       }
 
-      /* 深色模式：跟随系统，暖调纸面反转 */
+      /* 外观切换：跟随系统 / 浅色 / 深色 */
+      .theme-choice { display: flex; gap: 8px; flex-wrap: wrap; }
+      .theme-choice button { min-width: 88px; }
+      .theme-choice button.active {
+        border-color: var(--accent);
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-weight: 600;
+      }
+
+      /* 深色模式样式独立成表，由脚本按用户选择启停（跟随系统 / 浅色 / 深色） */
       :root { color-scheme: light dark; }
-      @media (prefers-color-scheme: dark) {
+    </style>
+    <style id="darkThemeCss">
         :root {
           --bg: #1e211c;
           --card: #272b24;
@@ -3776,7 +3786,8 @@
         .next-class:hover { background: var(--accent-soft); }
         .week-cell .wc-free { border-color: rgba(255, 255, 255, 0.16); }
         .wc-free:hover { background: var(--card); }
-      }
+    </style>
+    <style>
       @media (prefers-reduced-motion: reduce) {
         *,
         *::before,
@@ -3788,6 +3799,25 @@
         }
       }
     </style>
+    <script>
+      // 主题在页面渲染前尽早应用，避免浅色闪一下再变深色；设置页随后同步按钮状态
+      (function () {
+        var KEY = "qut.theme";
+        var c = "system";
+        try {
+          var v = localStorage.getItem(KEY);
+          if (v === "system" || v === "light" || v === "dark") c = v;
+        } catch (e) {}
+        var dark = c === "dark" ||
+          (c === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        var el = document.getElementById("darkThemeCss");
+        if (el) el.disabled = !dark;
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+        document.documentElement.style.colorScheme = dark ? "dark" : "light";
+        var meta = document.getElementById("themeColorMeta");
+        if (meta) meta.content = dark ? "#1e211c" : "#f5f5f7";
+      })();
+    </script>
   </head>
   <body>
     <div id="authScreen" class="auth-screen">
@@ -4171,6 +4201,17 @@
 
       <!-- 设置 -->
       <section id="tab-settings" class="hidden">
+        <div class="card">
+          <h2>外观</h2>
+          <div class="theme-choice" id="themeChoice">
+            <button type="button" data-theme-choice="system">跟随系统</button>
+            <button type="button" data-theme-choice="light">浅色</button>
+            <button type="button" data-theme-choice="dark">深色</button>
+          </div>
+          <p class="hint">
+            默认跟随手机 / 电脑的系统外观；也可以固定为浅色或深色。选择保存在本机浏览器，刷新后依然生效。
+          </p>
+        </div>
         <div class="card">
           <h2>账号安全</h2>
           <div class="account-grid" id="accountInfo"></div>
@@ -7363,6 +7404,42 @@
             : '<div class="empty">暂无操作记录</div>';
         } catch (e) { toast(e.message, 4000); }
       }
+
+      /* ---------- 外观主题（跟随系统 / 浅色 / 深色） ---------- */
+      const THEME_KEY = "qut.theme";
+      function readThemeChoice() {
+        try {
+          const v = localStorage.getItem(THEME_KEY);
+          return ["system", "light", "dark"].includes(v) ? v : "system";
+        } catch (e) { return "system"; }
+      }
+      function applyTheme(choice) {
+        const dark = choice === "dark" ||
+          (choice === "system" &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches);
+        const el = document.getElementById("darkThemeCss");
+        if (el) el.disabled = !dark;
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+        document.documentElement.style.colorScheme = dark ? "dark" : "light";
+        const meta = document.getElementById("themeColorMeta");
+        if (meta) meta.content = dark ? "#1e211c" : "#f5f5f7";
+        document.querySelectorAll("#themeChoice button").forEach((b) =>
+          b.classList.toggle("active", b.dataset.themeChoice === choice));
+      }
+      $("#themeChoice").addEventListener("click", (e) => {
+        const btn = e.target.closest("button[data-theme-choice]");
+        if (!btn) return;
+        try { localStorage.setItem(THEME_KEY, btn.dataset.themeChoice); } catch (err) {}
+        applyTheme(btn.dataset.themeChoice);
+      });
+      // 选「跟随系统」时，系统外观变化要即时跟随（含老浏览器 addListener 兜底）
+      const themeMq = window.matchMedia("(prefers-color-scheme: dark)");
+      const onSystemThemeChange = () => {
+        if (readThemeChoice() === "system") applyTheme("system");
+      };
+      if (themeMq.addEventListener) themeMq.addEventListener("change", onSystemThemeChange);
+      else if (themeMq.addListener) themeMq.addListener(onSystemThemeChange);
+      applyTheme(readThemeChoice());
 
       /* ---------- Tab 切换 ---------- */
       // 记住当前页面，刷新后停留在原 tab（按浏览器本地保存，不含任何隐私数据）
