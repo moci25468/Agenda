@@ -3508,8 +3508,7 @@
       <nav id="nav" aria-label="主导航">
         <button data-tab="today" class="active">今日</button>
         <button data-tab="events">日程</button>
-        <button data-tab="week">本周课表</button>
-        <button data-tab="exams">考试</button>
+        <button data-tab="week">课表</button>
         <button data-tab="rooms">空教室</button>
         <button data-tab="ai">AI 助手</button>
         <button data-tab="source">课表来源</button>
@@ -3577,11 +3576,8 @@
           <div class="week-grid" id="weekGrid"></div>
         </div>
         <p class="hint" id="weekHint"></p>
-      </section>
-
-      <!-- 考试 -->
-      <section id="tab-exams" class="hidden">
-        <div class="card">
+        <!-- 考试：并入课表页，随课表一起查看 -->
+        <div class="card" style="margin-top:16px">
           <div class="day-head">
             <span class="date">考试安排</span>
             <span class="muted" id="examSub"></span>
@@ -6135,10 +6131,10 @@
           if (syncAfter) await doSync();
           else {
             await loadToday();
-            if (!$("#tab-week").classList.contains("hidden"))
+            if (!$("#tab-week").classList.contains("hidden")) {
               await loadWeek(viewWeek);
-            if (!$("#tab-exams").classList.contains("hidden"))
               await loadExams();
+            }
           }
         } catch (e) {
           toast(e.message, 4000);
@@ -6151,10 +6147,10 @@
           const r = await api("/api/sync", { method: "POST" });
           toast(r.message, 4000);
           await Promise.all([loadStatus(), loadToday()]);
-          if (!$("#tab-week").classList.contains("hidden"))
+          if (!$("#tab-week").classList.contains("hidden")) {
             await loadWeek(viewWeek);
-          if (!$("#tab-exams").classList.contains("hidden"))
             await loadExams();
+          }
         } catch (e) {
           toast(e.message, 4000);
         } finally {
@@ -6293,15 +6289,16 @@
         $$("#nav button").forEach((b) =>
           b.classList.toggle("active", b.dataset.tab === tab),
         );
-        ["today", "events", "week", "exams", "rooms", "ai", "source", "admin", "settings"].forEach((t) =>
+        ["today", "events", "week", "rooms", "ai", "source", "admin", "settings"].forEach((t) =>
           $("#tab-" + t).classList.toggle("hidden", t !== tab),
         );
         if (tab === "events") loadEvents();
         if (tab === "today") loadToday();
         if (tab === "rooms" && !roomMeta) loadRooms();
-        if (tab === "week")
+        if (tab === "week") {
           loadWeek(viewWeek ?? Math.max(status?.week || 1, 1));
-        if (tab === "exams") loadExams();
+          loadExams();
+        }
         if (tab === "source") loadSources();
         if (tab === "admin") {
           loadAdminStats();
