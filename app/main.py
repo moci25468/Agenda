@@ -623,18 +623,30 @@ def _rooms_provider() -> ZhengfangProvider:
 
 @app.get("/api/rooms/meta")
 async def rooms_meta(campus: str = ""):
-    """校区/教学楼/节次时刻表 + 学期周次范围（日期换算用应用自己的开学日期）。"""
+    """校区/教学楼/节次时刻表 + 学期周次范围（日期换算用应用自己的开学日期）。
+
+    未指定 campus 时使用「课表来源」里设置的默认校区；默认校区失效则退回教务第一校区。
+    """
     from .providers.base import AuthExpiredError
+    cfg = load_config()
+    rcfg = cfg.get("rooms") or {}
+    default_id = str(rcfg.get("default_campus") or "").strip()
+    default_name = str(rcfg.get("default_campus_name") or "").strip()
     provider = _rooms_provider()
     try:
-        meta = await provider.fetch_room_meta(campus.strip())
+        meta = await provider.fetch_room_meta(campus.strip() or default_id)
+        ids = {str(c.get("id")) for c in meta.get("campuses") or []}
+        if default_id and default_id not in ids:
+            # 教务里已经没有这个校区（换了学期或校区代码），别让下拉框空着
+            default_id, default_name = "", ""
+            if not campus.strip():
+                meta = await provider.fetch_room_meta("")
     except AuthExpiredError as e:
         raise HTTPException(400, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"空教室查询失败: {e}")
-    cfg = load_config()
     today = date.today()
     semester_start = cfg.get("semester_start", "")
     meta.update({
@@ -642,6 +654,8 @@ async def rooms_meta(campus: str = ""):
         "current_week": current_week(semester_start, today, 40),
         "today": today.isoformat(),
         "today_weekday": today.isoweekday(),
+        "default_campus": default_id,
+        "default_campus_name": default_name,
     })
     return meta
 
@@ -659,6 +673,8 @@ async def rooms_free(date_s: str = "", start: int = 1, end: int = 2,
     if not (1 <= start <= end <= 12):
         raise HTTPException(400, "节次范围无效")
     cfg = load_config()
+    # 未指定校区时用「课表来源」里的默认校区，免得每次查教室都重选
+    campus = campus.strip() or str((cfg.get("rooms") or {}).get("default_campus") or "").strip()
     week = current_week(cfg.get("semester_start", ""), d, 40)
     if week < 1:
         raise HTTPException(400, "该日期还没开学，查不了空教室")
@@ -667,7 +683,7 @@ async def rooms_free(date_s: str = "", start: int = 1, end: int = 2,
     provider = _rooms_provider()
     try:
         rooms = await provider.fetch_free_rooms(
-            week, d.isoweekday(), start, end, campus.strip(), building.strip())
+            week, d.isoweekday(), start, end, campus, building.strip())
     except AuthExpiredError as e:
         raise HTTPException(400, str(e))
     except ValueError as e:

@@ -260,6 +260,22 @@ _cfg_room["provider"] = {**_cfg_room.get("provider", {}), "zhengfang": {
 save_config(_cfg_room)
 check("空教室.AI 上下文已就绪提示",
       "空教室查询：已就绪" in build_context(load_config()))
+# 空教室默认校区：配置项存在，设置后注入 AI 上下文与配置现状，未设置则不出现
+check("默认校区.配置含默认项",
+      "default_campus" in load_config().get("rooms", {}), "")
+_cfg_room["rooms"] = {"default_campus": "05", "default_campus_name": "黄岛校区"}
+save_config(_cfg_room)
+_ctx_def = build_context(load_config())
+check("默认校区.已注入 AI 上下文",
+      "用户默认校区：黄岛校区" in _ctx_def, _ctx_def[-300:])
+check("默认校区.配置现状含默认校区",
+      "空教室默认校区：黄岛校区" in _ctx_def, _ctx_def[-500:])
+check("默认校区.提示词要求按默认查询",
+      "用户默认校区" in SYSTEM_PROMPT, "")
+_cfg_room["rooms"] = {"default_campus": "", "default_campus_name": ""}
+save_config(_cfg_room)
+check("默认校区.未设置不注入",
+      "用户默认校区：" not in build_context(load_config()), "")
 _cfg_room["provider"]["zhengfang"]["username"] = ""
 _cfg_room["provider"]["zhengfang"]["password"] = ""
 save_config(_cfg_room)
@@ -961,6 +977,15 @@ async def http_tests(port: int):
         check("天气.接口关闭返回空表", w.get("ok") is True
               and w.get("enabled") is False and w.get("hours") == {}, str(w)[:200])
         await ca.post(f"{base}/api/settings", json={"weather": {"enabled": True}})
+        await ca.post(f"{base}/api/settings", json={"rooms": {
+            "default_campus": "05", "default_campus_name": "黄岛校区"}})
+        st = (await ca.get(f"{base}/api/settings")).json()
+        check("默认校区.设置接口保存并回读",
+              (st.get("rooms") or {}).get("default_campus") == "05"
+              and st["rooms"].get("default_campus_name") == "黄岛校区",
+              str(st.get("rooms"))[:160])
+        await ca.post(f"{base}/api/settings", json={"rooms": {
+            "default_campus": "", "default_campus_name": ""}})
         r = await ca.post(f"{base}/api/ingest",
                           json={"payload": {"code": 200, "data": {"courses": tt["courses"]}},
                                 "push": False, "source": "test"})

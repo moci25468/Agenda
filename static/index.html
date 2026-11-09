@@ -3727,6 +3727,22 @@
             </div>
           </div>
         </div>
+
+        <div class="card">
+          <h2>空教室默认设置</h2>
+          <p class="hint">
+            查空教室要选的参数太多，可以在这里设一个默认校区：「空教室」页会自动选中它，在 AI 里直接问「今天下午哪有空教室」也会默认查询这个校区。需要先配置正方教务。
+          </p>
+          <div class="form-grid">
+            <label class="field"><span>默认校区</span>
+              <select id="defaultCampusSelect"><option value="">加载中…</option></select>
+            </label>
+          </div>
+          <div class="form-actions">
+            <button id="saveDefaultCampusBtn">保存默认校区</button>
+          </div>
+          <span class="hint" id="defaultCampusState"></span>
+        </div>
       </section>
 
       <!-- 用户管理 -->
@@ -5801,7 +5817,11 @@
           '<div class="ep-head">空教室查询</div><div class="ep-meta">正在查询正方教务…</div>';
         try {
           if (!roomMeta) roomMeta = await api("/api/rooms/meta");
-          const campusId = roomResolveName(roomMeta.campuses, query.campus);
+          // AI 没写校区时用「课表来源」里设的默认校区，避免查成全部校区
+          const campusId = query.campus
+            ? roomResolveName(roomMeta.campuses, query.campus)
+            : (roomMeta.default_campus || "");
+          const campusName = query.campus || roomMeta.default_campus_name || "";
           let buildings = roomMeta.buildings;
           if (campusId && campusId !== roomMeta.campus) {
             const m2 = await api("/api/rooms/meta?campus=" + encodeURIComponent(campusId));
@@ -5816,7 +5836,7 @@
           const res = {
             date: data.date, week: data.week, day: data.day,
             start: data.start, end: data.end,
-            campus: query.campus, building: query.building,
+            campus: campusName, building: query.building,
             campusId, buildingId, count: data.count,
             rooms: data.rooms.slice(0, 12).map((r) => ({
               name: r.name, code: r.code, building: r.building, seats: r.seats,
@@ -5827,7 +5847,8 @@
         } catch (e) {
           const res = {
             error: e.message, date: query.date, start: query.start, end: query.end,
-            campus: query.campus, building: query.building,
+            campus: query.campus || (roomMeta && roomMeta.default_campus_name) || "",
+            building: query.building,
           };
           renderRoomCard(card, query, res);
           save(res);
@@ -6177,10 +6198,74 @@
           if (s.portal.url) {
             $("#curlInput").placeholder = "已配置：" + s.portal.url;
           }
+          loadDefaultCampus(s.zhengfang.configured);
         } catch (e) {
           toast(e.message, 4000);
         }
       }
+
+      let defaultCampusLoading = false;
+      async function loadDefaultCampus(configured) {
+        const sel = $("#defaultCampusSelect");
+        const btn = $("#saveDefaultCampusBtn");
+        if (!configured) {
+          sel.innerHTML = '<option value="">先配置正方教务</option>';
+          sel.disabled = true;
+          btn.disabled = true;
+          $("#defaultCampusState").textContent =
+            "保存正方学号密码后，这里会列出可选校区。";
+          return;
+        }
+        if (defaultCampusLoading) return;
+        defaultCampusLoading = true;
+        sel.disabled = false;
+        btn.disabled = false;
+        try {
+          if (!roomMeta) roomMeta = await api("/api/rooms/meta");
+          sel.innerHTML = '<option value="">不设默认（每次手动选）</option>' +
+            roomMeta.campuses
+              .map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`)
+              .join("");
+          const cfg = await api("/api/settings");
+          const def = (cfg.rooms && cfg.rooms.default_campus) || "";
+          sel.value = [...sel.options].some((o) => o.value === def) ? def : "";
+          $("#defaultCampusState").textContent = def
+            ? "当前默认：" + (sel.selectedOptions[0] || {}).textContent
+            : "未设默认校区，空教室页会使用教务默认校区。";
+        } catch (e) {
+          sel.innerHTML = '<option value="">校区加载失败</option>';
+          $("#defaultCampusState").textContent = e.message;
+        } finally {
+          defaultCampusLoading = false;
+        }
+      }
+      async function saveDefaultCampus() {
+        const sel = $("#defaultCampusSelect");
+        const btn = $("#saveDefaultCampusBtn");
+        const id = sel.value || "";
+        const name = id ? ((sel.selectedOptions[0] || {}).textContent || "").trim() : "";
+        btn.disabled = true;
+        try {
+          await api("/api/settings", {
+            method: "POST",
+            body: JSON.stringify({
+              rooms: { default_campus: id, default_campus_name: name },
+            }),
+          });
+          toast(id ? "默认校区已设为 " + name : "已取消默认校区");
+          $("#defaultCampusState").textContent = id
+            ? "当前默认：" + name
+            : "未设默认校区，空教室页会使用教务默认校区。";
+          // 让空教室页下次进入时按新默认重新取 meta
+          roomMeta = null;
+          roomLastQuery = null;
+        } catch (e) {
+          toast(e.message, 4000);
+        } finally {
+          btn.disabled = false;
+        }
+      }
+      $("#saveDefaultCampusBtn").addEventListener("click", saveDefaultCampus);
 
       /* ---------- 用户管理 ---------- */
       const ACTION_CN = {

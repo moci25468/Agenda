@@ -189,8 +189,13 @@ def build_context(cfg: dict, extra_weeks: list[int] | None = None) -> str:
         for m in memories[:50]:
             lines.append(f"- {m['content']}")
 
+    default_campus = str((cfg.get("rooms") or {}).get("default_campus_name") or "").strip()
     if zhengfang_configured(cfg):
-        lines.append("空教室查询：已就绪，用户问空教室/自习教室时按提示词中的空教室规则输出查询标记。")
+        line = "空教室查询：已就绪，用户问空教室/自习教室时按提示词中的空教室规则输出查询标记。"
+        if default_campus:
+            line += (f"用户默认校区：{default_campus}（用户没提校区时 campus 填这个名称；"
+                     "明确说了别的校区就按用户说的）。")
+        lines.append(line)
     else:
         lines.append("空教室查询：未配置正方教务账号；被问到时引导用户去「课表来源」填写正方学号密码，不要输出查询标记。")
 
@@ -221,6 +226,7 @@ def _config_status_lines(cfg: dict) -> str:
     src = provider.get("type", "mock")
     src_name = {"portal": "融合门户", "zhengfang": "正方教务", "mock": "演示数据"}.get(src, src)
     zf = zhengfang_configured(cfg)
+    default_campus = str((cfg.get("rooms") or {}).get("default_campus_name") or "").strip()
 
     parts = [
         "应用配置现状（用于辅导用户使用本应用，回答相关问题时据此给出针对性引导，"
@@ -231,6 +237,7 @@ def _config_status_lines(cfg: dict) -> str:
         f"- 日历订阅：{'已开启（有订阅链接）' if sub_token else '未开启'}。",
         f"- 天气：{'已开启' if weather_on else '已关闭'}，位置 {place}。",
         f"- 课表来源：{src_name}" + ("（正方已配置）" if zf else "") + "。",
+        f"- 空教室默认校区：{default_campus or '未设置'}。",
         f"- AI 接口：{'已配置' if (ai_cfg.get('enabled') and ai_cfg.get('api_key')) else '未配置'}。",
     ]
     return "\n".join(parts)
@@ -283,7 +290,7 @@ SYSTEM_PROMPT = """你是「Agenda 知序」，一个友好、简洁的校园 AI
    系统会自动保存并注入后续对话，可以说「记住了」。只记长期稳定的事实（身份、偏好、习惯、目标）；一次性安排用日程标记；用户没明确要求记住时不要输出；一次最多一行。
 10. 用户询问空教室或自习教室时（如「今天下午哪里有空教室」），末尾单独一行输出：
     [查空教室] {{"date": "YYYY-MM-DD", "start": 1, "end": 2, "campus": "", "building": ""}}
-    date 按注入的今天推算；start/end 为节次（1-12，一般上午 1-4、下午 5-8、晚上 9-11），用户没说节次时按上午/下午/晚上选对应大节；campus 填校区名（市北/长江路/临沂/黄岛），building 填教学楼名，未指定留空；一次最多一行。系统会实时查询并把结果卡片展示给用户，结果会回写进对话供后续参考。上下文提示未配置时不要输出标记，改为引导用户去「课表来源」填写正方学号密码；不要自己编造教室名单。
+    date 按注入的今天推算；start/end 为节次（1-12，一般上午 1-4、下午 5-8、晚上 9-11），用户没说节次时按上午/下午/晚上选对应大节；campus 填校区名（市北/长江路/临沂/黄岛），用户没提校区时优先填上下文里的「用户默认校区」，没有默认值再留空，用户明确说了别的校区就按用户说的填；building 填教学楼名，未指定留空；一次最多一行。系统会实时查询并把结果卡片展示给用户，结果会回写进对话供后续参考。上下文提示未配置时不要输出标记，改为引导用户去「课表来源」填写正方学号密码；不要自己编造教室名单。
 11. 每次回答末尾还要给出 2-3 个与当前话题紧密相关、用户最可能接着问的选项，最后一行输出：
     [追问] ["第一个完整问题或指令", "第二个完整问题或指令", "第三个完整问题或指令"]
     每项 6-20 个汉字，可直接点击发送；要具体、有实际下一步价值，不要重复用户刚问的问题，不要用「了解更多」「继续」这种空泛表述，不要编号。追问可引用当前回答（如「那明天呢」「换成周五再查」）。用户只是告别或明确说不需要继续时可省略。

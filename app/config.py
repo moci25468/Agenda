@@ -84,6 +84,10 @@ DEFAULT_CONFIG = {
         "lat": 35.96,               # 纬度
         "lon": 120.20,              # 经度
     },
+    "rooms": {
+        "default_campus": "",       # 空教室默认校区（正方 xqh_id），查询时自动带入
+        "default_campus_name": "",  # 校区名称，供 AI 上下文与展示使用
+    },
     "ai": {
         "enabled": False,
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
