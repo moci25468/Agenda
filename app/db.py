@@ -248,6 +248,15 @@ def add_push_log(channel: str, title: str, body: str, status: str, error: str = 
         )
 
 
+def list_push_logs(limit: int = 10) -> list[dict]:
+    """最近的推送结果，不含正文，供设置页展示失败原因。"""
+    with get_conn() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT id, ts, channel, title, status, error FROM push_log "
+            "WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+            (_uid(), max(1, min(limit, 50)))).fetchall()]
+
+
 def reminder_sent(day: str, item_key: str) -> bool:
     """今天这个事项是否已经推过提前提醒（每分钟轮询靠它去重）。"""
     with get_conn() as conn:

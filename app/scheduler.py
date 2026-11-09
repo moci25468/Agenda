@@ -27,6 +27,7 @@ _scheduler: BackgroundScheduler | None = None
 JOB_ID = "daily_timetable_sync"
 REMINDER_JOB_ID = "class_reminders"
 NEXT_DAY_JOB_ID = "next_day_summary"
+BACKUP_JOB_ID = "daily_backup"
 
 
 def section_time(cfg: dict, section: int, end: bool = False) -> str:
@@ -490,6 +491,17 @@ def _next_day_job_wrapper():
             current_user_id.reset(ctx)
 
 
+def _backup_job_wrapper():
+    """每日备份整库与全局配置；不分用户，失败只打日志，不影响其他任务。"""
+    from .backup import backup_now
+
+    try:
+        path = backup_now()
+        print(f"[backup] 已备份到 {path}", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[backup] 备份失败：{type(e).__name__}: {e}", flush=True)
+
+
 def start_scheduler(cfg: dict):
     global _scheduler
     if _scheduler is None:
@@ -507,6 +519,20 @@ def start_scheduler(cfg: dict):
         id=NEXT_DAY_JOB_ID, replace_existing=True, max_instances=1,
         coalesce=True, misfire_grace_time=120,
     )
+    # 每天凌晨备份一次数据库；进程启动时当天还没备份就补一份
+    _scheduler.add_job(
+        _backup_job_wrapper, CronTrigger(hour=3, minute=20, timezone=TZ),
+        id=BACKUP_JOB_ID, replace_existing=True, max_instances=1,
+        coalesce=True, misfire_grace_time=3600,
+    )
+    try:
+        from .backup import BACKUP_DIR
+
+        today = datetime.now(TZ).strftime("%Y%m%d")
+        if not (BACKUP_DIR / f"campus-{today}.db").exists():
+            _backup_job_wrapper()
+    except Exception as e:  # noqa: BLE001
+        print(f"[backup] 启动备份失败：{type(e).__name__}: {e}", flush=True)
     reschedule(cfg)
 
 

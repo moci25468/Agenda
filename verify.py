@@ -31,7 +31,7 @@ from app.config import load_config as _load_cfg, save_config as _save_cfg
 from app import db as _db
 from datetime import date, datetime, timedelta
 from app.push import (push_all, send_wecom, _wecom_url, WECOM_API,
-                      send_selected, available_channels)
+                      send_selected, available_channels, wecom_input_error)
 from app.scheduler import (run_sync, format_changes, courses_on, section_time,
                            run_reminders, push_exam_reviews, TZ)
 import app.scheduler as _sched
@@ -988,7 +988,28 @@ async def main():
           and "标题" in _wecom_hits[-1][1]["text"]["content"]
           and "正文" in _wecom_hits[-1][1]["text"]["content"], str(_wecom_hits[-1:]))
     ok, err = await send_wecom({"push": {"wecom_webhook": WECOM_FAIL}}, "t", "b")
-    check("群机器人.失败反馈", ok is False and "invalid" in err, err)
+    check("群机器人.失败反馈翻译", ok is False and "Webhook 无效" in err
+          and "93000" in err, err)
+    # 地址校验：后台网页、裸 hex、缺 key 都要在保存前挡住
+    check("群机器人.管理后台地址被识别",
+          "管理后台" in wecom_input_error(
+              "https://work.weixin.qq.com/wework_admin/common/openBotProfile/242cbb"))
+    check("群机器人.裸 hex 不是 key",
+          "既不是完整地址也不是 key" in wecom_input_error("242cbb531ae9a13ea3604a2819a0af87"))
+    check("群机器人.合法 key 通过",
+          wecom_input_error("242cbb53-1ae9-a13e-a360-4a2819a0af87") == ""
+          and wecom_input_error("a" * 64) == "")
+    check("群机器人.合法地址通过",
+          wecom_input_error(WECOM_API + "242cbb53-1ae9-a13e-a360-4a2819a0af87") == ""
+          and wecom_input_error("") == "")
+    check("群机器人.缺 key 的接口地址被识别",
+          "缺少 key" in wecom_input_error("https://qyapi.weixin.qq.com/cgi-bin/webhook/send"))
+    _bad = await send_wecom({"push": {"wecom_webhook": "242cbb531ae9a13ea3604a2819a0af87"}},
+                            "t", "b")
+    check("群机器人.非法值不发请求", _bad[0] is False and "key" in _bad[1], str(_bad))
+    check("群机器人.非法值不算已配置",
+          available_channels({"push": {"wecom_enabled": True,
+                                       "wecom_webhook": "2" * 34}}) == [])
     check("群机器人.未配置优雅失败",
           (await send_wecom({"push": {}}, "t", "b"))[0] is False)
     _cw = load_config()
@@ -1028,6 +1049,28 @@ async def main():
     logs = db.get_logs(10)
     check("同步日志落库", len(logs["sync"]) >= 2)
     check("推送日志落库", len(logs["push"]) >= 2)
+    check("推送.最近记录接口字段", db.list_push_logs(3)
+          and {"ts", "channel", "status", "error"} <= set(db.list_push_logs(3)[0]))
+
+    # 7a. 每日备份：在线快照可读、权限收紧、过期文件被清理
+    import sqlite3 as _sq
+
+    from app.backup import BACKUP_DIR as _bk_dir, backup_now as _backup_now
+    _bk = _backup_now()
+    check("备份.生成当日快照", _bk.exists() and _bk.stat().st_size > 0, str(_bk))
+    with _sq.connect(_bk) as _bconn:
+        check("备份.副本完整可读",
+              _bconn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+              and _bconn.execute(
+                  "SELECT count(*) FROM sqlite_master WHERE type='table'").fetchone()[0] > 0)
+    check("备份.文件权限 600", oct(_bk.stat().st_mode)[-3:] == "600",
+          oct(_bk.stat().st_mode))
+    _old_bk = _bk_dir / "campus-19990101.db"
+    _old_bk.write_text("old")
+    _old_ts = time.time() - 9 * 86400
+    os.utime(_old_bk, (_old_ts, _old_ts))
+    _backup_now()
+    check("备份.过期文件被清理", not _old_bk.exists())
 
     # 8. 配置保存 + 掩码保留密钥
     cfg3 = load_config()
@@ -1316,6 +1359,21 @@ async def http_tests(port: int):
         check("推送.状态列出企业微信通道",
               "wecom" in st_push.get("push_channels", []),
               str(st_push.get("push_channels")))
+        lg = (await ca.get(f"{base}/api/push/log?limit=5")).json().get("logs") or []
+        check("推送.最近记录可读", lg and {"ts", "channel", "status"} <= set(lg[0]),
+              str(lg[:1])[:200])
+        # 非法地址在保存阶段就被拦下，不会存进配置
+        r = await ca.post(f"{base}/api/settings", json={"push": {
+            "wecom_webhook": "https://work.weixin.qq.com/wework_admin/common/openBotProfile/242cbb"}})
+        check("推送.管理后台地址保存被拒", r.status_code == 400
+              and "管理后台" in r.text, str(r.text)[:200])
+        r = await ca.post(f"{base}/api/settings", json={"push": {
+            "wecom_webhook": "242cbb531ae9a13ea3604a2819a0af87"}})
+        check("推送.裸 hex 保存被拒", r.status_code == 400 and "key" in r.text,
+              str(r.text)[:200])
+        keep = (await ca.get(f"{base}/api/settings")).json().get("push", {})
+        check("推送.被拒后配置未被覆盖", keep.get("wecom_webhook") == WECOM_OK,
+              str(keep.get("wecom_webhook"))[:80])
         await ca.post(f"{base}/api/settings", json={"push": {
             "wecom_enabled": False, "wecom_webhook": ""}})
         r = await ca.post(f"{base}/api/ingest",

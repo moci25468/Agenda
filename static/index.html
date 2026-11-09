@@ -4358,10 +4358,24 @@
             ><input name="push.wecom_webhook" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."
           /></label>
           <p class="hint">
-            在企业微信群里「添加群机器人」复制 Webhook 地址粘贴到这里，也可以只填 key；钉钉群机器人同理。安卓手机在微信 / 企业微信里就能收到，和 Bark 可同时开启。
+            在<strong>企业微信客户端</strong>打开群聊 → 右上角「…」→ 群机器人 → 添加机器人，复制形如
+            <code>https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…</code>
+            的地址粘贴到这里；也可以只填 key（36 位带横线）。钉钉群机器人同理。管理后台
+            <code>work.weixin.qq.com</code> 的网页地址不能用作推送地址。
           </p>
           <div class="form-actions">
             <button id="testWecomBtn">发送测试消息</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>最近推送</h2>
+          <p class="hint">
+            测试、课前提醒、每日推送与 AI 推送的最近结果，失败会写明原因。
+          </p>
+          <div id="pushLogList"></div>
+          <div class="form-actions">
+            <button id="refreshPushLogBtn">刷新</button>
           </div>
         </div>
 
@@ -7476,7 +7490,10 @@
           loadAdminLog();
           refreshInvites();
         }
-        if (tab === "settings") loadSettings();
+        if (tab === "settings") {
+          loadSettings();
+          loadPushLog();
+        }
         // 切到 AI 页时滚到底部：历史在页面加载时（容器还隐藏）就渲染了，
         // 那时的滚底无效，需等 tab 可见、布局完成后重新定位到最后一条消息。
         if (tab === "ai") {
@@ -7810,6 +7827,33 @@
           btn.disabled = false;
         }
       });
+      async function loadPushLog() {
+        try {
+          const r = await api("/api/push/log?limit=8");
+          const logs = r.logs || [];
+          $("#pushLogList").innerHTML = logs.length
+            ? logs
+                .map((x) => {
+                  const ok = x.status === "ok";
+                  const state =
+                    ok ? "成功" : x.status === "skip" ? "跳过" : "失败";
+                  const detail = ok ? "" : `：${x.error || ""}`;
+                  const time = esc((x.ts || "").slice(5, 16));
+                  return `<div class="memory-row"><div>
+                      <div class="m-content">${esc(x.title || "推送")} · ${esc(pushChannelName(x.channel))}</div>
+                      <div class="m-date">${time} · ${
+                        ok
+                          ? state
+                          : `<span class="push-err">${esc(state + detail)}</span>`
+                      }</div>
+                    </div></div>`;
+                })
+                .join("")
+            : `<div class="empty"><div class="empty-title">还没有推送记录</div><div class="empty-sub">点上面的「发送测试消息」试一次。</div></div>`;
+        } catch (e) {
+          $("#pushLogList").innerHTML = `<div class="hint">读取失败：${esc(e.message)}</div>`;
+        }
+      }
       async function runPushTest(channel, btn) {
         try {
           if (btn) btn.disabled = true;
@@ -7829,10 +7873,12 @@
           toast(e.message, 4000);
         } finally {
           if (btn) btn.disabled = false;
+          loadPushLog();
         }
       }
       $("#testPushBtn").addEventListener("click", (e) => runPushTest("", e.currentTarget));
       $("#testWecomBtn").addEventListener("click", (e) => runPushTest("wecom", e.currentTarget));
+      $("#refreshPushLogBtn").addEventListener("click", () => loadPushLog());
 
       /* ---------- 启动 ---------- */
       /* ---------- 多用户：登录 / 注册 / 邀请码 ---------- */

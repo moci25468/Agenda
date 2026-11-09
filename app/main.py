@@ -29,7 +29,7 @@ from .models import (
 )
 from .providers import get_provider
 from .providers.zhengfang import ZhengfangProvider, zhengfang_configured
-from .push import available_channels, push_all, send_selected
+from .push import available_channels, push_all, send_selected, wecom_input_error
 from .scheduler import (
     WEEKDAY_CN, apply_snapshot, courses_on, next_run_time, reschedule, run_sync,
     section_time, shutdown_scheduler, start_scheduler,
@@ -962,6 +962,11 @@ async def get_settings():
 
 @app.post("/api/settings")
 async def post_settings(cfg: dict):
+    hook = str(((cfg or {}).get("push") or {}).get("wecom_webhook") or "")
+    if hook and hook != MASK:
+        bad = wecom_input_error(hook)
+        if bad:
+            raise HTTPException(400, bad)
     try:
         saved = save_config(cfg)
     except (ValueError, TypeError) as e:
@@ -1148,6 +1153,11 @@ class PushSendRequest(BaseModel):
     title: str = ""
     body: str = ""
     channels: list[str] = []
+
+
+@app.get("/api/push/log")
+async def push_log(limit: int = 10):
+    return {"logs": db.list_push_logs(limit)}
 
 
 @app.post("/api/push/test")
