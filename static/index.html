@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#f5f5f7" />
+    <meta name="theme-color" content="#1e211c" media="(prefers-color-scheme: dark)" />
     <meta name="description" content="Agenda 知序 — 青岛理工大学日程、课表、考试与校园问答。" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -3475,6 +3476,271 @@
         .auth-eyebrow { margin-bottom: 14px; }
         .auth-card { padding: 23px 20px; }
       }
+      /* 下一节课直达条 */
+      .next-class {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        width: 100%;
+        margin: 16px 0 2px;
+        padding: 13px 16px;
+        border: 1px solid var(--line);
+        border-left: 3px solid var(--accent);
+        border-radius: 12px;
+        background: var(--accent-soft);
+        text-align: left;
+      }
+      .next-class:hover { opacity: 1; border-color: var(--accent); background: var(--accent-soft); }
+      .next-class .nc-main { flex: 1; min-width: 0; }
+      .next-class .nc-kicker { color: var(--accent); font-size: 10px; font-weight: 650; letter-spacing: 0.1em; }
+      .next-class .nc-name {
+        margin-top: 2px;
+        color: var(--text);
+        font-size: 16px;
+        font-weight: 650;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .next-class .nc-meta { margin-top: 2px; color: var(--sub); font-size: 12px; }
+      .next-class .nc-count { flex: 0 0 auto; text-align: right; }
+      .next-class .nc-count b {
+        display: block;
+        color: var(--accent);
+        font-size: 24px;
+        font-weight: 680;
+        line-height: 1.1;
+        letter-spacing: -0.02em;
+        font-variant-numeric: tabular-nums;
+      }
+      .next-class .nc-count span { color: var(--sub); font-size: 10px; }
+      .next-class .nc-arrow { flex: 0 0 auto; color: var(--sub); font-size: 14px; }
+
+      /* 周课表卡片：直达空教室 */
+      #nav button svg { display: none; }
+      .mini-course .mc-rooms {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        min-height: 0;
+        margin-top: 6px;
+        padding: 2px 7px;
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        background: var(--card);
+        color: var(--sub);
+        font-size: 10px;
+        font-weight: 500;
+      }
+      .mini-course .mc-rooms:hover { border-color: var(--accent); background: var(--card); color: var(--accent); }
+      .mini-course .mc-rooms span { font-size: 9px; }
+
+      /* 空教室：座位筛选、折叠分组、座位数强调 */
+      .room-result-selects { display: flex; gap: 8px; flex-wrap: wrap; }
+      .room-result-bar { flex-wrap: wrap; }
+      .room-building { border-top: 1px solid var(--line); }
+      .room-building:first-child { border-top: 0; }
+      .room-building summary {
+        padding: 12px 0;
+        cursor: pointer;
+        list-style: none;
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .room-building summary::-webkit-details-marker { display: none; }
+      .room-building summary::before {
+        content: "▸";
+        display: inline-block;
+        margin-right: 7px;
+        color: var(--sub);
+        font-size: 11px;
+        transition: transform 0.15s ease;
+      }
+      .room-building[open] summary::before { transform: rotate(90deg); }
+      .room-building .rb-count { color: var(--sub); font-size: 12px; font-weight: 400; }
+      .room-building .rb-list { padding-bottom: 4px; }
+      .room-row { align-items: center; gap: 12px; padding: 12px 0; }
+      .room-seats { flex: 0 0 auto; text-align: right; color: var(--sub); font-size: 11px; }
+      .room-seats b {
+        display: block;
+        color: var(--text);
+        font-size: 17px;
+        font-weight: 650;
+        line-height: 1.2;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* 考试倒计时 */
+      .exam-countdown { flex: 0 0 auto; align-self: center; text-align: right; }
+      .exam-countdown b {
+        display: block;
+        color: var(--accent);
+        font: 650 28px/1 Georgia, "Times New Roman", serif;
+        letter-spacing: -0.03em;
+        font-variant-numeric: tabular-nums;
+      }
+      .exam-countdown span { display: block; margin-top: 4px; color: var(--sub); font-size: 10px; letter-spacing: 0.04em; }
+      .exam-countdown.urgent b { color: var(--warn); }
+
+      /* 长对话：加载更早消息 */
+      .chat-more {
+        align-self: center;
+        min-height: 30px;
+        margin: 0 0 14px;
+        padding: 5px 14px;
+        border: 1px dashed var(--line);
+        border-radius: 999px;
+        background: transparent;
+        color: var(--sub);
+        font-size: 11px;
+      }
+      .chat-more:hover { border-color: var(--accent); background: transparent; color: var(--accent); }
+
+      /* 移动端底部标签栏 */
+      @media (max-width: 720px) {
+        #nav {
+          position: fixed;
+          left: 0;
+          right: 0;
+          top: auto;
+          bottom: 0;
+          z-index: 45;
+          display: flex;
+          gap: 0;
+          margin: 0;
+          padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+          border: 0;
+          border-top: 1px solid var(--line);
+          border-radius: 0;
+          background: rgba(255, 255, 255, 0.94);
+          box-shadow: 0 -8px 24px rgba(35, 51, 39, 0.06);
+        }
+        #nav button {
+          flex: 1 1 0;
+          min-width: 0;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 2px;
+          min-height: 46px;
+          padding: 4px 0;
+          border-radius: 9px;
+          font-size: 10px;
+          font-weight: 500;
+          white-space: nowrap;
+        }
+        #nav button svg { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+        #nav button.active { background: var(--accent-soft); box-shadow: none; }
+        .wrap { padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
+        #toast { bottom: calc(86px + env(safe-area-inset-bottom)); }
+        .next-class { gap: 10px; padding: 12px 13px; }
+        .next-class .nc-name { font-size: 15px; }
+        .next-class .nc-count b { font-size: 21px; }
+        .exam-countdown b { font-size: 24px; }
+      }
+
+      /* 深色模式：跟随系统，暖调纸面反转 */
+      :root { color-scheme: light dark; }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #1e211c;
+          --card: #272b24;
+          --text: #e6e8e1;
+          --sub: #99a195;
+          --muted: #99a195;
+          --line: #3a4036;
+          --accent: #9cc4a8;
+          --accent-hover: #b3d4be;
+          --accent-soft: #2f3d31;
+          --ok: #8fbf9a;
+          --ok-soft: #2c3a2e;
+          --warn: #d3a06c;
+          --warn-soft: #3a3226;
+          --fail: #d98a80;
+          --fail-soft: #3d2c28;
+          --shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 12px 36px rgba(0, 0, 0, 0.16);
+        }
+        body { background: var(--bg); }
+        ::selection { background: #33452f; color: #dfe9da; }
+        button { border-color: var(--line); background: var(--card); }
+        button:hover { border-color: #4a5246; background: #31362c; }
+        button.primary { color: #17251b; box-shadow: none; }
+        button.primary:hover { color: #17251b; }
+        button.danger { border-color: #6b443c; }
+        button.danger:hover { border-color: #8a5a50; background: var(--fail-soft); }
+        input, select, textarea { border-color: var(--line); background: #22261f; }
+        input:hover, select:hover, textarea:hover { border-color: #4a5246; }
+        input:focus, select:focus, textarea:focus {
+          border-color: #6d8f78;
+          background: var(--card);
+          box-shadow: 0 0 0 3px rgba(156, 196, 168, 0.12);
+        }
+        input::placeholder, textarea::placeholder { color: #6f776c; }
+        .brand-cn { background: rgba(255, 255, 255, 0.06); }
+        #userBox { background: rgba(255, 255, 255, 0.05); }
+        #syncBtn { color: #17251b; }
+        #syncBtn:hover { color: #17251b; }
+        .badge { border-color: #5a4c36; }
+        .statusbar { border-color: var(--line); background: rgba(255, 255, 255, 0.03); }
+        .statusbar span:not(:last-child)::after { background: #556052; }
+        nav { border-color: var(--line); background: rgba(39, 43, 36, 0.92); box-shadow: 0 8px 26px rgba(0, 0, 0, 0.25); }
+        nav button:hover { background: #31362c; }
+        nav button.active { box-shadow: none; }
+        .card, .today-card { border-color: var(--line); }
+        .day-head, .today-card .day-head { border-bottom-color: var(--line); }
+        .course-row { border-top-color: var(--line); }
+        .source-card { background: var(--card); }
+        .week-grid-scroll { scrollbar-color: #4a5246 transparent; }
+        .week-head-cell, .week-period { background: #2d322a; }
+        .week-cell.today { background: #2c3529; }
+        .mini-course,
+        .mini-course.tone-0, .mini-course.tone-1, .mini-course.tone-2,
+        .mini-course.tone-3, .mini-course.tone-4 { border-left-color: #7ba98a; background: #2c3a2e; }
+        .mini-course.tone-1 { border-left-color: #8aa3bd; background: #2c343d; }
+        .mini-course.tone-2 { border-left-color: #bd9c76; background: #3a342a; }
+        .mini-course.tone-3 { border-left-color: #a49cc4; background: #34313d; }
+        .mini-course.tone-4 { border-left-color: #7fb3af; background: #2a3a38; }
+        .mini-course .t, .mini-course .r, .mini-course .w { color: #a3aca0; }
+        .chat-head { border-bottom-color: var(--line); background: var(--card); }
+        .chat-head-actions button { background: #31362c; }
+        .ai-status-dot { background: #7ba98a; box-shadow: 0 0 0 4px #2f3d31; }
+        .chat-msgs { background: #232620; scrollbar-color: #4a5246 transparent; }
+        .msg.user { color: #17251b; box-shadow: none; }
+        .msg.user .msg-actions button { color: inherit; }
+        .msg.ai { border-color: var(--line); background: var(--card); box-shadow: none; }
+        .msg.ai:last-child { border-bottom-color: var(--line); }
+        .msg.ai.error { border-color: #5a3a33; }
+        .msg.ai .md-table th { background: #31362c; color: #c6cec2; }
+        .msg.ai .md-table tbody tr:nth-child(even) td { background: #262a23; }
+        .msg.ai .md-quote { border-left-color: #5f7a66; background: #2c3129; }
+        .msg.ai code { background: #333d31; color: #b9d2bf; }
+        .msg.ai .md-li::before { color: #7f9a85; }
+        .reply-followups { border-top-color: var(--line); }
+        .reply-followup { border-color: var(--line); background: #2e342b; color: #a9c4af; }
+        .reply-followup::after { color: #7d8b7f; }
+        .reply-followup:hover { border-color: #556052; background: var(--accent-soft); color: var(--accent); }
+        .chips { border-top-color: var(--line); background: var(--card); }
+        .chips button { border-color: var(--line); background: #2e332b; color: #a7afa3; }
+        .chips button:hover { border-color: #556052; background: var(--accent-soft); color: var(--accent); }
+        .chat-input { background: var(--card); }
+        .chat-input input { background: #22261f; }
+        .chat-input-hint { background: var(--card); color: #7d857b; }
+        .chat-more:hover { background: transparent; }
+        .sheet { background: rgba(0, 0, 0, 0.55); }
+        .sheet-panel { border-color: var(--line); box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45); }
+        #toast { background: #3c4437; border-color: rgba(255, 255, 255, 0.14); color: #f0f2ec; }
+        .auth-tabs { background: #2e332b; }
+        .auth-tabs button:hover { background: rgba(255, 255, 255, 0.06); }
+        .auth-tabs button.primary { background: #3a4136; color: var(--accent); box-shadow: none; }
+        .auth-card { border-color: var(--line); box-shadow: none; }
+        .auth-title span { background: rgba(255, 255, 255, 0.06); }
+        .auth-features { border-top-color: var(--line); }
+        .auth-features > div { border-bottom-color: var(--line); }
+        #nav { background: rgba(39, 43, 36, 0.94); box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.3); }
+        .next-class:hover { background: var(--accent-soft); }
+        .mini-course .mc-rooms:hover { background: var(--card); }
+      }
       @media (prefers-reduced-motion: reduce) {
         *,
         *::before,
@@ -3544,13 +3810,13 @@
       </header>
       <div class="statusbar" id="statusbar"></div>
       <nav id="nav" aria-label="主导航">
-        <button data-tab="today" class="active">今日</button>
-        <button data-tab="week">课表</button>
-        <button data-tab="rooms">空教室</button>
-        <button data-tab="ai">AI 助手</button>
-        <button data-tab="source">课表来源</button>
-        <button data-tab="admin" id="adminNavBtn" class="hidden">用户管理</button>
-        <button data-tab="settings">设置</button>
+        <button data-tab="today" class="active"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 9.5h17M8 3v4M16 3v4M8.5 14l2.2 2.2 4.3-4.4"/></svg>今日</button>
+        <button data-tab="week"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M10 4v16"/></svg>课表</button>
+        <button data-tab="rooms"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 20.5V4.5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v16M3.5 20.5h17"/><circle cx="14.7" cy="12" r="1" fill="currentColor" stroke="none"/></svg>空教室</button>
+        <button data-tab="ai"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5c.7 3.8 2.7 5.8 6.5 6.5-3.8.7-5.8 2.7-6.5 6.5-.7-3.8-2.7-5.8-6.5-6.5 3.8-.7 5.8-2.7 6.5-6.5z"/><path d="M18.5 15.5c.3 1.7 1.2 2.6 2.9 2.9-1.7.3-2.6 1.2-2.9 2.9-.3-1.7-1.2-2.6-2.9-2.9 1.7-.3 2.6-1.2 2.9-2.9z"/></svg>AI 助手</button>
+        <button data-tab="source"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 14.5l5-5M8.5 11.5l-2.2 2.2a3.6 3.6 0 0 0 5.1 5.1l2.1-2.2M15.5 12.5l2.2-2.2a3.6 3.6 0 0 0-5.1-5.1l-2.1 2.2"/></svg>课表来源</button>
+        <button data-tab="admin" id="adminNavBtn" class="hidden"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="3"/><path d="M3.5 19.5c.6-3 2.7-4.5 5.5-4.5s4.9 1.5 5.5 4.5M16 5.7a2.8 2.8 0 0 1 0 5.6M17 15.2c2 .5 3.2 1.9 3.6 4.3"/></svg>用户管理</button>
+        <button data-tab="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17.5 7H20M4 17h2.5M11 17h9"/><circle cx="15.2" cy="7" r="2.2"/><circle cx="8.7" cy="17" r="2.2"/></svg>设置</button>
       </nav>
 
       <!-- 今日 -->
@@ -3566,6 +3832,7 @@
               <span id="todayCount"></span>
             </div>
           </div>
+          <button type="button" id="nextClassBar" class="next-class hidden" aria-label="下一节课，点击查看周课表"></button>
           <div id="todayList"></div>
         </div>
         <!-- 今日无安排时展示，方便规划明日 -->
@@ -3641,7 +3908,16 @@
           </div>
           <div class="room-result-bar hidden" id="roomResultBar">
             <span class="muted" id="roomCount"></span>
-            <select id="roomCategory" aria-label="按类别筛选"></select>
+            <div class="room-result-selects">
+              <select id="roomSeats" aria-label="按座位数筛选">
+                <option value="">全部座位数</option>
+                <option value="0-40">小教室 · ≤40 座</option>
+                <option value="41-80">41–80 座</option>
+                <option value="81-150">81–150 座</option>
+                <option value="151-99999">大教室 · >150 座</option>
+              </select>
+              <select id="roomCategory" aria-label="按类别筛选"></select>
+            </div>
           </div>
           <div id="roomResult">
             <div class="empty"><div class="empty-title">查自习、找空教室</div><div class="empty-sub">选择日期与节次后点击查询，数据来自正方教务，实时更新。</div></div>
@@ -3672,13 +3948,13 @@
           <div class="chat-msgs" id="chatMsgs" aria-live="polite">
             <div class="msg ai">你好，我是知序。课程、考试、空教室和个人日程都可以问我；也可以直接说「明天下午三点开会」或「记住我喜欢坐前排」。</div>
           </div>
-          <div class="chips" id="chatChips" aria-label="推荐问题">
-            <span class="chips-label">可以试试</span>
-            <button type="button">我明天有什么安排？</button>
+          <div class="chips" id="chatChips" aria-label="快捷操作">
+            <span class="chips-label">快捷</span>
+            <button type="button">查空教室</button>
+            <button type="button" data-prefill="添加日程：">添加日程</button>
+            <button type="button">明天有什么课？</button>
             <button type="button">这周哪天没课？</button>
             <button type="button">我最近有什么考试？</button>
-            <button type="button">今天下午哪里有空教室？</button>
-            <button type="button">帮我记一下：周五晚7点社团聚餐</button>
           </div>
           <div class="chat-input">
             <input
@@ -4367,6 +4643,7 @@
         d.textContent = s ?? "";
         return d.innerHTML;
       }
+      const escAttr = (s) => esc(s).replace(/"/g, "&quot;");
 
       /* ---------- 状态与今日 ---------- */
       async function loadStatus() {
@@ -4443,13 +4720,57 @@
         const time = e.start && e.end ? `${e.start}–${e.end}` : e.display_time || e.time;
         const meta = [time, e.room || "考场待定", e.seat ? `座位 ${e.seat}` : ""]
           .filter(Boolean).map(esc).join(" · ");
+        let when = "";
+        if (!e.finished) {
+          const now = new Date();
+          const pad = (n) => String(n).padStart(2, "0");
+          const today = weekData?.today ||
+            `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+          const days = Math.round(
+            (d - new Date(today + "T00:00:00")) / 86400000,
+          );
+          if (days === 0) when = "今天";
+          else if (days === 1) when = "明天";
+          else if (days > 1) when = `${days} 天后`;
+        }
         return `<div class="course-row event-row exam-agenda${e.finished ? " done" : ""}">
     <div class="course-time"><div class="range">${esc(e.date.slice(5).replace("-", "/"))}</div><div class="sections">${esc(dow)}</div></div>
     <div class="course-main">
-      <div class="course-name">${esc(e.name)}<span class="event-tag">考试</span></div>
+      <div class="course-name">${esc(e.name)}<span class="event-tag">考试</span>${when ? `<span class="exam-when">${when}</span>` : ""}</div>
       ${meta ? `<div class="course-meta">${meta}</div>` : ""}
     </div>
   </div>`;
+      }
+
+      // 今日页顶部：正在上 / 下一节课 + 倒计时，点一下直达周课表
+      function renderNextClass() {
+        const bar = $("#nextClassBar");
+        const courses = (weekData?.today_courses || [])
+          .filter((c) => c.start_time && c.end_time)
+          .sort((a, b) => a.start_time.localeCompare(b.start_time));
+        const now = new Date();
+        const hm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+        const nowMin = now.getHours() * 60 + now.getMinutes();
+        const toMin = (t) => {
+          const [h, m] = t.split(":").map(Number);
+          return h * 60 + m;
+        };
+        const current = courses.find((c) => c.start_time <= hm && hm < c.end_time);
+        const pick = current || courses.find((c) => c.start_time > hm);
+        if (!pick) {
+          bar.innerHTML = `<div class="nc-main"><div class="nc-kicker">${courses.length ? "今日课程已结束" : "今日无课"}</div><div class="nc-name">${courses.length ? "今天的课都上完了" : "今天没有课程安排"}</div></div><div class="nc-arrow">›</div>`;
+        } else {
+          const left = Math.max(0, (current ? toMin(pick.end_time) : toMin(pick.start_time)) - nowMin);
+          const meta = [pick.room || "教室待定", pick.campus || ""].filter(Boolean).join(" · ");
+          bar.innerHTML = `<div class="nc-main">
+        <div class="nc-kicker">${current ? `正在上课 · 第 ${pick.start}–${pick.end} 节` : "下一节课"}</div>
+        <div class="nc-name">${esc(pick.name)}</div>
+        <div class="nc-meta">${esc(pick.start_time)}–${esc(pick.end_time)}${meta ? " · " + esc(meta) : ""}</div>
+      </div>
+      <div class="nc-count"><b>${left}</b><span>分钟${current ? "后下课" : "后上课"}</span></div>
+      <div class="nc-arrow">›</div>`;
+        }
+        bar.classList.remove("hidden");
       }
 
       async function loadToday() {
@@ -4487,6 +4808,7 @@
         }
         // 今日页同时承载个人日程与未考完的考试
         await loadEvents().catch(() => {});
+        renderNextClass();
       }
 
       // 今日无安排时，在下方展示「明日安排」模块，方便提前规划
@@ -4640,6 +4962,45 @@
       let roomLastQuery = null;
       // AI 卡片跳转时指定的节次，进入空教室页后优先按它查询
       let roomPending = null;
+      // 折叠状态：null 表示新查询未初始化，跨筛选重渲染时保留用户展开/收起
+      let roomOpenState = null;
+
+      function roomFilterKey() {
+        return "agenda.rooms." + (currentUser?.username || "0");
+      }
+      function roomReadFilters() {
+        try { return JSON.parse(localStorage.getItem(roomFilterKey()) || "{}"); }
+        catch (e) { return {}; }
+      }
+      function roomSaveFilters() {
+        try {
+          localStorage.setItem(roomFilterKey(), JSON.stringify({
+            campus: $("#roomCampus").value || "",
+            building: $("#roomBuilding").value || "",
+            seats: $("#roomSeats").value || "",
+            category: $("#roomCategory").value || "",
+          }));
+        } catch (e) {}
+      }
+
+      // 按当前时间预选节次：正在上的节 → 否则最近将开始的节 → 否则最后一节
+      function roomNowBlock(periods) {
+        const now = new Date();
+        const hm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+        const list = (periods || []).filter((p) => p.time && p.time.includes("-"));
+        let jc = null;
+        if (list.length) {
+          const cur = list.find((p) => {
+            const [s, e] = p.time.split("-");
+            return s <= hm && hm <= e;
+          });
+          const next = list.find((p) => p.time.split("-")[0] > hm);
+          jc = (cur || next || list[list.length - 1]).jc;
+        }
+        const maxJc = list.length ? Math.max(...list.map((p) => p.jc)) : 10;
+        const start = jc ? Math.floor((jc - 1) / 2) * 2 + 1 : 1;
+        return { start, end: Math.min(start + 1, Math.max(maxJc, start)) };
+      }
 
       function roomFillSelect(sel, options, keepValue) {
         const prev = keepValue ? sel.value : "";
@@ -4666,8 +5027,9 @@
         roomFillSelect($("#roomStart"), opts, keepSelections);
         roomFillSelect($("#roomEnd"), opts, keepSelections);
         if (!keepSelections) {
-          $("#roomStart").value = "1";
-          $("#roomEnd").value = "2";
+          const block = roomNowBlock(periods);
+          $("#roomStart").value = String(block.start);
+          $("#roomEnd").value = String(block.end);
         }
         if (!$("#roomDate").value) $("#roomDate").value = m.today;
         if (m.semester_start) {
@@ -4704,6 +5066,20 @@
             roomMeta = await api("/api/rooms/meta" + (campus ? "?campus=" + encodeURIComponent(campus) : ""));
           }
           roomFillMeta(!!campus);
+          // 记住上次筛选：校区优先于教务默认；跳转查询时不覆盖带来的条件
+          const saved = roomReadFilters();
+          if (!campus && !roomPending && saved.campus &&
+              saved.campus !== roomMeta.campus &&
+              roomMeta.campuses.some((c) => c.id === saved.campus)) {
+            roomMeta = await api("/api/rooms/meta?campus=" + encodeURIComponent(saved.campus));
+            roomFillMeta(true);
+          }
+          if (!roomPending && saved.building &&
+              [...$("#roomBuilding").options].some((o) => o.value === saved.building))
+            $("#roomBuilding").value = saved.building;
+          if (saved.seats &&
+              [...$("#roomSeats").options].some((o) => o.value === saved.seats))
+            $("#roomSeats").value = saved.seats;
           if (roomPending) {
             const p = roomPending;
             roomPending = null;
@@ -4727,25 +5103,34 @@
       });
 
       function roomRow(r) {
-        const meta = [r.category, r.seats ? `${r.seats} 座` : "", r.campus]
-          .filter(Boolean).map(esc).join(" · ");
+        const meta = [r.category, r.campus].filter(Boolean).map(esc).join(" · ");
         return `<div class="course-row room-row">
     <div class="course-main">
       <div class="course-name">${esc(r.name)}${r.code && r.code !== r.name ? `<span class="event-tag">${esc(r.code)}</span>` : ""}</div>
       ${meta ? `<div class="course-meta">${meta}</div>` : ""}
     </div>
+    ${r.seats ? `<div class="room-seats"><b>${r.seats}</b><span>座</span></div>` : ""}
   </div>`;
       }
 
       function renderRooms() {
         const cat = $("#roomCategory").value;
-        const rooms = cat ? roomCache.filter((r) => r.category === cat) : roomCache;
-        $("#roomCount").textContent = cat
+        const seatVal = $("#roomSeats").value;
+        const [lo, hi] = (seatVal || "").split("-").map(Number);
+        const rooms = roomCache.filter((r) => {
+          if (cat && r.category !== cat) return false;
+          if (seatVal && !Number.isNaN(lo)) {
+            const s = r.seats || 0;
+            if (s < lo || s > hi) return false;
+          }
+          return true;
+        });
+        $("#roomCount").textContent = cat || seatVal
           ? `${rooms.length} 间（共 ${roomCache.length} 间）`
           : `共 ${roomCache.length} 间`;
         if (!rooms.length) {
           $("#roomResult").innerHTML =
-            `<div class="empty"><div class="empty-title">没有符合条件的空教室</div><div class="empty-sub">换个节次、教学楼或校区试试。</div></div>`;
+            `<div class="empty"><div class="empty-title">没有符合条件的空教室</div><div class="empty-sub">换个节次、教学楼、座位数或校区试试。</div></div>`;
           return;
         }
         const groups = new Map();
@@ -4754,13 +5139,28 @@
           if (!groups.has(key)) groups.set(key, []);
           groups.get(key).push(r);
         });
+        if (roomOpenState === null) {
+          // 楼少时全部展开，楼多时只展开第一栋，长列表更清爽
+          roomOpenState = new Set(
+            [...groups.keys()].slice(0, groups.size <= 2 ? groups.size : 1),
+          );
+        }
         let html = "";
         for (const [building, list] of groups) {
-          html += `<div class="exam-group">${esc(building)} · ${list.length} 间</div>`
-            + list.map(roomRow).join("");
+          html += `<details class="room-building" data-building="${escAttr(building)}"${roomOpenState.has(building) ? " open" : ""}>
+      <summary>${esc(building)}<span class="rb-count"> · ${list.length} 间</span></summary>
+      <div class="rb-list">${list.map(roomRow).join("")}</div>
+    </details>`;
         }
         $("#roomResult").innerHTML = html;
       }
+      $("#roomResult").addEventListener("toggle", (e) => {
+        const d = e.target;
+        if (!d.matches || !d.matches("details.room-building")) return;
+        if (!roomOpenState) roomOpenState = new Set();
+        if (d.open) roomOpenState.add(d.dataset.building);
+        else roomOpenState.delete(d.dataset.building);
+      }, true);
 
       async function queryRooms() {
         if (roomBusy) return;
@@ -4786,10 +5186,14 @@
           const cats = [...new Set(roomCache.map((r) => r.category).filter(Boolean))];
           roomFillSelect($("#roomCategory"),
             [{ v: "", t: "全部类别" }, ...cats.map((c) => ({ v: c, t: c }))], true);
+          const savedCat = roomReadFilters().category;
+          if (savedCat && cats.includes(savedCat)) $("#roomCategory").value = savedCat;
           $("#roomSub").textContent =
             `第 ${data.week} 周 ${WEEKDAY[data.day - 1]} · 第 ${data.start}–${data.end} 节`;
           $("#roomResultBar").classList.remove("hidden");
+          roomOpenState = null;
           renderRooms();
+          roomSaveFilters();
         } catch (e) {
           roomError("查询失败", e.message);
         } finally {
@@ -4800,7 +5204,9 @@
       }
 
       $("#roomQueryBtn").addEventListener("click", queryRooms);
-      $("#roomCategory").addEventListener("change", renderRooms);
+      $("#roomCategory").addEventListener("change", () => { roomSaveFilters(); renderRooms(); });
+      $("#roomSeats").addEventListener("change", () => { roomSaveFilters(); renderRooms(); });
+      $("#roomBuilding").addEventListener("change", roomSaveFilters);
       $("#roomCampus").addEventListener("change", (e) => loadRooms(e.target.value));
       $("#roomStart").addEventListener("change", () => {
         if (parseInt($("#roomEnd").value, 10) < parseInt($("#roomStart").value, 10))
@@ -4872,6 +5278,7 @@
         <div class="n">${esc(c.name)}</div>
         <div class="r">${esc(c.room || "教室待定")}${c.note ? " · " + esc(c.note) : ""}</div>
         ${wline}
+        <button type="button" class="mc-rooms" data-mc-rooms data-date="${iso}" data-start="${c.start}" data-end="${c.end}" data-room="${escAttr(c.room || "")}" data-campus="${escAttr(c.campus || "")}">查空教室<span>↗</span></button>
       </div>`;
                   })
                   .join("")
@@ -4904,6 +5311,54 @@
         renderWeek(data);
         if (data.week === data.current_week) loadWeather();
       }
+
+      // 课程卡片 → 空教室：把日期、节次、校区与教学楼直接带过去
+      $("#weekGrid").addEventListener("click", async (e) => {
+        const btn = e.target.closest("button[data-mc-rooms]");
+        if (!btn || btn.disabled) return;
+        btn.disabled = true;
+        try {
+          if (!roomMeta) {
+            roomMeta = await api("/api/rooms/meta");
+            roomFillMeta(true);
+          }
+          const campusName = btn.dataset.campus;
+          if (campusName) {
+            const hit = roomMeta.campuses.find(
+              (c) => c.name.includes(campusName) || campusName.includes(c.name),
+            );
+            if (hit && hit.id !== roomMeta.campus) {
+              roomMeta = await api("/api/rooms/meta?campus=" + encodeURIComponent(hit.id));
+              roomFillMeta(true);
+            }
+          }
+          const roomName = btn.dataset.room;
+          const b = roomName
+            ? roomMeta.buildings.find((x) => roomName.includes(x.name))
+            : null;
+          roomPending = {
+            date: btn.dataset.date,
+            start: parseInt(btn.dataset.start, 10) || 1,
+            end: parseInt(btn.dataset.end, 10) || 2,
+            building: b ? b.id : "",
+          };
+          switchTab("rooms");
+          // 空教室页已有结果时不会自动加载，这里直接按课程条件查询
+          if (roomPending) {
+            const p = roomPending;
+            roomPending = null;
+            $("#roomDate").value = p.date;
+            $("#roomStart").value = String(p.start);
+            $("#roomEnd").value = String(p.end);
+            $("#roomBuilding").value = p.building;
+            await queryRooms();
+          }
+        } catch (err) {
+          toast(err.message, 4000);
+        } finally {
+          btn.disabled = false;
+        }
+      });
 
       /* ---------- 编辑课表 ---------- */
       let courseData = null;
@@ -5349,6 +5804,7 @@
         const md = `${d.getMonth() + 1}/${d.getDate()}`;
         const dow = WEEKDAY[d.getDay() === 0 ? 6 : d.getDay() - 1];
         let when = "";
+        let countdown = "";
         if (!e.finished && examData?.today) {
           const days = Math.round(
             (new Date(e.date + "T00:00:00") -
@@ -5357,7 +5813,10 @@
           );
           if (days === 0) when = "今天";
           else if (days === 1) when = "明天";
-          else if (days > 1) when = `${days} 天后`;
+          else if (days > 1) {
+            when = `${days} 天后`;
+            countdown = `<div class="exam-countdown${days <= 3 ? " urgent" : ""}"><b>${days}</b><span>天后考试</span></div>`;
+          }
         }
         const time =
           e.start && e.end ? `${e.start}–${e.end}` : e.display_time || e.time;
@@ -5373,6 +5832,7 @@
       <div class="exam-meta">${meta}</div>
       ${extra ? `<div class="exam-meta">${extra}</div>` : ""}
     </div>
+    ${countdown}
   </div>`;
       }
       async function loadExams() {
@@ -5586,12 +6046,10 @@
       const CHAT_WELCOME =
         "你好，我是知序。课程、考试、空教室和个人日程都可以问我；也可以直接说「明天下午三点开会」或「记住我喜欢坐前排」。";
 
-      // 编辑重发：从某条消息起截断历史与 DOM，再重新发送
+      // 编辑重发：从某条消息起截断历史，再按窗口重渲染
       function truncateChat(k) {
         if (k < chatHistory.length) chatHistory.length = k;
-        $$("#chatMsgs .msg[data-hidx]").forEach((d) => {
-          if (parseInt(d.dataset.hidx, 10) >= k) d.remove();
-        });
+        renderChatWindow();
       }
       function startEditMsg(div, hidx) {
         const original = chatHistory[hidx]?.content;
@@ -5627,6 +6085,16 @@
           return;
         }
         if (chatBusy) return;
+        if (btn.id === "chatMoreBtn") {
+          const box = $("#chatMsgs");
+          const prevH = box.scrollHeight;
+          const prevT = box.scrollTop;
+          chatRenderLimit += CHAT_WINDOW;
+          renderChatWindow();
+          // 保持视觉锚点：新加载的消息撑高多少，就把滚动位置下移多少
+          box.scrollTop = box.scrollHeight - prevH + prevT;
+          return;
+        }
         if (btn.dataset.followup) {
           sendChat(btn.dataset.followup);
           return;
@@ -5655,21 +6123,43 @@
           body: JSON.stringify({ messages: chatHistory }),
         }).catch(() => {});
       }
+      // 长对话只渲染最近 N 条，更早的按需向上加载，避免整页越拉越长
+      const CHAT_WINDOW = 30;
+      let chatRenderLimit = CHAT_WINDOW;
+      function renderChatWindow() {
+        const box = $("#chatMsgs");
+        box.innerHTML = "";
+        if (!chatHistory.length) {
+          box.innerHTML = `<div class="msg ai">${CHAT_WELCOME}</div>`;
+          return;
+        }
+        const hidden = Math.max(0, chatHistory.length - chatRenderLimit);
+        if (hidden > 0) {
+          const more = document.createElement("button");
+          more.type = "button";
+          more.id = "chatMoreBtn";
+          more.className = "chat-more";
+          more.textContent = `加载更早的消息（还有 ${hidden} 条）`;
+          box.appendChild(more);
+        }
+        chatHistory.slice(hidden).forEach((m, i) => {
+          const hidx = hidden + i;
+          if (m.role === "user") {
+            addMsg("user", m.content, false, hidx);
+          } else {
+            const bubble = addMsg("ai", "", false, hidx);
+            renderAiContent(bubble, m.content, true);
+          }
+        });
+      }
       async function loadChatHistory() {
         try {
           const r = await api("/api/chat/history");
           const msgs = r.messages || [];
           if (!msgs.length) return;
           chatHistory = msgs;
-          $("#chatMsgs").innerHTML = "";
-          msgs.forEach((m, i) => {
-            if (m.role === "user") {
-              addMsg("user", m.content, false, i);
-            } else {
-              const bubble = addMsg("ai", "", false, i);
-              renderAiContent(bubble, m.content, true);
-            }
-          });
+          chatRenderLimit = CHAT_WINDOW;
+          renderChatWindow();
           // 所有消息渲染完后滚到底，避免最后一条 AI 长回复把位置顶回中间
           requestAnimationFrame(() => scrollChatToBottom(true));
         } catch (e) {}
@@ -6206,6 +6696,7 @@
         try {
           await api("/api/chat/clear", { method: "POST" });
           chatHistory = [];
+          chatRenderLimit = CHAT_WINDOW;
           $("#chatMsgs").innerHTML = `<div class="msg ai">${CHAT_WELCOME}</div>`;
           toast("对话已清空");
         } catch (e) { toast(e.message, 4000); }
@@ -6449,9 +6940,14 @@
           $("#defaultCampusState").textContent = id
             ? "当前默认：" + name
             : "未设默认校区，空教室页会使用教务默认校区。";
-          // 让空教室页下次进入时按新默认重新取 meta
+          // 让空教室页下次进入时按新默认重新取 meta，记忆的校区也让位给新默认
           roomMeta = null;
           roomLastQuery = null;
+          const saved = roomReadFilters();
+          if (saved.campus) {
+            saved.campus = "";
+            try { localStorage.setItem(roomFilterKey(), JSON.stringify(saved)); } catch (e) {}
+          }
         } catch (e) {
           toast(e.message, 4000);
         } finally {
@@ -6564,6 +7060,8 @@
 
       /* ---------- Tab 切换 ---------- */
       function switchTab(tab) {
+        // 移动端底部导航切页后回到顶部，避免停在上一页的滚动位置
+        if (window.matchMedia("(max-width: 720px)").matches) window.scrollTo(0, 0);
         $$("#nav button").forEach((b) =>
           b.classList.toggle("active", b.dataset.tab === tab),
         );
@@ -6725,13 +7223,23 @@
       $("#backTodayBtn").addEventListener("click", () =>
         loadWeek(Math.max(weekRender?.current_week || status?.week || 1, 1)),
       );
+      $("#nextClassBar").addEventListener("click", () => switchTab("week"));
+      setInterval(() => {
+        if (weekData && !$("#tab-today").classList.contains("hidden")) renderNextClass();
+      }, 30000);
       $("#chatSend").addEventListener("click", () => sendChat());
       $("#chatInput").addEventListener("keydown", (e) => {
         if (e.key === "Enter") sendChat();
       });
       $("#chatChips").addEventListener("click", (e) => {
         const btn = e.target.closest("button");
-        if (btn) sendChat(btn.textContent.trim());
+        if (!btn) return;
+        if (btn.dataset.prefill) {
+          $("#chatInput").value = btn.dataset.prefill;
+          $("#chatInput").focus();
+          return;
+        }
+        sendChat(btn.textContent.trim());
       });
       $("#importCurlBtn").addEventListener("click", async () => {
         const text = $("#curlInput").value.trim();
