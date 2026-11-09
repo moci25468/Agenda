@@ -293,6 +293,17 @@
         color: var(--sub);
         white-space: nowrap;
       }
+      .room-card .rc-periods {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      .room-card .rc-periods button.active {
+        border-color: var(--accent);
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
 
       /* 考试 */
       .exam-group {
@@ -4587,6 +4598,8 @@
       let roomCache = [];
       let roomBusy = false;
       let roomLastQuery = null;
+      // AI 卡片跳转时指定的节次，进入空教室页后优先按它查询
+      let roomPending = null;
 
       function roomFillSelect(sel, options, keepValue) {
         const prev = keepValue ? sel.value : "";
@@ -4651,6 +4664,16 @@
             roomMeta = await api("/api/rooms/meta" + (campus ? "?campus=" + encodeURIComponent(campus) : ""));
           }
           roomFillMeta(!!campus);
+          if (roomPending) {
+            const p = roomPending;
+            roomPending = null;
+            $("#roomDate").value = p.date;
+            $("#roomStart").value = String(p.start);
+            $("#roomEnd").value = String(p.end);
+            $("#roomBuilding").value = p.building;
+            await queryRooms();
+            return;
+          }
           if (!roomLastQuery) await queryRooms();
         } catch (e) {
           roomError("空教室暂不可用", e.message);
@@ -5852,12 +5875,14 @@
           if (!Number.isInteger(hidx) || chatHistory[hidx]?.role !== "assistant"
               || chatHistory[hidx].content !== acc) return;
           const base = acc.trimEnd();
-          let sample = res.rooms || [];
-          let payload = JSON.stringify({ ...res, rooms: sample });
-          // 历史单条上限 4000 字：超长时递减样本，保证结果标记不被截掉
-          while (base.length + payload.length + 20 > 3900 && sample.length > 0) {
-            sample = sample.slice(0, Math.max(0, sample.length - 4));
-            payload = JSON.stringify({ ...res, rooms: sample });
+          let payload = JSON.stringify(res);
+          // 历史单条上限 4000 字：超长时递减各节次样本，保证结果标记不被截掉
+          const groups = res.groups || [];
+          while (base.length + payload.length + 20 > 3900) {
+            const g = [...groups].reverse().find((x) => (x.rooms || []).length);
+            if (!g) break;
+            g.rooms = g.rooms.slice(0, Math.max(0, g.rooms.length - 4));
+            payload = JSON.stringify(res);
           }
           chatHistory[hidx].content = base + "\n[空教室结果] " + payload;
           persistChat();
@@ -5877,19 +5902,36 @@
             buildings = m2.buildings;
           }
           const buildingId = roomResolveName(buildings, query.building);
-          const params = new URLSearchParams({
-            date_s: query.date, start: query.start, end: query.end,
-            campus: campusId, building: buildingId,
-          });
-          const data = await api("/api/rooms/free?" + params.toString());
+          // 按大节拆开查询，卡片上可以按第几节切换查看
+          const blocks = roomPeriodBlocks(query.start, query.end);
+          const groups = [];
+          let week = null;
+          let day = null;
+          for (const b of blocks) {
+            if (blocks.length > 1) {
+              const step = card.querySelector(".ep-meta");
+              if (step) step.textContent = `正在查询第 ${b.start}–${b.end} 节…`;
+            }
+            const params = new URLSearchParams({
+              date_s: query.date, start: b.start, end: b.end,
+              campus: campusId, building: buildingId,
+            });
+            const data = await api("/api/rooms/free?" + params.toString());
+            if (week == null) { week = data.week; day = data.day; }
+            groups.push({
+              start: data.start, end: data.end, count: data.count,
+              rooms: data.rooms.slice(0, 8).map((r) => ({
+                name: r.name, code: r.code, building: r.building, seats: r.seats,
+              })),
+            });
+          }
           const res = {
-            date: data.date, week: data.week, day: data.day,
-            start: data.start, end: data.end,
+            date: query.date, week, day,
+            start: query.start, end: query.end,
             campus: campusName, building: query.building,
-            campusId, buildingId, count: data.count,
-            rooms: data.rooms.slice(0, 12).map((r) => ({
-              name: r.name, code: r.code, building: r.building, seats: r.seats,
-            })),
+            campusId, buildingId,
+            count: groups.reduce((n, g) => n + (g.count || 0), 0),
+            groups,
           };
           renderRoomCard(card, query, res);
           save(res);
@@ -5903,11 +5945,59 @@
           save(res);
         }
       }
+      // 把查询范围按大节拆开：第 1–4 节 → 1–2、3–4
+      function roomPeriodBlocks(start, end) {
+        const blocks = [];
+        let s = Math.max(1, start);
+        const stop = Math.max(s, end);
+        while (s <= stop) {
+          const e = Math.min(s + 1, stop);
+          blocks.push({ start: s, end: e });
+          s = e + 1;
+        }
+        return blocks;
+      }
       function renderRoomCard(card, query, res) {
         const q = query || res;
-        const when = `${q.date || ""} 第 ${q.start}–${q.end} 节`;
+        const groups = res.groups && res.groups.length
+          ? res.groups
+          : [{ start: q.start, end: q.end, count: res.count || 0, rooms: res.rooms || [] }];
+        const range = q.start ? ` · 第 ${q.start}–${q.end} 节` : "";
+        const when = `${q.date || ""}${range}`;
         const scope = [q.campus, q.building].filter(Boolean).join(" · ");
         const head = `<div class="ep-head">空教室查询 · ${esc(when)}${scope ? " · " + esc(scope) : ""}</div>`;
+        let pick = () => groups[0];
+        const draw = () => {
+          const sel = pick();
+          card.dataset.period = String(sel.start);
+          const chips = groups.length > 1
+            ? `<div class="rc-periods">` + groups.map((g) =>
+              `<button type="button" class="small${g === sel ? " active" : ""}" data-rc-period="${g.start}">第 ${g.start}–${g.end} 节 · ${g.count} 间</button>`).join("") + `</div>`
+            : "";
+          const rooms = sel.rooms || [];
+          const byBuilding = new Map();
+          rooms.forEach((r) => {
+            const k = r.building || "其他";
+            if (!byBuilding.has(k)) byBuilding.set(k, []);
+            byBuilding.get(k).push(r);
+          });
+          let list = "";
+          for (const [b, rs] of byBuilding) {
+            list += `<div class="rc-group">${esc(b)}</div>` + rs.map((r) =>
+              `<div class="rc-room"><span>${esc(r.name)}${r.code && r.code !== r.name ? ` <span class="event-tag">${esc(r.code)}</span>` : ""}</span><span class="rc-seats">${r.seats ? esc(r.seats) + " 座" : ""}</span></div>`).join("");
+          }
+          const title = groups.length > 1
+            ? `第 ${sel.start}–${sel.end} 节 · ${sel.count} 间空教室`
+            : `共 ${sel.count} 间空教室`;
+          card.innerHTML = head + chips +
+            `<div class="ep-title">${esc(title)}</div>` +
+            (list
+              ? `<div class="rc-list">${list}</div>`
+              : `<div class="ep-meta">${sel.count ? "结果较多，仅保留了数量统计" : "这一节没有空教室，换个节次看看"}</div>`) +
+            (rooms.length && sel.count > rooms.length
+              ? `<div class="ep-meta">仅展示前 ${rooms.length} 间</div>` : "") +
+            '<div class="ep-actions"><button class="small" data-rc="all">在空教室页查看全部</button></div>';
+        };
         if (res.error) {
           card.innerHTML = head +
             `<div class="ep-meta" style="color:var(--fail)">查询失败：${esc(res.error)}</div>` +
@@ -5915,29 +6005,24 @@
               ? '<div class="ep-actions"><button class="small" data-rc="source">去配置正方账号</button></div>'
               : "");
         } else {
-          const rooms = res.rooms || [];
-          const groups = new Map();
-          rooms.forEach((r) => {
-            const k = r.building || "其他";
-            if (!groups.has(k)) groups.set(k, []);
-            groups.get(k).push(r);
-          });
-          let list = "";
-          for (const [b, rs] of groups) {
-            list += `<div class="rc-group">${esc(b)}</div>` + rs.map((r) =>
-              `<div class="rc-room"><span>${esc(r.name)}${r.code && r.code !== r.name ? ` <span class="event-tag">${esc(r.code)}</span>` : ""}</span><span class="rc-seats">${r.seats ? esc(r.seats) + " 座" : ""}</span></div>`).join("");
-          }
-          card.innerHTML = head +
-            `<div class="ep-title">共 ${res.count} 间空教室</div>` +
-            (list ? `<div class="rc-list">${list}</div>` : "") +
-            (res.count > rooms.length
-              ? `<div class="ep-meta">仅展示前 ${rooms.length} 间</div>` : "") +
-            '<div class="ep-actions"><button class="small" data-rc="all">在空教室页查看全部</button></div>';
+          pick = () => {
+            const saved = parseInt(card.dataset.period, 10);
+            return groups.find((g) => g.start === saved)
+              || groups.find((g) => g.count > 0) || groups[0];
+          };
+          draw();
         }
         card.addEventListener("click", async (e) => {
+          const p = e.target.closest("button[data-rc-period]");
+          if (p) {
+            card.dataset.period = p.dataset.rcPeriod;
+            draw();
+            return;
+          }
           const btn = e.target.closest("button[data-rc]");
           if (!btn) return;
           if (btn.dataset.rc === "source") { switchTab("source"); return; }
+          const sel = pick();
           btn.disabled = true;
           try {
             // 先备好 meta 再切页，避免 switchTab 触发一次默认条件的自动查询
@@ -5946,12 +6031,23 @@
                 (res.campusId ? "?campus=" + encodeURIComponent(res.campusId) : ""));
               roomFillMeta(true);
             }
+            roomPending = {
+              date: res.date || roomMeta.today,
+              start: sel.start || 1,
+              end: sel.end || 2,
+              building: res.buildingId || "",
+            };
             switchTab("rooms");
-            $("#roomDate").value = res.date || roomMeta.today;
-            $("#roomStart").value = String(res.start || 1);
-            $("#roomEnd").value = String(res.end || 2);
-            $("#roomBuilding").value = res.buildingId || "";
-            await queryRooms();
+            // 空教室页已有上次结果时不会自动加载，这里直接按当前节次查询
+            if (roomPending) {
+              const p = roomPending;
+              roomPending = null;
+              $("#roomDate").value = p.date;
+              $("#roomStart").value = String(p.start);
+              $("#roomEnd").value = String(p.end);
+              $("#roomBuilding").value = p.building;
+              await queryRooms();
+            }
           } catch (err) { toast(err.message, 4000); }
           finally { btn.disabled = false; }
         });
