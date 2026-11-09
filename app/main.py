@@ -274,6 +274,18 @@ async def timetable(week: int | None = None):
     tomorrow_s = tomorrow.isoformat()
     tomorrow_events = [d | {"display_time": Event.from_dict(d).display_time()}
                        for d in db.list_events(date_from=tomorrow_s, date_to=tomorrow_s)]
+    # 考试也是日程的一部分：今日/明日时间线直接带上，考完前一直显示
+    exam_snap = db.get_exam_snapshot()
+    exam_items = apply_exam_overrides(
+        [Exam.from_dict(d) for d in exam_snap["exams"]],
+        _exam_overrides(cfg)) if exam_snap else []
+
+    def exams_on_day(day_s: str) -> list[dict]:
+        picked = sorted((e for e in exam_items if e.date == day_s),
+                        key=lambda e: (e.start or "23:59", e.name))
+        return [e.to_dict() | {"finished": e.is_finished(),
+                               "display_time": e.display_time()} for e in picked]
+
     return {
         "week": week,
         "current_week": cur_week,
@@ -289,10 +301,12 @@ async def timetable(week: int | None = None):
             "start_time": section_time(cfg, c.start), "end_time": section_time(cfg, c.end, end=True),
         } for c in courses_on(cfg, courses, today)],
         "today_events": today_events,
+        "today_exams": exams_on_day(today_s),
         "tomorrow_courses": [c.to_dict() | {
             "start_time": section_time(cfg, c.start), "end_time": section_time(cfg, c.end, end=True),
         } for c in courses_on(cfg, courses, tomorrow)],
         "tomorrow_events": tomorrow_events,
+        "tomorrow_exams": exams_on_day(tomorrow_s),
     }
 
 

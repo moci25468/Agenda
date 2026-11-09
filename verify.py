@@ -1118,6 +1118,25 @@ async def http_tests(port: int):
         check("考试.状态栏计数", st_ex.get("exam_count", 0) >= 2
               and st_ex.get("upcoming_exam_count", 0) >= 2
               and bool(st_ex.get("next_exam")), str(st_ex.get("next_exam"))[:160])
+        # 今日页合并日程：今日/明日考试随课表接口返回，供时间线展示
+        _today_d = date.today()
+        _tmr_d = _today_d + timedelta(days=1)
+        await ca.post(f"{base}/api/exams", json={"action": "add", "exam": {
+            "name": "今日日程考试", "date": _today_d.isoformat(),
+            "start": "23:00", "end": "23:59", "room": "1-101"}})
+        await ca.post(f"{base}/api/exams", json={"action": "add", "exam": {
+            "name": "明日日程考试", "date": _tmr_d.isoformat(),
+            "start": "09:00", "end": "11:00", "room": "2-202"}})
+        tt_d = (await ca.get(f"{base}/api/timetable")).json()
+        check("日程.今日考试进时间线",
+              any(e.get("name") == "今日日程考试"
+                  for e in tt_d.get("today_exams", [])),
+              str(tt_d.get("today_exams"))[:200])
+        check("日程.明日考试进明日安排",
+              any(e.get("name") == "明日日程考试"
+                  for e in tt_d.get("tomorrow_exams", [])),
+              str(tt_d.get("tomorrow_exams"))[:200])
+        await ca.post(f"{base}/api/exams", json={"action": "reset"})
         # 手动改课表：添加 → 修改 → 隐藏 → 恢复 → 修改同步课 → 重置
         base_list = (await ca.get(f"{base}/api/courses")).json()
         check("课表.列表带稳定标识", base_list.get("count", 0) > 0

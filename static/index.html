@@ -3507,7 +3507,6 @@
       <div class="statusbar" id="statusbar"></div>
       <nav id="nav" aria-label="主导航">
         <button data-tab="today" class="active">今日</button>
-        <button data-tab="events">日程</button>
         <button data-tab="week">课表</button>
         <button data-tab="rooms">空教室</button>
         <button data-tab="ai">AI 助手</button>
@@ -3542,13 +3541,10 @@
           </div>
           <div id="tomorrowList"></div>
         </div>
-      </section>
-
-      <!-- 个人日程 -->
-      <section id="tab-events" class="hidden">
+        <!-- 个人日程与考试：和今日合并，考完前一直列在这里 -->
         <div class="card">
           <div class="day-head">
-            <span class="date">个人日程</span>
+            <span class="date">日程</span>
             <div class="day-meta">
               <span class="muted" id="eventSub"></span>
               <button class="small" id="addEventBtn">添加日程</button>
@@ -3557,7 +3553,7 @@
           <div id="eventList"></div>
         </div>
         <p class="hint">
-          个人日程保存在你的服务器中，会并入今日安排、每日推送与 AI 问答；也可以在 AI 助手里说一句「明天下午三点开会」直接添加。
+          个人日程保存在你的服务器中，会并入今日安排、每日推送与 AI 问答；也可以在 AI 助手里说一句「明天下午三点开会」直接添加。考试会自动列在日程里，考完自动移除。
         </p>
       </section>
 
@@ -4376,6 +4372,21 @@
   </div>`;
       }
 
+      function agendaExamRow(e) {
+        const d = new Date(e.date + "T00:00:00");
+        const dow = WEEKDAY[d.getDay() === 0 ? 6 : d.getDay() - 1];
+        const time = e.start && e.end ? `${e.start}–${e.end}` : e.display_time || e.time;
+        const meta = [time, e.room || "考场待定", e.seat ? `座位 ${e.seat}` : ""]
+          .filter(Boolean).map(esc).join(" · ");
+        return `<div class="course-row event-row exam-agenda${e.finished ? " done" : ""}">
+    <div class="course-time"><div class="range">${esc(e.date.slice(5).replace("-", "/"))}</div><div class="sections">${esc(dow)}</div></div>
+    <div class="course-main">
+      <div class="course-name">${esc(e.name)}<span class="event-tag">考试</span></div>
+      ${meta ? `<div class="course-meta">${meta}</div>` : ""}
+    </div>
+  </div>`;
+      }
+
       async function loadToday() {
         weekData = await api("/api/timetable");
         if (viewWeek === null) viewWeek = Math.max(weekData.current_week, 1);
@@ -4388,14 +4399,17 @@
             : "假期";
         const courses = weekData.today_courses;
         const events = weekData.today_events || [];
-        // 课程与日程按开始时间混排；全天日程排最前
+        const exams = weekData.today_exams || [];
+        // 课程、日程与当天考试按开始时间混排；全天安排排最前
         const items = [
           ...events.map((e) => ({ sort: e.start || "00:00", html: eventRow(e) })),
+          ...exams.map((e) => ({ sort: e.start || "00:00", html: agendaExamRow(e) })),
           ...courses.map((c) => ({ sort: c.start_time || "99:99", html: courseRow(c) })),
         ].sort((a, b) => a.sort.localeCompare(b.sort));
         const countText = [
           courses.length ? `${courses.length} 门课程` : "",
           events.length ? `${events.length} 项日程` : "",
+          exams.length ? `${exams.length} 场考试` : "",
         ].filter(Boolean).join(" · ");
         $("#todayCount").textContent = countText || "今日无安排";
         if (items.length) {
@@ -4403,9 +4417,11 @@
           $("#tomorrowBlock").classList.add("hidden");
         } else {
           $("#todayList").innerHTML =
-            `<div class="empty"><div class="empty-title">今天没有课程和日程</div><div class="empty-sub">可以安心安排自己的时间，或去「日程」页添加一条安排。</div></div>`;
+            `<div class="empty"><div class="empty-title">今天没有课程和日程</div><div class="empty-sub">可以安心安排自己的时间，或点击下方「添加日程」。</div></div>`;
           renderTomorrow();
         }
+        // 今日页同时承载个人日程与未考完的考试
+        await loadEvents().catch(() => {});
       }
 
       // 今日无安排时，在下方展示「明日安排」模块，方便提前规划
@@ -4413,10 +4429,12 @@
         const block = $("#tomorrowBlock");
         const tmCourses = weekData.tomorrow_courses || [];
         const tmEvents = weekData.tomorrow_events || [];
+        const tmExams = weekData.tomorrow_exams || [];
         const d = new Date(weekData.tomorrow + "T00:00:00");
         const dow = WEEKDAY[d.getDay() === 0 ? 6 : d.getDay() - 1];
         const items = [
           ...tmEvents.map((e) => ({ sort: e.start || "00:00", html: eventRow(e) })),
+          ...tmExams.map((e) => ({ sort: e.start || "00:00", html: agendaExamRow(e) })),
           ...tmCourses.map((c) => ({ sort: c.start_time || "99:99", html: courseRow(c) })),
         ].sort((a, b) => a.sort.localeCompare(b.sort));
         $("#tomorrowDate").textContent =
@@ -4437,15 +4455,31 @@
         $("#eventEditorTitle").textContent = "添加明日日程";
       }
 
-      /* ---------- 个人日程 ---------- */
+      /* ---------- 个人日程（并入今日页） ---------- */
       let eventsCache = [];
       async function loadEvents() {
-        const data = await api("/api/events");
+        const [data, exams] = await Promise.all([
+          api("/api/events"),
+          api("/api/exams").catch(() => ({ exams: [] })),
+        ]);
         eventsCache = data.events;
         const upcoming = data.events.filter((e) => !e.finished);
         const past = data.events.filter((e) => e.finished);
-        $("#eventSub").textContent = upcoming.length ? `${upcoming.length} 项待办` : "";
-        let html = upcoming.map((e) => eventRow(e, true)).join("");
+        // 未考完的考试一直列在日程里，按日期与开始时间混排；考完自动移除
+        const upcomingExams = (exams.exams || []).filter((e) => !e.finished);
+        const items = [
+          ...upcoming.map((e) => ({
+            sort: `${e.date} ${e.start || "00:00"}`, html: eventRow(e, true),
+          })),
+          ...upcomingExams.map((e) => ({
+            sort: `${e.date} ${e.start || "00:00"}`, html: agendaExamRow(e),
+          })),
+        ].sort((a, b) => a.sort.localeCompare(b.sort));
+        $("#eventSub").textContent = [
+          upcoming.length ? `${upcoming.length} 项日程` : "",
+          upcomingExams.length ? `${upcomingExams.length} 场考试` : "",
+        ].filter(Boolean).join(" · ");
+        let html = items.map((x) => x.html).join("");
         if (past.length)
           html += `<div class="exam-group">已结束</div>` + past.map((e) => eventRow(e, true)).join("");
         $("#eventList").innerHTML = html ||
@@ -4504,7 +4538,6 @@
           closeEventEditor();
           toast(id ? "日程已保存" : "日程已添加");
           await Promise.all([loadStatus(), loadToday()]);
-          await loadEvents();
         } catch (err) {
           $("#eventFormError").textContent = err.message;
         } finally {
@@ -4530,7 +4563,6 @@
           });
           toast("日程已删除");
           await Promise.all([loadStatus(), loadToday()]);
-          await loadEvents();
         } catch (err) {
           toast(err.message, 4000);
         }
@@ -4596,10 +4628,14 @@
       }
       async function _loadRooms(campus = "") {
         try {
-          if (!roomMeta)
-            $("#roomResult").innerHTML =
-              `<div class="empty"><div class="empty-title">正在连接正方教务…</div><div class="empty-sub">首次需要登录教务，约几秒钟。</div></div>`;
-          roomMeta = await api("/api/rooms/meta" + (campus ? "?campus=" + encodeURIComponent(campus) : ""));
+          // 课表来源页设置默认校区时可能已经取过 meta，这里直接复用，
+          // 避免重复登录教务，也避免页面停在未查询的占位状态
+          if (!roomMeta || campus) {
+            if (!roomMeta)
+              $("#roomResult").innerHTML =
+                `<div class="empty"><div class="empty-title">正在连接正方教务…</div><div class="empty-sub">首次需要登录教务，约几秒钟。</div></div>`;
+            roomMeta = await api("/api/rooms/meta" + (campus ? "?campus=" + encodeURIComponent(campus) : ""));
+          }
           roomFillMeta(!!campus);
           if (!roomLastQuery) await queryRooms();
         } catch (e) {
@@ -5744,7 +5780,6 @@
               '<div class="ep-done">已添加到日程</div>';
             toast("日程已添加");
             await Promise.all([loadStatus(), loadToday()]);
-            if (!$("#tab-events").classList.contains("hidden")) await loadEvents();
           } catch (err) {
             btn.disabled = false;
             toast(err.message, 4000);
@@ -6374,12 +6409,11 @@
         $$("#nav button").forEach((b) =>
           b.classList.toggle("active", b.dataset.tab === tab),
         );
-        ["today", "events", "week", "rooms", "ai", "source", "admin", "settings"].forEach((t) =>
+        ["today", "week", "rooms", "ai", "source", "admin", "settings"].forEach((t) =>
           $("#tab-" + t).classList.toggle("hidden", t !== tab),
         );
-        if (tab === "events") loadEvents();
         if (tab === "today") loadToday();
-        if (tab === "rooms" && !roomMeta) loadRooms();
+        if (tab === "rooms" && (!roomMeta || !roomLastQuery)) loadRooms();
         if (tab === "week") {
           loadWeek(viewWeek ?? Math.max(status?.week || 1, 1));
           loadExams();
