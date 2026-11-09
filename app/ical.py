@@ -39,12 +39,17 @@ def _uid(c: Course, d: date) -> str:
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:24]
 
 
-def _course_events(cfg: dict, courses: list[Course]) -> list[dict]:
-    """把课程展开成具体事件列表（已去重、按时间排序）。"""
+def _course_events(cfg: dict, courses: list[Course],
+                   weather_map: dict | None = None) -> list[dict]:
+    """把课程展开成具体事件列表（已去重、按时间排序）。
+
+    weather_map 为 {day_s: {hhmm: 上课时天气}} 时，把天气附加到每节课的描述里。
+    """
     semester_start = cfg.get("semester_start", "")
     total_weeks = cfg.get("total_weeks", 30) or 30
     events: list[dict] = []
     seen: set[str] = set()
+    weather_map = weather_map or {}
 
     for c in courses:
         weeks = c.weeks or list(range(1, total_weeks + 1))
@@ -71,13 +76,13 @@ def _course_events(cfg: dict, courses: list[Course]) -> list[dict]:
                 "dtend": _fmt_dt(day, end_hhmm),
                 "summary": c.name,
                 "location": c.room,
-                "description": _desc(c),
+                "description": _desc(c, weather_map.get(day.isoformat(), {}).get(start_hhmm)),
             })
     events.sort(key=lambda e: (e["dtstart"], e["summary"]))
     return events
 
 
-def _desc(c: Course) -> str:
+def _desc(c: Course, weather: str | None = None) -> str:
     parts = []
     if c.teacher:
         parts.append(f"教师：{c.teacher}")
@@ -86,6 +91,8 @@ def _desc(c: Course) -> str:
     if c.campus:
         parts.append(f"校区：{c.campus}")
     parts.append(f"第 {c.start}-{c.end} 节")
+    if weather:
+        parts.append(f"上课时天气：{weather}")
     return "；".join(p for p in parts if p)
 
 
@@ -129,8 +136,12 @@ def _exam_events(exams: list[Exam]) -> list[dict]:
     return events
 
 
-def build_ical(cfg: dict, courses: list[Course], exams: list[Exam] | None = None) -> str:
-    """生成完整的 iCalendar 文本（课程 + 可选考试合并到同一日历）。"""
+def build_ical(cfg: dict, courses: list[Course], exams: list[Exam] | None = None,
+               weather_map: dict | None = None) -> str:
+    """生成完整的 iCalendar 文本（课程 + 可选考试合并到同一日历）。
+
+    weather_map 为 {day_s: {hhmm: 上课时天气}} 时，逐节附加天气到课程描述。
+    """
     now = datetime.now()
     dtstamp = now.strftime("%Y%m%dT%H%M%SZ")
     school = cfg.get("school", "") or "课程表"
@@ -151,7 +162,7 @@ def build_ical(cfg: dict, courses: list[Course], exams: list[Exam] | None = None
         "END:STANDARD",
         "END:VTIMEZONE",
     ]
-    all_events = _course_events(cfg, courses) + _exam_events(exams or [])
+    all_events = _course_events(cfg, courses, weather_map) + _exam_events(exams or [])
     all_events.sort(key=lambda x: (x["dtstart"], x["summary"]))
     for e in all_events:
         lines += [

@@ -632,6 +632,30 @@ _wcfg["weather"]["enabled"] = False
 check("天气.关闭后逐小时为空", asyncio.run(_weather.hours_map(_wcfg)) == {})
 _weather.fetch_hourly = _orig_fetch
 
+# 日历导出逐节天气映射
+_orig_fetch3 = _weather.fetch_hourly
+
+
+async def _fake_hourly3(lat, lon):
+    return {
+        "2026-11-09T08:00": {"temp": 14.6, "code": 2, "pop": 40},
+        "2026-11-09T10:00": {"temp": 16.0, "code": 0, "pop": 10},
+    }
+
+
+_weather.fetch_hourly = _fake_hourly3
+_wcfg["weather"]["enabled"] = True
+_lwm = asyncio.run(_weather.lesson_weather_map(_wcfg))
+check("天气.逐节天气映射结构",
+      _lwm.get("2026-11-09", {}).get("08:00") == "多云 15℃，降水概率 40%"
+      and _lwm.get("2026-11-09", {}).get("10:00") == "晴 16℃",
+      str(_lwm))
+_wcfg["weather"]["enabled"] = False
+check("天气.关闭后逐节映射为空",
+      asyncio.run(_weather.lesson_weather_map(_wcfg)) == {})
+_wcfg["weather"]["enabled"] = True
+_weather.fetch_hourly = _orig_fetch3
+
 # 企业微信 / 钉钉群机器人：本地 mock webhook（负载 / 失败 / 日志）
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer

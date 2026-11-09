@@ -187,6 +187,42 @@ async def daily_summary(cfg: dict, day_s: str) -> str:
     return line
 
 
+async def lesson_weather_map(cfg: dict) -> dict:
+    """构建「日期 + 上课时刻 → 上课时天气短描述」的映射，供日历导出给每节课附天气。
+
+    返回形如 {"2026-11-10": {"08:00": "小雨 14℃", "10:00": "多云 16℃"}}，
+    键的上课时刻按整点归一（HH:00），与日历事件对齐。
+    未开启、坐标无效或接口不可用时返回空 dict，不影响日历生成。
+    """
+    w = cfg.get("weather") or {}
+    if w.get("enabled") is False:
+        return {}
+    try:
+        lat = float(w.get("lat") or 35.96)
+        lon = float(w.get("lon") or 120.20)
+    except (TypeError, ValueError):
+        return {}
+    hourly = await fetch_hourly(lat, lon)
+    out: dict[str, dict] = {}
+    for key, item in hourly.items():
+        # key 形如 '2026-11-10T08:00'
+        try:
+            day_s, hhmm = key.split("T", 1)
+        except ValueError:
+            continue
+        summary = _summary(item)
+        if not summary:
+            continue
+        parts = [summary["text"]]
+        if "temp" in summary:
+            parts.append(f"{summary['temp']}℃")
+        text = " ".join(parts)
+        if summary.get("pop", -1) >= 30:
+            text += f"，降水概率 {summary['pop']}%"
+        out.setdefault(day_s, {})[hhmm] = text
+    return out
+
+
 def clear_cache():
     """测试或手动刷新用。"""
     _cache.clear()

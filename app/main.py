@@ -34,6 +34,7 @@ from .scheduler import (
     WEEKDAY_CN, apply_snapshot, courses_on, next_run_time, reschedule, run_sync,
     section_time, shutdown_scheduler, start_scheduler,
 )
+from . import weather
 from .weather import hours_map
 from .version import get_version, get_full_version
 from . import ical
@@ -335,7 +336,12 @@ async def export_calendar(request: Request):
         exams = ical.exams_for_export(cfg)
     if not courses and not exams:
         raise HTTPException(404, "课表尚未同步，请先在「课表来源」页同步数据")
-    body = ical.build_ical(cfg, courses, exams)
+    # 逐节附加上课时天气（复用 weather 30 分钟缓存，失败静默降级为无天气）
+    try:
+        weather_map = await weather.lesson_weather_map(cfg)
+    except Exception:  # noqa: BLE001 - 天气不可用不影响日历导出
+        weather_map = {}
+    body = ical.build_ical(cfg, courses, exams, weather_map=weather_map)
     school = (cfg.get("school", "") or "课程表").replace("/", "-")
     from urllib.parse import quote
     filename = f"{school}-课表.ics"
