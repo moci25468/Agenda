@@ -4039,8 +4039,10 @@
               <div class="form-grid">
                 <label class="field full"><span>教务地址</span><input id="zfBase" placeholder="https://jxgl.qut.edu.cn/jwglxt" /></label>
                 <label class="field"><span>学号</span><input id="zfUsername" /></label>
-                <label class="field"><span>密码</span><input id="zfPassword" type="password" /></label>
-                <label class="field"><span>学年</span><input id="zfYear" placeholder="2026" /></label>
+                <label class="field"><span>密码</span><input id="zfPassword" type="password" placeholder="留空则沿用已保存的密码" /></label>
+                <label class="field"><span>学年</span>
+                  <select id="zfYear"></select>
+                </label>
                 <label class="field"><span>学期</span>
                   <select id="zfTerm">
                     <option value="3">第一学期（秋季）</option>
@@ -4048,6 +4050,7 @@
                   </select>
                 </label>
               </div>
+              <p class="hint">学年按教务的「2026-2027」显示；所选学期教务里还没有排课时，保存会自动切到教务当前学期。</p>
               <p class="hint">正方登录已适配青岛理工 jxgl 实际页面（RSA 加密 + csrftoken）。连续输错 3 次会要求验证码，请稍后再试。</p>
               <div class="form-actions">
                 <button id="zfSaveBtn">保存并测试登录</button>
@@ -6997,6 +7000,22 @@
       }
 
       /* ---------- 课表来源 ---------- */
+      function fillZfYears(saved) {
+        // 教务学年按起始年份存（2026 = 2026-2027 学年），8 月开学后进入新学年
+        const now = new Date();
+        const m = now.getMonth() + 1;
+        const current = m >= 8 ? now.getFullYear() : now.getFullYear() - 1;
+        const years = [];
+        for (let y = current + 1; y >= current - 4; y--) years.push(String(y));
+        if (saved && !years.includes(saved)) years.unshift(saved);
+        $("#zfYear").innerHTML = years
+          .map(
+            (y) =>
+              `<option value="${y}">${y}-${Number(y) + 1}${y === String(current) ? "（当前学年）" : ""}</option>`,
+          )
+          .join("");
+        $("#zfYear").value = saved || String(current);
+      }
       async function loadSources() {
         try {
           const s = await api("/api/provider/sources");
@@ -7009,7 +7028,7 @@
           // 回填正方表单（密码不回显，留空表示未改）
           $("#zfBase").value = s.zhengfang.base || "https://jxgl.qut.edu.cn/jwglxt";
           $("#zfUsername").value = s.zhengfang.username || "";
-          $("#zfYear").value = (s.zhengfang.year || "2026");
+          fillZfYears(s.zhengfang.year || "");
           $("#zfTerm").value = (s.zhengfang.term || "3");
           // 门户表单回填 cURL 占位信息
           if (s.portal.url) {
@@ -7509,7 +7528,7 @@
               base: $("#zfBase").value.trim(),
               username: $("#zfUsername").value.trim(),
               password: $("#zfPassword").value,
-              year: $("#zfYear").value.trim() || "2026",
+              year: $("#zfYear").value,
               term: $("#zfTerm").value,
               test: true,
             }),

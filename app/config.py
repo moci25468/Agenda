@@ -52,8 +52,8 @@ DEFAULT_CONFIG = {
             "username": "",
             "password": "",
             "cookie": "",             # 也可直填登录后的 Cookie，跳过账号登录
-            "year": "2026",           # 学年
-            "term": "3",              # 学期：3=第一学期(秋季) 12=第二学期(春季)
+            "year": "",               # 学年起始年份，空=按当前日期推断（如 2026-2027 学年填 2026）
+            "term": "",               # 学期：3=第一学期(秋季) 12=第二学期(春季)，空=按日期推断
         },
         "portal": {                   # 青岛理工融合门户（cURL / 一键登录写入）
             "url": "",
@@ -160,13 +160,15 @@ def normalize_provider(p: dict | None) -> dict:
     def _truthy(v):
         return v not in (None, "", {}, [])
 
+    from .providers.zhengfang import normalize_year, default_term
+    dy, dt = default_term()
     zhengfang = {
         "base": zf.get("base") or p.get("zf_base") or DEFAULT_CONFIG["provider"]["zhengfang"]["base"],
         "username": zf.get("username") or p.get("zf_username") or "",
         "password": zf.get("password") or p.get("zf_password") or "",
         "cookie": zf.get("cookie") or p.get("zf_cookie") or "",
-        "year": zf.get("year") or p.get("zf_year") or "2026",
-        "term": str(zf.get("term") or p.get("zf_term") or "3"),
+        "year": normalize_year(zf.get("year") or p.get("zf_year") or "") or dy,
+        "term": str(zf.get("term") or p.get("zf_term") or "") or dt,
     }
     portal = {
         "url": portal.get("url") or p.get("http_url") or "",

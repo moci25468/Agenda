@@ -177,6 +177,108 @@ check("正方.登录失败提示解析",
       _page_message('<div class="alert" id="tips"><span>!</span>用户名或密码不正确</div>')
       == "用户名或密码不正确")
 
+# 正方学期：学年归一化、当前学期推断、空学期自动切换
+from app.providers.zhengfang import (normalize_year, default_term, term_label,
+                                    TermEmptyError, ZhengfangProvider)
+
+check("正方.学年归一化", normalize_year("2026-2027") == "2026"
+      and normalize_year(" 2026 ") == "2026" and normalize_year("2026/2027") == "2026"
+      and normalize_year("abc") == "" and normalize_year("26") == "")
+check("正方.当前学期按日期推断", default_term(date(2026, 11, 9)) == ("2026", "3")
+      and default_term(date(2027, 1, 20)) == ("2026", "3")
+      and default_term(date(2027, 2, 15)) == ("2026", "12")
+      and default_term(date(2027, 8, 1)) == ("2027", "3"))
+check("正方.学期标签", term_label("2026", "3") == "2026-2027 学年 第一学期（秋季）"
+      and term_label("2026", "12") == "2026-2027 学年 第二学期（春季）")
+
+
+class _ZfResp:
+    def __init__(self, payload=None, text=""):
+        self._payload, self.text = payload, text
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._payload
+
+
+class _ZfClient:
+    """按调用顺序返回预设响应的假 httpx 客户端。"""
+
+    def __init__(self, *responses):
+        self._responses = list(responses)
+
+    async def post(self, *a, **k):
+        return self._responses.pop(0)
+
+    async def get(self, *a, **k):
+        return self._responses.pop(0)
+
+
+def _zf_cfg(**zf):
+    conf = {"provider": {"zhengfang": {
+        "base": "http://example.invalid/jwglxt", "username": "u", "password": "p",
+        "year": "2026", "term": "3"}}}
+    conf["provider"]["zhengfang"].update(zf)
+    return conf
+
+
+def _zf_index(year_sel: str, term_sel: str) -> str:
+    """模拟课表页里教务默认选中的学年/学期。"""
+    return (
+        f'<select name="xnm" id="xnm"><option value="2027">2027-2028</option>'
+        f'<option value="{year_sel}" selected>{year_sel}</option></select>'
+        f'<select name="xqm" id="xqm"><option value="">请选择</option>'
+        f'<option value="3"{" selected" if term_sel == "3" else ""}>1</option>'
+        f'<option value="12"{" selected" if term_sel == "12" else ""}>2</option></select>'
+    )
+
+
+_zfp = ZhengfangProvider(_zf_cfg())
+check("正方.学年为空按日期推断",
+      (ZhengfangProvider(_zf_cfg(year="", term="")).year,
+       ZhengfangProvider(_zf_cfg(year="", term="")).term) == default_term())
+check("正方.学年支持 2026-2027 写法",
+      ZhengfangProvider(_zf_cfg(year="2026-2027")).year == "2026")
+
+try:
+    asyncio.run(_zfp._fetch_courses(_ZfClient(_ZfResp({"kbList": []}))))
+    _zf_empty = ""
+except TermEmptyError as e:
+    _zf_empty = str(e)
+check("正方.空学期报错带学期标签",
+      "2026-2027 学年 第一学期（秋季）" in _zf_empty and "没有排课数据" in _zf_empty,
+      _zf_empty)
+try:
+    asyncio.run(_zfp._fetch_courses(_ZfClient(_ZfResp(None))))
+    _zf_null = ""
+except TermEmptyError as e:
+    _zf_null = str(e)
+check("正方.学年参数不被接受时报学期", "2026-2027" in _zf_null, _zf_null)
+
+check("正方.识别教务当前学期",
+      asyncio.run(_zfp.detect_current_term(
+          _ZfClient(_ZfResp(text=_zf_index("2026", "3"))))) == ("2026", "3")
+      and asyncio.run(_zfp.detect_current_term(
+          _ZfClient(_ZfResp(text="<html></html>")))) is None)
+
+_zfp_spring = ZhengfangProvider(_zf_cfg(term="12"))
+_kb = {"kbList": [{"xqj": "1", "jcs": "1-2", "kcmc": "测试课", "zcd": "1-8周"}]}
+_courses, _switched = asyncio.run(_zfp_spring.fetch_courses_with_term_fix(
+    _ZfClient(_ZfResp({"kbList": []}), _ZfResp(text=_zf_index("2026", "3")),
+              _ZfResp(_kb))))
+check("正方.空学期自动切到教务当前学期",
+      _switched == ("2026", "3") and _zfp_spring.term == "3"
+      and len(_courses) == 1 and _courses[0].name == "测试课", str(_switched))
+try:
+    asyncio.run(ZhengfangProvider(_zf_cfg()).fetch_courses_with_term_fix(
+        _ZfClient(_ZfResp({"kbList": []}), _ZfResp(text=_zf_index("2026", "3")))))
+    _zf_same = ""
+except TermEmptyError as e:
+    _zf_same = str(e)
+check("正方.当前学期也无排课时不切换", "没有排课数据" in _zf_same, _zf_same)
+
 db.save_exam_snapshot([exam.to_dict()], "test")
 esnap = db.get_exam_snapshot()
 check("考试.快照落库", bool(esnap) and esnap["source"] == "test"
@@ -1554,6 +1656,26 @@ async def http_tests(port: int):
         r = await ca.post(f"{base}/api/memories",
                           json={"action": "delete", "id": mem_id})
         check("记忆.重复删除404", r.status_code == 404, str(r.status_code))
+
+        # 正方保存：密码留空沿用旧密码，学年归一化，测试失败不改配置
+        r = await ca.post(f"{base}/api/provider/zhengfang", json={
+            "username": "20230001", "password": "", "test": False})
+        _d = r.json()
+        check("正方.首次保存缺密码被拒", _d.get("ok") is False
+              and "沿用已保存的密码" in _d.get("message", ""), str(_d)[:160])
+        r = await ca.post(f"{base}/api/provider/zhengfang", json={
+            "username": "20230001", "password": "demo-pass",
+            "year": "2026-2027", "term": "12", "test": False})
+        _d = r.json()
+        check("正方.未测试保存归一化学年", _d.get("ok") is True
+              and _d.get("year") == "2026" and _d.get("term") == "12", str(_d)[:160])
+        await ca.post(f"{base}/api/provider/zhengfang", json={
+            "username": "20230001", "password": "",
+            "year": "2026", "term": "3", "test": False})
+        _src = (await ca.get(f"{base}/api/provider/sources")).json()["zhengfang"]
+        check("正方.密码留空不清空已存密码",
+              _src.get("has_login") is True and _src.get("year") == "2026"
+              and _src.get("term") == "3", str(_src)[:200])
 
         # 门户课表 + 正方考试：不切数据源也能识别考试能力
         await ca.post(f"{base}/api/settings", json={"provider": {

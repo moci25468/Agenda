@@ -1677,8 +1677,8 @@ class ZhengfangSaveRequest(BaseModel):
     base: str = ""
     username: str = ""
     password: str = ""
-    year: str = "2026"
-    term: str = "3"
+    year: str = ""
+    term: str = ""
     test: bool = True
 
 
@@ -1686,46 +1686,73 @@ class ZhengfangSaveRequest(BaseModel):
 async def save_zhengfang(req: ZhengfangSaveRequest):
     """保存正方账号（学号+密码），可立即测试登录并拉一次课表，不破坏门户配置。
 
-    用户明确：正方登录只用账号密码，不暴露 Cookie 输入框。
+    密码框留空表示沿用已保存的密码（页面不回显密码）。学年/学期只有测试成功才
+    写入配置，选错了学期不会把配置改坏；所选学期教务里没排课时自动切到当前学期。
     """
+    from .providers.zhengfang import (
+        ZhengfangProvider, TermEmptyError, default_term, normalize_year, term_label)
+
     cfg = load_config()
     p = cfg["provider"]
     zf = dict(p.get("zhengfang") or {})
+    if not req.password and not zf.get("password") and not zf.get("cookie"):
+        return {"ok": False,
+                "message": "请填写教务密码（密码框留空只表示沿用已保存的密码）"}
     zf["base"] = (req.base or "https://jxgl.qut.edu.cn/jwglxt").rstrip("/")
     zf["username"] = req.username.strip()
-    zf["password"] = req.password
-    zf["year"] = req.year.strip() or "2026"
-    zf["term"] = str(req.term or "3")
-    zf["cookie"] = ""  # 账号密码模式：清空 Cookie，避免混用
+    if req.password:
+        zf["password"] = req.password
+        zf["cookie"] = ""  # 账号密码模式：清空 Cookie，避免混用
     p["zhengfang"] = zf
     p["primary"] = p.get("primary") or "auto"
-    save_config(cfg)
+    save_config(cfg)  # 先存凭证；学期等测试成功再回写
 
     if not req.test:
-        return {"ok": True, "message": "已保存正方账号（未测试）"}
-    # 立即试登录并拉课表，验证账号密码
-    from .providers.zhengfang import ZhengfangProvider
+        zf["year"] = normalize_year(req.year) or default_term()[0]
+        zf["term"] = str(req.term or default_term()[1])
+        save_config(cfg)
+        return {"ok": True, "message": "已保存正方账号（未测试）",
+                "year": zf["year"], "term": zf["term"]}
+
+    test_cfg = json.loads(json.dumps(cfg))
+    test_zf = test_cfg["provider"]["zhengfang"]
+    test_zf["year"] = normalize_year(req.year) or default_term()[0]
+    test_zf["term"] = str(req.term or default_term()[1])
     try:
-        provider = ZhengfangProvider(cfg)
+        provider = ZhengfangProvider(test_cfg)
     except ValueError as e:
         return {"ok": False, "message": str(e)}
     try:
         async with provider._session() as client:
-            courses = await provider._fetch_courses(client)
+            courses, switched = await provider.fetch_courses_with_term_fix(client)
             exams: list = []
             exam_error = ""
             try:
                 exams = await provider._fetch_exams(client)
             except Exception as e:  # noqa: BLE001
                 exam_error = str(e)
-        message = f"登录成功：{len(courses)} 门课程"
-        message += f"，{len(exams)} 场考试" if not exam_error else "；考试接口失败"
-        snap = db.get_snapshot()
-        return {"ok": True, "message": message, "course_count": len(courses),
-                "exam_count": len(exams), "exam_error": exam_error,
-                "overwritten": (snap or {}).get("source") == "portal"}
+    except TermEmptyError as e:
+        message = str(e)
+        detected = provider.last_detected_term
+        if detected and detected != (provider.year, provider.term):
+            message += f"；教务当前学期是 {term_label(*detected)}，请改选这个学期"
+        return {"ok": False, "message": message}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "message": str(e)}
+
+    zf["year"], zf["term"] = provider.year, provider.term
+    p["zhengfang"] = zf
+    save_config(cfg)
+    label = term_label(provider.year, provider.term)
+    message = (f"已自动切换到教务当前学期（{label}）：" if switched else f"{label}：")
+    message += f"{len(courses)} 门课程"
+    message += f"，{len(exams)} 场考试" if not exam_error else "；考试接口失败"
+    snap = db.get_snapshot()
+    return {"ok": True, "message": message, "course_count": len(courses),
+            "exam_count": len(exams), "exam_error": exam_error,
+            "overwritten": (snap or {}).get("source") == "portal",
+            "year": provider.year, "term": provider.term,
+            "switched": bool(switched)}
 
 
 @app.get("/api/health")

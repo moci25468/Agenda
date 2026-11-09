@@ -18,6 +18,7 @@ import os
 import re
 import time
 from contextlib import asynccontextmanager
+from datetime import date
 
 import httpx
 
@@ -28,6 +29,41 @@ UA = ("Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36")
 WEEKDAY_MAP = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "日": 7, "天": 7}
 LOGIN_EXPIRED_MSG = "教务会话已过期或登录失败，请重新登录，或更新设置中的 Cookie"
+TERM_LABELS = {"3": "第一学期（秋季）", "12": "第二学期（春季）"}
+
+
+class TermEmptyError(ValueError):
+    """教务对所选学年/学期没有排课数据（通常是学期选错了）。"""
+
+    def __init__(self, message: str, year: str = "", term: str = ""):
+        super().__init__(message)
+        self.year, self.term = year, term
+
+
+def normalize_year(value) -> str:
+    """教务学年只认起始年份：'2026-2027' / '2026/2027' / '2026' → '2026'。"""
+    m = re.search(r"\d{4}", str(value or ""))
+    return m.group() if m else ""
+
+
+def default_term(day: date | None = None) -> tuple[str, str]:
+    """按日期推断当前学年/学期：秋季 8 月开学（1 月考试月仍算秋季），春季 2 月开学。"""
+    d = day or date.today()
+    if d.month >= 8:
+        return str(d.year), "3"
+    if d.month == 1:
+        return str(d.year - 1), "3"
+    return str(d.year - 1), "12"
+
+
+def term_label(year: str, term: str) -> str:
+    """如 '2026' + '3' → '2026-2027 学年 第一学期（秋季）'。"""
+    label = TERM_LABELS.get(str(term), f"第 {term} 学期")
+    try:
+        start = int(year)
+    except (TypeError, ValueError):
+        return label
+    return f"{start}-{start + 1} 学年 {label}"
 
 
 def zhengfang_configured(cfg: dict) -> bool:
@@ -123,8 +159,10 @@ class ZhengfangProvider(TimetableProvider):
         self.cookie = (zf.get("cookie") or p.get("zf_cookie") or "").strip()
         if self.cookie.lower().startswith("cookie:"):
             self.cookie = self.cookie[7:].strip()
-        self.year = str(zf.get("year") or p.get("zf_year", "") or "")
-        self.term = str(zf.get("term") or p.get("zf_term", "3") or "3")
+        dy, dt = default_term()
+        self.year = normalize_year(zf.get("year") or p.get("zf_year", "")) or dy
+        self.term = str(zf.get("term") or p.get("zf_term") or dt)
+        self.last_detected_term: tuple[str, str] | None = None
         if not self.base:
             raise ValueError("未配置正方教务地址（设置 → 课表来源 → 正方教务，填入学号密码）")
 
@@ -239,9 +277,17 @@ class ZhengfangProvider(TimetableProvider):
             payload = r.json()
         except ValueError:
             raise AuthExpiredError(LOGIN_EXPIRED_MSG)
+        if not isinstance(payload, dict):
+            raise TermEmptyError(
+                f"教务没有返回 {term_label(self.year, self.term)} 的课表，学年/学期可能填错了",
+                self.year, self.term)
         kb_list = payload.get("kbList") or []
         if not kb_list:
-            raise ValueError(f"课表为空或字段不匹配：响应键为 {list(payload.keys())[:8]}")
+            keys = ", ".join(list(payload.keys())[:8])
+            raise TermEmptyError(
+                f"{term_label(self.year, self.term)}在教务里没有排课数据"
+                + (f"（响应键：{keys}）" if keys else ""),
+                self.year, self.term)
         courses = []
         for item in kb_list:
             if not isinstance(item, dict):
@@ -333,6 +379,48 @@ class ZhengfangProvider(TimetableProvider):
                 self.last_exam_error = str(e)
                 exams = None
             return courses, exams
+
+    async def detect_current_term(self, client: httpx.AsyncClient) -> tuple[str, str] | None:
+        """读课表页里教务自己默认选中的学年/学期，即教务认定的当前学期。"""
+        try:
+            r = await client.get(
+                f"{self.base}/kbcx/xskbcx_cxXskbcxIndex.html",
+                params={"gnmkdm": "N2151"}, timeout=20)
+            r.raise_for_status()
+        except httpx.HTTPError:
+            return None
+        html = r.text
+
+        def _selected(select_id: str) -> str:
+            m = re.search(r'<select[^>]*\bid=["\']' + select_id + r'["\'][^>]*>(.*?)</select>',
+                          html, re.S)
+            if not m:
+                return ""
+            for om in re.finditer(r"<option([^>]*)>(.*?)</option>", m.group(1), re.S):
+                if "selected" in om.group(1):
+                    vm = re.search(r'value=["\']([^"\']*)["\']', om.group(1))
+                    return (vm.group(1) if vm else "").strip()
+            return ""
+
+        year, term = normalize_year(_selected("xnm")), _selected("xqm")
+        return (year, term) if year and term else None
+
+    async def fetch_courses_with_term_fix(
+            self, client: httpx.AsyncClient) -> tuple[list[Course], tuple[str, str] | None]:
+        """先按配置的学期拉课表；教务没排课时改用教务当前学期重试一次。
+
+        返回 (课程, 切换后的学年/学期或 None)。用户选错学期（比如提前选了春季）
+        时不用自己挨个试，直接落到教务里有数据的当前学期。
+        """
+        try:
+            return await self._fetch_courses(client), None
+        except TermEmptyError:
+            detected = await self.detect_current_term(client)
+            self.last_detected_term = detected
+            if not detected or detected == (self.year, self.term):
+                raise
+            self.year, self.term = detected
+            return await self._fetch_courses(client), detected
 
     # ---------- 空教室查询（cdjy/cdjy_cxKxcdlb，2026-11-08 实测协议） ----------
     #
