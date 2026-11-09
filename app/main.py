@@ -575,6 +575,68 @@ async def edit_course(req: CourseEditRequest):
     return _save_course_overrides(cfg, overrides)
 
 
+@app.get("/api/search")
+async def search_schedule(q: str = ""):
+    """跨课程 / 个人日程 / 考试搜索，附所在周次供前端跳转。"""
+    cfg = load_config()
+    query = (q or "").strip().lower()
+    if not query:
+        return {"results": []}
+    semester_start = cfg.get("semester_start") or ""
+
+    def week_of(day_s: str) -> int:
+        try:
+            base = date.fromisoformat(semester_start)
+            d = date.fromisoformat(day_s or "")
+        except ValueError:
+            return 0
+        return (d - base).days // 7 + 1
+
+    cur_week = current_week(semester_start, date.today(), cfg.get("total_weeks", 30))
+    results = []
+    snap = db.get_snapshot()
+    courses = apply_course_overrides(
+        [Course.from_dict(d) for d in snap["courses"]] if snap else [],
+        cfg.get("course_overrides"))
+    for c in sorted(courses, key=lambda x: (x.day, x.start)):
+        if query not in f"{c.name} {c.teacher} {c.room} {c.campus}".lower():
+            continue
+        jump = cur_week if c.in_week(cur_week) else (min(c.weeks) if c.weeks else cur_week)
+        results.append({
+            "kind": "course", "title": c.name,
+            "meta": f"{WEEKDAY_CN[c.day - 1]} 第 {c.start}–{c.end} 节"
+                    + (f" · 第 {min(c.weeks)}–{max(c.weeks)} 周" if c.weeks else ""),
+            "sub": " · ".join(filter(None, (c.teacher, c.room, c.campus))),
+            "week": jump, "date": "",
+        })
+    for d in db.list_events():
+        if query not in f"{d.get('title', '')} {d.get('location', '')} {d.get('note', '')}".lower():
+            continue
+        # db.list_events() 返回的是 "start"/"end"（数据库列名才是 start_time/end_time）
+        when = d.get("start") or ""
+        if d.get("end") and when:
+            when = f"{when}–{d['end']}"
+        results.append({
+            "kind": "event", "title": d.get("title", ""),
+            "meta": d.get("date", ""),
+            "sub": " · ".join(filter(None, (when or "全天", d.get("location") or ""))),
+            "week": week_of(d.get("date", "")), "date": d.get("date", ""),
+        })
+    exam_snap = db.get_exam_snapshot()
+    exams = apply_exam_overrides(
+        [Exam.from_dict(x) for x in exam_snap["exams"]],
+        cfg.get("exam_overrides")) if exam_snap else []
+    for e in sorted(exams, key=lambda x: x.date or "9999"):
+        if query not in f"{e.name} {e.room} {e.campus}".lower():
+            continue
+        results.append({
+            "kind": "exam", "title": e.name, "meta": e.date,
+            "sub": " · ".join(filter(None, (e.start, e.room))),
+            "week": week_of(e.date), "date": e.date,
+        })
+    return {"results": results[:40], "count": len(results)}
+
+
 @app.get("/api/events")
 async def list_events():
     """个人日程：全部按日期升序，带 finished / display_time 展示字段。"""

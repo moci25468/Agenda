@@ -743,6 +743,10 @@ check("提醒.用户间互不串扰", not _push_calls
 _sync_cfg = load_config()
 _sync_cfg["push"] = {**_sync_cfg.get("push", {}), "bark_enabled": True, "bark_key": "t",
                      "push_next_day": True, "reminder_enabled": False}
+# 把第 10 节的结束时间固定到当天最晚，让「今日剩余课程」不依赖真实时钟，
+# 否则晚上跑测试时该分支永远为空，还会误标记明日课表去重导致后面连锁失败
+_orig_section_ends = _sync_cfg.get("section_ends")
+_sync_cfg["section_ends"] = {**(_orig_section_ends or {}), "10": "23:59"}
 save_config(_sync_cfg)
 # 清空快照与提醒记录，避免前面测试的课程/去重记录干扰
 db.save_snapshot([], "test")
@@ -791,9 +795,14 @@ asyncio.run(_sched.push_next_day_summary(now=_at("2026-11-09T22:00:00")))
 check("定时推送.未推则推送明日", len(_push_calls) == 1
       and "明日课表" in _push_calls[0][0], str(_push_calls))
 
-# 清理本段测试的去重记录，避免影响后续
+# 清理本段测试的去重记录，并恢复节次时间，避免影响后续
 with db.get_conn() as conn:
     conn.execute("DELETE FROM reminders WHERE user_id = 1")
+if _orig_section_ends is None:
+    _sync_cfg.pop("section_ends", None)
+else:
+    _sync_cfg["section_ends"] = _orig_section_ends
+save_config(_sync_cfg)
 
 # 每日推送：时间可配置 + 内容可选（课表 / 日程考试 / 天气）
 _dc = load_config()
@@ -1720,6 +1729,36 @@ async def http_tests(port: int):
                            json={"action": "delete", "id": ev_id})).json()
         lst = (await ca.get(f"{base}/api/events")).json()
         check("日程.删除", d.get("ok") and lst.get("count") == 0, str(lst)[:160])
+
+        # 全局搜索：课程 / 个人日程 / 空结果，返回所在周次供前端跳转
+        sr = (await ca.get(f"{base}/api/search", params={"q": "数据结构"})).json()
+        check("搜索.命中课程", any(x["kind"] == "course" and "数据结构" in x["title"]
+                                   for x in sr["results"]), str(sr)[:200])
+        check("搜索.课程带周次", all(isinstance(x.get("week"), int) for x in sr["results"])
+              and any("第" in x["meta"] for x in sr["results"]), str(sr)[:200])
+        await ca.post(f"{base}/api/events", json={
+            "action": "add", "event": {"title": "搜索验证日程", "date": today_iso,
+                                       "start": "10:00", "location": "图书馆"}})
+        sr = (await ca.get(f"{base}/api/search", params={"q": "搜索验证"})).json()
+        check("搜索.命中个人日程", any(x["kind"] == "event" and x["title"] == "搜索验证日程"
+                                     and x["date"] == today_iso for x in sr["results"]),
+              str(sr)[:200])
+        # db.list_events() 的字段名是 start/end（不是数据库列名 start_time），别再显示成"全天"
+        check("搜索.日程带起止时间", any(x["kind"] == "event" and "10:00" in x["sub"]
+                                     and "全天" not in x["sub"] for x in sr["results"]),
+              str(sr)[:200])
+        sr = (await ca.get(f"{base}/api/search", params={"q": "图书馆"})).json()
+        check("搜索.按地点命中", any(x["kind"] == "event" for x in sr["results"]), str(sr)[:200])
+        sr = (await ca.get(f"{base}/api/search", params={"q": "不存在xyz"})).json()
+        check("搜索.无结果为空", sr["results"] == [], str(sr)[:120])
+        sr = (await ca.get(f"{base}/api/search", params={"q": ""})).json()
+        check("搜索.空关键词为空", sr["results"] == [], str(sr)[:120])
+        _se = (await ca.get(f"{base}/api/events")).json()["events"]
+        await ca.post(f"{base}/api/events", json={
+            "action": "delete", "id": [e["id"] for e in _se if e["title"] == "搜索验证日程"][0]})
+        async with _hx.AsyncClient(timeout=10, trust_env=False) as _an2:
+            check("搜索.未登录被拒",
+                  (await _an2.get(f"{base}/api/search?q=x")).status_code == 401)
 
         # 空教室：未配置正方 → 400；参数校验先于数据源检查
         r = await ca.get(f"{base}/api/rooms/meta")

@@ -3788,6 +3788,109 @@
         .wc-free:hover { background: var(--card); }
     </style>
     <style>
+      /* 交互层：顶部进度、骨架屏、设置分区导航、周视图工具、搜索与安装提示 */
+      .top-progress {
+        position: fixed; top: 0; left: 0; width: 100%; height: 2px;
+        z-index: 90; pointer-events: none; opacity: 0; transition: opacity 0.2s ease;
+      }
+      .top-progress.show { opacity: 1; }
+      .top-progress::after {
+        content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 40%;
+        background: var(--accent); animation: tp-slide 1.1s ease-in-out infinite;
+      }
+      @keyframes tp-slide {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(350%); }
+      }
+      .sk {
+        position: relative; overflow: hidden; border-radius: 6px;
+        background: var(--accent-soft);
+      }
+      .sk::after {
+        content: ""; position: absolute; inset: 0;
+        /* 高光跟着主题变量走，深色下不会闪出刺眼的白 */
+        background: linear-gradient(90deg, transparent,
+          color-mix(in srgb, var(--card) 72%, white), transparent);
+        transform: translateX(-100%); animation: sk-shine 1.3s ease-in-out infinite;
+      }
+      @keyframes sk-shine { to { transform: translateX(100%); } }
+      .sk-row { display: flex; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+      .sk-row:last-child { border-bottom: 0; }
+      .sk-row .sk-a { width: 52px; height: 34px; flex: 0 0 auto; }
+      .sk-row .sk-lines { flex: 1; }
+      .sk-row .sk-b { height: 12px; width: 60%; }
+      .sk-row .sk-c { height: 10px; width: 85%; margin-top: 9px; }
+      .sk-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; padding: 6px 0; }
+      .sk-grid .sk { height: 74px; }
+
+      .settings-nav {
+        position: sticky; top: 10px; z-index: 25;
+        display: flex; gap: 4px; padding: 5px; margin: 0 0 14px;
+        border: 1px solid var(--line); border-radius: 12px;
+        background: var(--card);
+        background: color-mix(in srgb, var(--card) 92%, transparent);
+        backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+        overflow-x: auto; scrollbar-width: none;
+      }
+      .settings-nav::-webkit-scrollbar { display: none; }
+      .settings-nav button {
+        flex: 1 0 auto; white-space: nowrap; border: 0; background: transparent;
+        padding: 7px 12px; border-radius: 8px; font-size: 12px; color: var(--sub);
+        box-shadow: none;
+      }
+      .settings-nav button.active { background: var(--accent-soft); color: var(--text, inherit); }
+      #tab-settings .card { scroll-margin-top: 76px; }
+
+      .week-tools { display: flex; gap: 6px; margin-left: auto; align-items: center; }
+      .week-menu-wrap { position: relative; }
+      .week-menu {
+        position: absolute; right: 0; top: calc(100% + 6px); z-index: 40;
+        min-width: 150px; padding: 5px;
+        background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.1);
+      }
+      .week-menu button {
+        display: block; width: 100%; text-align: left; border: 0; background: transparent;
+        padding: 9px 10px; border-radius: 8px; font-size: 13px; box-shadow: none;
+      }
+      .week-menu button:hover { background: var(--accent-soft); }
+      .week-jump { display: flex; gap: 8px; align-items: center; margin: 10px 0 2px; }
+      .week-jump input { flex: 1; min-width: 0; }
+      .search-row { margin: 12px 0 10px; }
+      .search-row input { width: 100%; }
+      .search-results {
+        border: 1px solid var(--line); border-radius: 12px; background: var(--card);
+        margin-bottom: 12px; overflow: hidden;
+      }
+      .sr-item {
+        display: flex; gap: 10px; align-items: flex-start; width: 100%;
+        padding: 11px 12px; border: 0; border-bottom: 1px solid var(--line);
+        background: transparent; text-align: left; cursor: pointer; box-shadow: none;
+        border-radius: 0;
+      }
+      .sr-item:last-child { border-bottom: 0; }
+      .sr-item:hover { background: var(--accent-soft); }
+      .sr-kind {
+        flex: 0 0 auto; font-size: 11px; color: var(--sub);
+        border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px;
+      }
+      .sr-title { font-size: 13px; }
+      .sr-meta { font-size: 11px; color: var(--sub); margin-top: 3px; }
+      .sr-empty { padding: 14px; font-size: 12px; color: var(--sub); }
+      .flash { animation: flash-ring 1.4s ease; }
+      @keyframes flash-ring {
+        0% { box-shadow: 0 0 0 2px var(--accent); }
+        100% { box-shadow: none; }
+      }
+      .install-tip {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 10px; flex-wrap: wrap; padding: 12px 14px; margin-bottom: 14px;
+        border: 1px solid var(--line); border-radius: 12px; background: var(--card);
+        font-size: 12px; color: var(--sub);
+      }
+      .install-actions { display: flex; gap: 6px; }
+    </style>
+    <style>
       @media (prefers-reduced-motion: reduce) {
         *,
         *::before,
@@ -3820,6 +3923,7 @@
     </script>
   </head>
   <body>
+    <div class="top-progress" id="topProgress" aria-hidden="true"></div>
     <div id="authScreen" class="auth-screen">
       <div class="auth-layout">
         <section class="auth-intro" aria-label="产品介绍">
@@ -3885,6 +3989,13 @@
 
       <!-- 今日 -->
       <section id="tab-today">
+        <div class="install-tip hidden" id="installTip">
+          <span id="installTipText">把 Agenda 添加到主屏幕，像 App 一样打开。</span>
+          <div class="install-actions">
+            <button class="small primary" id="installBtn">安装</button>
+            <button class="small" id="installDismiss">以后再说</button>
+          </div>
+        </div>
         <div class="card today-card">
           <div class="day-head">
             <div>
@@ -3919,14 +4030,30 @@
           <button class="small" id="prevWeek">上一周</button>
           <span class="label" id="weekLabel"></span>
           <button class="small" id="nextWeek">下一周</button>
-          <button class="small" id="editCoursesBtn">编辑课表</button>
-          <button class="small" id="exportIcsBtn">导出日历</button>
-          <button class="small" id="subscribeIcsBtn">一键订阅</button>
+          <div class="week-tools">
+            <button class="small" id="weekJumpBtn">跳转</button>
+            <div class="week-menu-wrap">
+              <button class="small" id="weekMoreBtn" aria-label="更多操作">更多</button>
+              <div class="week-menu hidden" id="weekMenu">
+                <button id="editCoursesBtn">编辑课表</button>
+                <button id="exportIcsBtn">导出日历</button>
+                <button id="subscribeIcsBtn">一键订阅</button>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="week-grid-scroll">
+        <div class="week-jump hidden" id="weekJump">
+          <input type="date" id="weekJumpDate" />
+          <button class="small" id="weekJumpGo">转到这一周</button>
+        </div>
+        <div class="week-grid-scroll" id="weekGridScroll">
           <div class="week-grid" id="weekGrid"></div>
         </div>
         <p class="hint" id="weekHint"></p>
+        <div class="search-row">
+          <input id="scheduleSearch" type="search" placeholder="搜索课程、日程、考试…" autocomplete="off" />
+        </div>
+        <div class="search-results hidden" id="searchResults"></div>
         <!-- 本周日程：这一周的个人任务，空格子里「加日程」添加后立刻显示 -->
         <div class="card" style="margin-top:16px">
           <div class="day-head">
@@ -4201,7 +4328,14 @@
 
       <!-- 设置 -->
       <section id="tab-settings" class="hidden">
-        <div class="card">
+        <nav class="settings-nav" id="settingsNav" aria-label="设置分区">
+          <button type="button" data-target="settingsAppearance" class="active">外观</button>
+          <button type="button" data-target="settingsAccount">账号</button>
+          <button type="button" data-target="settingsSync">同步</button>
+          <button type="button" data-target="settingsPush">推送</button>
+          <button type="button" data-target="settingsAi">AI</button>
+        </nav>
+        <div class="card" id="settingsAppearance">
           <h2>外观</h2>
           <div class="theme-choice" id="themeChoice">
             <button type="button" data-theme-choice="system">跟随系统</button>
@@ -4212,7 +4346,7 @@
             默认跟随手机 / 电脑的系统外观；也可以固定为浅色或深色。选择保存在本机浏览器，刷新后依然生效。
           </p>
         </div>
-        <div class="card">
+        <div class="card" id="settingsAccount">
           <h2>账号安全</h2>
           <div class="account-grid" id="accountInfo"></div>
           <div class="form-actions">
@@ -4225,7 +4359,7 @@
             配置，无法恢复。若是管理员注销，管理员权限会自动交给最早注册的其他账号。
           </p>
         </div>
-        <div class="card">
+        <div class="card" id="settingsSync">
           <h2>同步</h2>
           <div class="form-grid">
             <label class="field"
@@ -4253,7 +4387,7 @@
           </div>
         </div>
 
-        <div class="card">
+        <div class="card" id="settingsPush">
           <h2>每日安排推送</h2>
           <div class="form-grid">
             <label class="field"
@@ -4379,7 +4513,7 @@
           </div>
         </div>
 
-        <div class="card">
+        <div class="card" id="settingsAi">
           <h2>AI 助手</h2>
           <div class="check">
             <input type="checkbox" id="aiEnabled" /><span
@@ -4713,19 +4847,44 @@
         weekRender = null,
         chatHistory = [];
 
-      async function api(path, opts = {}) {
-        const r = await fetch(path, {
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          ...opts,
-        });
-        const data = await r.json().catch(() => ({}));
-        if (r.status === 401 && !path.startsWith("/api/auth/")) {
-          showAuthScreen();
-          throw new Error("登录已失效，请重新登录");
+      let pendingRequests = 0, progressTimer = 0;
+      function requestBegin() {
+        pendingRequests += 1;
+        clearTimeout(progressTimer);
+        progressTimer = setTimeout(() => {
+          if (pendingRequests > 0) $("#topProgress").classList.add("show");
+        }, 250);
+      }
+      function requestEnd() {
+        pendingRequests = Math.max(0, pendingRequests - 1);
+        if (!pendingRequests) {
+          clearTimeout(progressTimer);
+          $("#topProgress").classList.remove("show");
         }
-        if (!r.ok) throw new Error(data.detail || `请求失败 (${r.status})`);
-        return data;
+      }
+      function skeletonRows(n = 3) {
+        return Array.from({ length: n }, () =>
+          `<div class="sk-row"><div class="sk sk-a"></div><div class="sk-lines"><div class="sk sk-b"></div><div class="sk sk-c"></div></div></div>`
+        ).join("");
+      }
+      async function api(path, opts = {}) {
+        requestBegin();
+        try {
+          const r = await fetch(path, {
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            ...opts,
+          });
+          const data = await r.json().catch(() => ({}));
+          if (r.status === 401 && !path.startsWith("/api/auth/")) {
+            showAuthScreen();
+            throw new Error("登录已失效，请重新登录");
+          }
+          if (!r.ok) throw new Error(data.detail || `请求失败 (${r.status})`);
+          return data;
+        } finally {
+          requestEnd();
+        }
       }
       function toast(msg, ms = 2600) {
         const t = $("#toast");
@@ -4870,6 +5029,8 @@
       }
 
       async function loadToday() {
+        if (!$("#todayList").children.length)
+          $("#todayList").innerHTML = skeletonRows(3);
         weekData = await api("/api/timetable");
         if (viewWeek === null) viewWeek = Math.max(weekData.current_week, 1);
         const d = new Date(weekData.today + "T00:00:00");
@@ -5269,7 +5430,8 @@
           if (!roomMeta || campus) {
             if (!roomMeta)
               $("#roomResult").innerHTML =
-                `<div class="empty"><div class="empty-title">正在连接正方教务…</div><div class="empty-sub">首次需要登录教务，约几秒钟。</div></div>`;
+                `<div class="empty-sub" style="padding:2px 0 8px">正在连接正方教务，首次约需几秒钟…</div>` +
+                skeletonRows(4);
             roomMeta = await api("/api/rooms/meta" + (campus ? "?campus=" + encodeURIComponent(campus) : ""));
           }
           roomFillMeta(!!campus);
@@ -5391,7 +5553,8 @@
         $("#roomQueryBtn").textContent = "查询中…";
         $("#roomResultBar").classList.add("hidden");
         $("#roomResult").innerHTML =
-          `<div class="empty"><div class="empty-title">正在查询正方教务…</div><div class="empty-sub">首次查询需要登录教务，约几秒钟。</div></div>`;
+          `<div class="empty-sub" style="padding:2px 0 8px">正在查询正方教务…</div>` +
+          skeletonRows(4);
         try {
           const data = await api("/api/rooms/free?" + params.toString());
           roomCache = data.rooms;
@@ -5547,8 +5710,17 @@
         renderWeekEvents();
       }
 
+      let weekLoadSeq = 0;
       async function loadWeek(week) {
+        // 快速左右连滑时只应用最后一次的结果，避免慢响应覆盖新周次
+        const seq = ++weekLoadSeq;
+        if (!$("#weekGrid").children.length)
+          $("#weekGrid").innerHTML =
+            `<div style="grid-column:1/-1"><div class="sk-grid">${
+              Array.from({ length: 10 }, () => '<div class="sk"></div>').join("")
+            }</div></div>`;
         const data = await api("/api/timetable?week=" + week);
+        if (seq !== weekLoadSeq) return;
         viewWeek = data.week;
         renderWeek(data);
         if (data.week === data.current_week) loadWeather();
@@ -6080,6 +6252,8 @@
   </div>`;
       }
       async function loadExams() {
+        if (!$("#examList").children.length)
+          $("#examList").innerHTML = skeletonRows(2);
         examData = await api("/api/exams");
         const box = $("#examList");
         const sub = $("#examSub");
@@ -7880,6 +8054,201 @@
       $("#testWecomBtn").addEventListener("click", (e) => runPushTest("wecom", e.currentTarget));
       $("#refreshPushLogBtn").addEventListener("click", () => loadPushLog());
 
+      /* ---------- 设置分区导航：粘性锚点 + 滚动联动 ---------- */
+      const settingsNav = $("#settingsNav");
+      settingsNav.addEventListener("click", (e) => {
+        const btn = e.target.closest("button[data-target]");
+        if (!btn) return;
+        const el = document.getElementById(btn.dataset.target);
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+      const settingsObserver = new IntersectionObserver((entries) => {
+        entries.forEach((en) => {
+          if (!en.isIntersecting) return;
+          settingsNav.querySelectorAll("button").forEach((b) =>
+            b.classList.toggle("active", b.dataset.target === en.target.id));
+        });
+      }, { rootMargin: "-90px 0px -55% 0px", threshold: 0 });
+      ["settingsAppearance", "settingsAccount", "settingsSync", "settingsPush", "settingsAi"]
+        .forEach((id) => {
+          const el = document.getElementById(id);
+          if (el) settingsObserver.observe(el);
+        });
+
+      /* ---------- 周视图：更多菜单、日期跳转、滑动翻周、全局搜索 ---------- */
+      const weekMenu = $("#weekMenu");
+      $("#weekMoreBtn").addEventListener("click", (e) => {
+        e.stopPropagation();
+        weekMenu.classList.toggle("hidden");
+      });
+      document.addEventListener("click", (e) => {
+        if (!e.target.closest(".week-menu-wrap")) weekMenu.classList.add("hidden");
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") weekMenu.classList.add("hidden");
+      });
+      weekMenu.addEventListener("click", () => weekMenu.classList.add("hidden"));
+
+      let lastJumpIso = "";
+      $("#weekJumpBtn").addEventListener("click", () => {
+        const row = $("#weekJump");
+        row.classList.toggle("hidden");
+        if (!row.classList.contains("hidden")) {
+          lastJumpIso = ""; // 重新打开面板时允许再跳同一天
+          const base = weekRender?.dates?.[0] || weekData?.today;
+          if (base) $("#weekJumpDate").value = base;
+          $("#weekJumpDate").focus();
+        }
+      });
+      function mondayOf(iso) {
+        const d = new Date(iso + "T00:00:00");
+        if (isNaN(d)) return "";
+        d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      }
+      function jumpToDate(iso) {
+        if (!iso) return;
+        // 周课表还没渲染好时用今天所在周的周一兜底，不再静默失效
+        const now = new Date();
+        const localToday =
+          `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+        const anchor = weekRender?.dates?.[0] || mondayOf(weekData?.today || localToday);
+        const targetMonday = mondayOf(iso);
+        if (!anchor || !targetMonday) { toast("课表还没加载好，稍后再试", 3000); return; }
+        // 选完日期自动跳一次，再点「转到这一周」只收起面板，不重复请求
+        if (iso === lastJumpIso) { $("#weekJump").classList.add("hidden"); return; }
+        lastJumpIso = iso;
+        const a = new Date(anchor + "T00:00:00");
+        const t = new Date(targetMonday + "T00:00:00");
+        const diff = Math.round((t - a) / 604800000);
+        const total = status?.total_weeks || 30;
+        loadWeek(Math.min(Math.max((viewWeek || 1) + diff, 1), total));
+        $("#weekJump").classList.add("hidden");
+      }
+      $("#weekJumpGo").addEventListener("click", () => jumpToDate($("#weekJumpDate").value));
+      $("#weekJumpDate").addEventListener("change", (e) => jumpToDate(e.target.value));
+
+      // 横向滑动翻周；网格本身还能横向滚动时，中间的手势留给滚动
+      let touchX = 0, touchY = 0, touchActive = false;
+      const gridScroll = $("#weekGridScroll");
+      gridScroll.addEventListener("touchstart", (e) => {
+        if (e.touches.length !== 1) { touchActive = false; return; }
+        touchActive = true;
+        touchX = e.touches[0].clientX;
+        touchY = e.touches[0].clientY;
+      }, { passive: true });
+      gridScroll.addEventListener("touchcancel", () => { touchActive = false; },
+        { passive: true });
+      gridScroll.addEventListener("touchend", (e) => {
+        if (!touchActive) return;
+        touchActive = false;
+        const t = e.changedTouches[0];
+        const dx = t.clientX - touchX, dy = t.clientY - touchY;
+        if (Math.abs(dx) < 64 || Math.abs(dx) < Math.abs(dy) * 1.6) return;
+        if (gridScroll.scrollWidth > gridScroll.clientWidth + 4) {
+          if (dx < 0 && gridScroll.scrollLeft + gridScroll.clientWidth < gridScroll.scrollWidth - 8) return;
+          if (dx > 0 && gridScroll.scrollLeft > 8) return;
+        }
+        const total = status?.total_weeks || 30;
+        loadWeek(Math.min(Math.max((viewWeek || 1) + (dx < 0 ? 1 : -1), 1), total));
+      }, { passive: true });
+
+      const SEARCH_KINDS = { course: "课程", event: "日程", exam: "考试" };
+      let searchTimer = 0, searchSeq = 0;
+      async function runScheduleSearch(q) {
+        const box = $("#searchResults");
+        const query = q.trim();
+        if (!query) { box.classList.add("hidden"); box.innerHTML = ""; return; }
+        const seq = ++searchSeq;
+        box.classList.remove("hidden");
+        box.innerHTML = `<div class="sr-empty">正在搜索…</div>`;
+        try {
+          const r = await api("/api/search?q=" + encodeURIComponent(query));
+          if (seq !== searchSeq) return;
+          const list = r.results || [];
+          box.innerHTML = list.length
+            ? list.map((x, i) => `<button type="button" class="sr-item" data-sr="${i}">
+                <span class="sr-kind">${SEARCH_KINDS[x.kind] || "结果"}</span>
+                <span><span class="sr-title">${esc(x.title)}</span>
+                <span class="sr-meta" style="display:block">${esc(
+                  [x.meta, x.sub].filter(Boolean).join(" · "))}${
+                  x.week ? ` · 第 ${x.week} 周` : ""}</span></span>
+              </button>`).join("")
+            : `<div class="sr-empty">没有找到「${esc(query)}」相关的课程、日程或考试。</div>`;
+          box.dataset.items = JSON.stringify(
+            list.map((x) => ({ week: x.week, kind: x.kind })));
+        } catch (e) {
+          if (seq === searchSeq)
+            box.innerHTML = `<div class="sr-empty">搜索失败：${esc(e.message)}</div>`;
+        }
+      }
+      $("#scheduleSearch").addEventListener("input", (e) => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => runScheduleSearch(e.target.value), 320);
+      });
+      $("#searchResults").addEventListener("click", async (e) => {
+        const btn = e.target.closest("button[data-sr]");
+        if (!btn) return;
+        const items = JSON.parse($("#searchResults").dataset.items || "[]");
+        const item = items[Number(btn.dataset.sr)];
+        if (!item) return;
+        const total = status?.total_weeks || 30;
+        if (item.week) await loadWeek(Math.min(Math.max(item.week, 1), total));
+        const target = item.kind === "exam" ? $("#examList")
+          : item.kind === "event" ? $("#weekEventList") : $("#weekGridScroll");
+        if (target) {
+          target.scrollIntoView({ behavior: "smooth", block: "start" });
+          target.classList.remove("flash");
+          void target.offsetWidth;
+          target.classList.add("flash");
+        }
+      });
+
+      /* ---------- 安装到主屏幕：安卓用系统提示，iOS 给手动指引 ---------- */
+      let deferredInstall = null;
+      const INSTALL_KEY = "agenda.install.dismissed";
+      function maybeShowInstallTip() {
+        const standalone = window.matchMedia("(display-mode: standalone)").matches
+          || window.navigator.standalone === true;
+        if (standalone) return;
+        try { if (localStorage.getItem(INSTALL_KEY)) return; } catch (e) {}
+        const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+        if (!deferredInstall && !ios) return;
+        if (ios) {
+          $("#installTipText").textContent =
+            "用 Safari 打开，点分享 →「添加到主屏幕」，就能像 App 一样使用。";
+          $("#installBtn").textContent = "知道了";
+        }
+        $("#installTip").classList.remove("hidden");
+      }
+      window.addEventListener("beforeinstallprompt", (e) => {
+        e.preventDefault();
+        deferredInstall = e;
+        maybeShowInstallTip();
+      });
+      $("#installBtn").addEventListener("click", async () => {
+        if (!deferredInstall) {
+          // iOS 只有手动指引，点「知道了」也要记下，否则每次刷新都会再弹
+          try { localStorage.setItem(INSTALL_KEY, "1"); } catch (e) {}
+          $("#installTip").classList.add("hidden");
+          return;
+        }
+        deferredInstall.prompt();
+        try { await deferredInstall.userChoice; } catch (e) {}
+        deferredInstall = null;
+        try { localStorage.setItem(INSTALL_KEY, "1"); } catch (e) {}
+        $("#installTip").classList.add("hidden");
+      });
+      $("#installDismiss").addEventListener("click", () => {
+        try { localStorage.setItem(INSTALL_KEY, "1"); } catch (e) {}
+        $("#installTip").classList.add("hidden");
+      });
+      window.addEventListener("appinstalled", () => {
+        deferredInstall = null;
+        try { localStorage.setItem(INSTALL_KEY, "1"); } catch (e) {}
+        $("#installTip").classList.add("hidden");
+      });
+
       /* ---------- 启动 ---------- */
       /* ---------- 多用户：登录 / 注册 / 邀请码 ---------- */
       let currentUser = null;
@@ -7891,6 +8260,7 @@
       function showApp() {
         $("#authScreen").classList.add("hidden");
         $("#app").classList.remove("hidden");
+        maybeShowInstallTip();
       }
       function authError(msg) { $("#authError").textContent = msg || ""; }
       function switchAuthTab(which) {
