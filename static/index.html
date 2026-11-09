@@ -7223,7 +7223,20 @@
       }
 
       /* ---------- Tab 切换 ---------- */
+      // 记住当前页面，刷新后停留在原 tab（按浏览器本地保存，不含任何隐私数据）
+      const TAB_KEY = "qut.currentTab";
+      const TAB_IDS = ["today", "week", "rooms", "ai", "source", "admin", "settings"];
+      function readSavedTab() {
+        try {
+          const t = localStorage.getItem(TAB_KEY);
+          return TAB_IDS.includes(t) && $("#tab-" + t) ? t : null;
+        } catch (e) { return null; }
+      }
+      function saveTab(tab) {
+        try { localStorage.setItem(TAB_KEY, tab); } catch (e) {}
+      }
       function switchTab(tab) {
+        saveTab(tab);
         // 移动端底部导航切页后回到顶部，避免停在上一页的滚动位置
         if (window.matchMedia("(max-width: 720px)").matches) window.scrollTo(0, 0);
         $$("#nav button").forEach((b) =>
@@ -7692,9 +7705,18 @@
           await loadChatHistory();
           pollBrowserLogin();
           if (currentUser.role === "admin") refreshInvites();
-          // 首次进入且未配置任何数据源时，引导去「课表来源」
-          if (status && status.is_demo && !status.has_source)
+          // 刷新后停留在上一次的页面；首次未配置数据源时仍优先引导去「课表来源」
+          if (status && status.is_demo && !status.has_source) {
             switchTab("source");
+          } else {
+            const saved = readSavedTab();
+            // 非管理员不恢复「用户管理」，并清掉无效记录；today 是默认页且已加载，无需重复切换
+            if (saved === "admin" && currentUser.role !== "admin") {
+              saveTab("today");
+            } else if (saved && saved !== "today") {
+              switchTab(saved);
+            }
+          }
         } catch (e) {
           toast("加载失败：" + e.message, 5000);
         }
@@ -7726,6 +7748,7 @@
       });
       async function doLogout() {
         try { await api("/api/auth/logout", { method: "POST" }); } catch (e) {}
+        try { localStorage.removeItem(TAB_KEY); } catch (e) {}
         location.reload();
       }
       $("#logoutBtn").addEventListener("click", doLogout);
