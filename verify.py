@@ -12,7 +12,8 @@ from pathlib import Path
 import time
 import subprocess
 import socket
-from app.ai import build_context, _request_headers, _sse_delta, SYSTEM_PROMPT, weeks_mentioned
+from app.ai import (build_context, _request_headers, _sse_delta, SYSTEM_PROMPT,
+                    weeks_mentioned, last_room_query, room_query_context)
 from app.providers.httpjson import courses_from_payload
 from app.browser_login import (
     build_candidate, pick_best, _headers_for_config, _parse_body, _public_candidates,
@@ -279,6 +280,39 @@ check("默认校区.未设置不注入",
 _cfg_room["provider"]["zhengfang"]["username"] = ""
 _cfg_room["provider"]["zhengfang"]["password"] = ""
 save_config(_cfg_room)
+
+# 空教室多轮追问：沿用最近一次查询的日期/节次/校区，不切回今天
+_room_hist = [
+    {"role": "user", "content": "明天我想找一个空教室"},
+    {"role": "assistant", "content":
+     '好的，先查明天下午。\n[查空教室] {"date": "2026-11-10", "start": 5, "end": 8, '
+     '"campus": "黄岛校区", "building": ""}\n[追问] ["上午三四节呢", "换到市北校区"]'},
+    {"role": "assistant", "content":
+     '已查询。\n[空教室结果] {"date": "2026-11-10", "start": 5, "end": 8, '
+     '"campus": "黄岛校区", "building": "", "count": 3, "groups": []}'},
+    {"role": "user", "content": "我想找一个小一点的教室"},
+]
+_q_last = last_room_query(_room_hist)
+check("空教室.追问沿用上次条件", bool(_q_last)
+      and _q_last["date"] == "2026-11-10" and _q_last["start"] == 5
+      and _q_last["end"] == 8 and _q_last["campus"] == "黄岛校区", str(_q_last))
+_room_ctx = room_query_context(_room_hist)
+check("空教室.上下文写明确切日期",
+      "最近一次空教室查询条件" in _room_ctx and "2026-11-10" in _room_ctx
+      and "第 5–8 节" in _room_ctx and "不要切回今天" in _room_ctx, _room_ctx)
+_room_hist2 = _room_hist + [
+    {"role": "assistant", "content":
+     '[空教室结果] {"date": "2026-11-11", "start": 1, "end": 2, '
+     '"campus": "市北校区", "building": "一号教学楼"}'}]
+check("空教室.取最近一次查询", last_room_query(_room_hist2)["date"] == "2026-11-11"
+      and "一号教学楼" in room_query_context(_room_hist2), "")
+check("空教室.无历史不注入",
+      last_room_query([]) is None and room_query_context(None) == "", "")
+check("空教室.失败结果不算条件",
+      last_room_query([{"role": "assistant", "content":
+                        '[空教室结果] {"error": "超时", "date": "2026-11-10", '
+                        '"start": 5, "end": 8}'}]) is None, "")
+check("空教室.提示词含追问规则", "10.1 空教室多轮追问" in SYSTEM_PROMPT, "")
 
 # 应用辅导 + 配置状态注入 AI 上下文
 _ctx_cfg = build_context(load_config())

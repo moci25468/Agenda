@@ -31,6 +31,63 @@ def weeks_mentioned(text: str) -> list[int]:
     return [int(x) for x in re.findall(r"第\s*(\d{1,2})\s*周", text or "")]
 
 
+_ROOM_MARK_RE = re.compile(r"\[(?:查空教室|空教室结果)\]\s*(\{[^\n]*\})")
+
+
+def last_room_query(history: list[dict] | None) -> dict | None:
+    """找出最近一次空教室查询的条件，供多轮追问沿用。"""
+    for h in reversed(history or []):
+        if h.get("role") != "assistant":
+            continue
+        for raw in reversed(_ROOM_MARK_RE.findall(str(h.get("content") or ""))):
+            try:
+                obj = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(obj, dict) or obj.get("error"):
+                continue
+            date = str(obj.get("date") or "").strip()
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+                continue
+            try:
+                start, end = int(obj.get("start")), int(obj.get("end"))
+            except (TypeError, ValueError):
+                continue
+            if not 1 <= start <= end <= 12:
+                continue
+            return {
+                "date": date, "start": start, "end": end,
+                "campus": str(obj.get("campus") or "").strip()[:20],
+                "building": str(obj.get("building") or "").strip()[:30],
+            }
+    return None
+
+
+def room_query_context(history: list[dict] | None) -> str:
+    """把最近一次空教室查询条件写进上下文，避免追问被切回今天。"""
+    q = last_room_query(history)
+    if not q:
+        return ""
+    try:
+        day = datetime.strptime(q["date"], "%Y-%m-%d")
+        when = f"{q['date']}（{WEEKDAY_CN[day.isoweekday() - 1]}）"
+    except ValueError:
+        when = q["date"]
+    scope = "，".join(
+        part for part in (
+            f"校区 {q['campus']}" if q["campus"] else "",
+            f"教学楼 {q['building']}" if q["building"] else "",
+        ) if part
+    )
+    line = f"最近一次空教室查询条件：{when} 第 {q['start']}–{q['end']} 节"
+    if scope:
+        line += f"，{scope}"
+    line += ("。用户没有明确更换日期、节次或校区时，追问（例如「小一点的教室」「人少的」"
+             "「换一间」「我没课的时候」）沿用这组条件，不要切回今天或默认日期；"
+             "「我没课的时候」指这同一天里用户课表空闲的节次。")
+    return line
+
+
 def exam_line(e: Exam) -> str:
     parts = [e.display_time(), e.name]
     if e.room:
@@ -291,6 +348,7 @@ SYSTEM_PROMPT = """你是「Agenda 知序」，一个友好、简洁的校园 AI
 10. 用户询问空教室或自习教室时（如「今天下午哪里有空教室」），末尾单独一行输出：
     [查空教室] {{"date": "YYYY-MM-DD", "start": 1, "end": 2, "campus": "", "building": ""}}
     date 按注入的今天推算；start/end 为节次（1-12，一般上午 1-4、下午 5-8、晚上 9-11），用户没说节次时按上午/下午/晚上选对应大节；campus 填校区名（市北/长江路/临沂/黄岛），用户没提校区时优先填上下文里的「用户默认校区」，没有默认值再留空，用户明确说了别的校区就按用户说的填；building 填教学楼名，未指定留空；一次最多一行。系统会实时查询并把结果卡片展示给用户，结果会回写进对话供后续参考。上下文提示未配置时不要输出标记，改为引导用户去「课表来源」填写正方学号密码；不要自己编造教室名单。
+10.1 空教室多轮追问：上下文里有「最近一次空教室查询条件」时，只要用户没有明确改日期、节次或校区，追问（「小一点的教室」「人少一点」「换一间」「我没课的时候」等）必须沿用那组日期和节次，不要切回今天或默认值；「我没课的时候」指同一天里用户课表空闲的节次，需要结合注入的课表判断。用户明确说了新日期、节次或校区时才替换对应字段。
 11. 每次回答末尾还要给出 2-3 个与当前话题紧密相关、用户最可能接着问的选项，最后一行输出：
     [追问] ["第一个完整问题或指令", "第二个完整问题或指令", "第三个完整问题或指令"]
     每项 6-20 个汉字，可直接点击发送；要具体、有实际下一步价值，不要重复用户刚问的问题，不要用「了解更多」「继续」这种空泛表述，不要编号。追问可引用当前回答（如「那明天呢」「换成周五再查」）。用户只是告别或明确说不需要继续时可省略。
@@ -418,6 +476,9 @@ async def _prepare(message: str, history: list[dict] | None):
     weather = await _weather_context(cfg)
     if weather:
         context += "\n\n" + weather
+    continuity = room_query_context(history)
+    if continuity:
+        context += "\n\n" + continuity
     messages = [{"role": "system", "content":
                  SYSTEM_PROMPT.format(context=context)}]
     for h in (history or [])[-10:]:
