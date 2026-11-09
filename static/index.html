@@ -428,6 +428,18 @@
         font-size: 15px;
         font-weight: 600;
       }
+      /* 不在本周时，点周次标题即可回到本周；按钮栏保持固定，不做显隐重排 */
+      .week-nav .label.clickable { cursor: pointer; }
+      .week-nav .label .back-hint {
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--sub);
+        white-space: nowrap;
+      }
+      .week-nav .label.clickable:hover .back-hint {
+        color: var(--accent);
+        text-decoration: underline;
+      }
       .week-grid-scroll {
         overflow-x: auto;
       }
@@ -3894,7 +3906,6 @@
           <button class="small" id="prevWeek">上一周</button>
           <span class="label" id="weekLabel"></span>
           <button class="small" id="nextWeek">下一周</button>
-          <button class="small hidden" id="backTodayBtn">回到本周</button>
           <button class="small" id="editCoursesBtn">编辑课表</button>
           <button class="small" id="exportIcsBtn">导出日历</button>
           <button class="small" id="subscribeIcsBtn">一键订阅</button>
@@ -5378,11 +5389,15 @@
 
       function renderWeek(data) {
         weekRender = data;
-        $("#weekLabel").textContent =
-          `第 ${data.week} 周` +
-          (data.week === data.current_week ? "（本周）" : "");
         const backWeek = Math.max(data.current_week, 1);
-        $("#backTodayBtn").classList.toggle("hidden", data.week === backWeek);
+        const isCurrent = data.week === backWeek;
+        const label = $("#weekLabel");
+        // 周次标题兼任「回到本周」：不额外增减按钮，导航条布局恒定
+        label.innerHTML = isCurrent
+          ? `第 ${data.week} 周（本周）`
+          : `第 ${data.week} 周 <span class="back-hint">· 回到本周</span>`;
+        label.classList.toggle("clickable", !isCurrent);
+        label.title = isCurrent ? "" : "点击回到本周";
         $("#weekHint").textContent = data.is_demo
           ? "当前为演示课表，接入真实数据源后自动替换。"
           : `数据来源：${data.fetched_at || ""} 同步`;
@@ -7369,9 +7384,10 @@
       $("#nextWeek").addEventListener("click", () =>
         loadWeek(Math.min(status?.total_weeks || 30, viewWeek + 1)),
       );
-      $("#backTodayBtn").addEventListener("click", () =>
-        loadWeek(Math.max(weekRender?.current_week || status?.week || 1, 1)),
-      );
+      $("#weekLabel").addEventListener("click", () => {
+        if (!$("#weekLabel").classList.contains("clickable")) return;
+        loadWeek(Math.max(weekRender?.current_week || status?.week || 1, 1));
+      });
       $("#nextClassBar").addEventListener("click", () => switchTab("week"));
       setInterval(() => {
         if (weekData && !$("#tab-today").classList.contains("hidden")) renderNextClass();

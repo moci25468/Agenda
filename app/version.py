@@ -10,7 +10,7 @@ import subprocess
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-FALLBACK_VERSION = "1.4.30"
+FALLBACK_VERSION = "1.4.31"
 
 
 def _git(*args: str) -> str:
