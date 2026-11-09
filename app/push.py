@@ -56,6 +56,53 @@ async def send_wecom(cfg: dict, title: str, body: str) -> tuple[bool, str]:
         return False, f"群机器人请求失败: {e}"
 
 
+CHANNELS = ("bark", "wecom")
+CHANNEL_NAMES = {"bark": "Bark", "wecom": "企业微信 / 钉钉群机器人"}
+
+
+def channel_ready(cfg: dict, channel: str, need_enabled: bool = False) -> tuple[bool, str]:
+    """通道是否可发：need_enabled 时还要求设置里的启用开关已打开。"""
+    p = cfg.get("push", {})
+    if channel == "bark":
+        configured = bool(str(p.get("bark_key") or "").strip())
+    else:
+        configured = bool(_wecom_url(p.get("wecom_webhook") or ""))
+    name = CHANNEL_NAMES.get(channel, channel)
+    if not configured:
+        return False, f"未配置 {name}，请先在设置中填写"
+    if need_enabled and not p.get(f"{channel}_enabled"):
+        return False, f"{name} 推送未启用，请先在设置中开启"
+    return True, ""
+
+
+def available_channels(cfg: dict) -> list[str]:
+    """已配置并启用的通道，供 AI 判断能不能主动推送。"""
+    return [c for c in CHANNELS if channel_ready(cfg, c, need_enabled=True)[0]]
+
+
+async def send_selected(cfg: dict, title: str, body: str, channels: list[str],
+                        need_enabled: bool = False) -> list[dict]:
+    """按指定通道发送，逐条写 push_log。测试时可绕过启用开关。"""
+    results = []
+    for channel in channels:
+        if channel not in CHANNELS:
+            results.append({"channel": channel, "ok": False,
+                            "error": f"不支持的推送通道：{channel}"})
+            continue
+        ready, err = channel_ready(cfg, channel, need_enabled=need_enabled)
+        if not ready:
+            db.add_push_log(channel, title, body, "skip", err)
+            results.append({"channel": channel, "ok": False, "error": err})
+            continue
+        if channel == "bark":
+            ok, err = await send_bark(cfg, title, body)
+        else:
+            ok, err = await send_wecom(cfg, title, body)
+        db.add_push_log(channel, title, body, "ok" if ok else "fail", err)
+        results.append({"channel": channel, "ok": ok, "error": err})
+    return results
+
+
 async def push_all(cfg: dict, title: str, body: str) -> list[dict]:
     """向所有已启用通道推送，逐条记录日志，返回结果列表。"""
     p = cfg.get("push", {})

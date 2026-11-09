@@ -29,7 +29,7 @@ from .models import (
 )
 from .providers import get_provider
 from .providers.zhengfang import ZhengfangProvider, zhengfang_configured
-from .push import push_all
+from .push import available_channels, push_all, send_selected
 from .scheduler import (
     WEEKDAY_CN, apply_snapshot, courses_on, next_run_time, reschedule, run_sync,
     section_time, shutdown_scheduler, start_scheduler,
@@ -257,7 +257,10 @@ async def status():
         "sync_time": cfg.get("sync_time", "12:00"),
         "next_sync": next_run_time(),
         "ai_enabled": bool(cfg.get("ai", {}).get("enabled") and cfg.get("ai", {}).get("api_key")),
-        "push_channels": [c for c, on in (("bark", push_cfg.get("bark_enabled")),) if on],
+        "push_channels": [c for c, on in (
+            ("bark", push_cfg.get("bark_enabled")),
+            ("wecom", push_cfg.get("wecom_enabled")),
+        ) if on],
     }
 
 
@@ -1137,10 +1140,43 @@ async def provider_preview():
             "warnings": diagnose_url(cfg["provider"].get("portal", {}).get("url", ""))}
 
 
+class PushTestRequest(BaseModel):
+    channel: str = ""
+
+
+class PushSendRequest(BaseModel):
+    title: str = ""
+    body: str = ""
+    channels: list[str] = []
+
+
 @app.post("/api/push/test")
-async def push_test():
+async def push_test(req: PushTestRequest | None = None):
     cfg = load_config()
-    results = await push_all(cfg, "测试推送", "Agenda 推送通道测试成功。\n每日定时同步后会推送课表变更与次日课程、日程安排。")
+    channel = (req.channel if req else "").strip()
+    title = "测试推送"
+    body = "Agenda 推送通道测试成功。\n每日定时同步后会推送课表变更与次日课程、日程安排。"
+    if channel:
+        results = await send_selected(cfg, title, body, [channel])
+    else:
+        results = await push_all(cfg, title, body)
+    return {"results": results}
+
+
+@app.post("/api/push/send")
+async def push_send(req: PushSendRequest):
+    """AI 主动推送：只发给已配置并启用的通道，逐条返回结果。"""
+    cfg = load_config()
+    title = (req.title or "").strip()[:60] or "Agenda 消息"
+    body = (req.body or "").strip()
+    if not body:
+        raise HTTPException(400, "推送内容不能为空")
+    channels = list(dict.fromkeys(c for c in (req.channels or []) if c))
+    if not channels:
+        channels = available_channels(cfg)
+        if not channels:
+            raise HTTPException(400, "未配置或未启用 Bark / 企业微信推送，请先到设置中填写并开启")
+    results = await send_selected(cfg, title, body[:1000], channels, need_enabled=True)
     return {"results": results}
 
 

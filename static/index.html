@@ -1738,6 +1738,7 @@
         align-items: center;
         gap: 10px;
       }
+      .push-chip .push-err { color: var(--warn); }
       .memory-add {
         display: flex;
         gap: 10px;
@@ -4325,6 +4326,9 @@
           <p class="hint">
             在企业微信群里「添加群机器人」复制 Webhook 地址粘贴到这里，也可以只填 key；钉钉群机器人同理。安卓手机在微信 / 企业微信里就能收到，和 Bark 可同时开启。
           </p>
+          <div class="form-actions">
+            <button id="testWecomBtn">发送测试消息</button>
+          </div>
         </div>
 
         <div class="card">
@@ -6040,7 +6044,7 @@
       }
       // 流式输出时先隐藏未写完的动作标记，结束后再渲染成卡片
       function stripPendingMarkers(s) {
-        return (s || "").replace(/\[(添加日程|记住|查空教室|追问)\][\s\S]*$/, "");
+        return (s || "").replace(/\[(添加日程|记住|查空教室|推送|追问)\][\s\S]*$/, "");
       }
       // 轻量 Markdown：标题 / 列表 / 表格 / 引用 / 分隔线 / 代码块，先整体转义再渲染
       function renderReply(raw) {
@@ -6370,17 +6374,77 @@
         const { text: t1, proposal } = extractEventProposal(t0);
         const { text: t2, memory } = extractMemory(t1);
         const { text: t3, query: roomQuery } = extractRoomQuery(t2);
-        const { text: cleanText, followups } = extractFollowups(t3);
+        const { text: t4, push } = extractPush(t3);
+        const { text: cleanText, followups } = extractFollowups(t4);
         const bodyText = cleanText || (proposal ? "为你整理了一条日程，确认后存入："
-          : (roomQuery || roomResult) ? "为你查询了空教室：" : "已为你整理好，可以继续这样问：");
+          : (roomQuery || roomResult) ? "为你查询了空教室："
+          : push ? "正在把你的消息发到手机：" : "已为你整理好，可以继续这样问：");
         bubble.innerHTML = renderReply(bodyText);
         attachMsgActions(bubble, "ai");
         if (proposal) appendEventProposal(bubble, proposal);
         if (memory) appendMemoryChip(bubble, memory, fromHistory);
         if (roomQuery || roomResult) appendRoomCard(bubble, roomQuery, roomResult, acc);
+        if (push) appendPushChip(bubble, push, fromHistory);
         appendFollowups(bubble, followups.length ? followups : fallbackFollowups(bodyText, {
           proposal, memory, room: roomQuery || roomResult,
         }));
+      }
+
+      function pushChannelName(channel) {
+        return channel === "bark" ? "Bark" : channel === "wecom" ? "企业微信" : channel;
+      }
+      // [推送] {json} 标记 → 通过 Bark / 企业微信把消息发到手机；历史回放不重发
+      function extractPush(text) {
+        const m = text.match(/\[推送\]\s*(\{[^\n]*\})/);
+        if (!m) return { text, push: null };
+        try {
+          const obj = JSON.parse(m[1]);
+          const title = typeof obj.title === "string" ? obj.title.trim().slice(0, 60) : "";
+          const body = typeof obj.body === "string" ? obj.body.trim().slice(0, 1000) : "";
+          if (body) {
+            const channels = Array.isArray(obj.channels)
+              ? obj.channels.filter((c) => c === "bark" || c === "wecom")
+              : [];
+            return {
+              text: text.replace(m[0], "").trim(),
+              push: { title, body, channels },
+            };
+          }
+        } catch (e) {}
+        return { text, push: null };
+      }
+      async function appendPushChip(bubble, push, fromHistory = false) {
+        const chip = document.createElement("div");
+        chip.className = "memory-chip push-chip";
+        const label = push.title || push.body.slice(0, 20);
+        if (fromHistory) {
+          chip.innerHTML = `<span>已推送到手机：${esc(label)}</span>`;
+          bubble.appendChild(chip);
+          return;
+        }
+        chip.innerHTML = "<span>正在推送到手机…</span>";
+        bubble.appendChild(chip);
+        try {
+          const r = await api("/api/push/send", {
+            method: "POST",
+            body: JSON.stringify(push),
+          });
+          const ok = r.results.filter((x) => x.ok).map((x) => pushChannelName(x.channel));
+          const bad = r.results.filter((x) => !x.ok);
+          if (ok.length) {
+            chip.innerHTML = `<span>已推送到 ${esc(ok.join("、"))}${
+              bad.length
+                ? `；<span class="push-err">${esc(bad.map((x) => x.error).join("；"))}</span>`
+                : ""
+            }</span>`;
+          } else {
+            chip.innerHTML = `<span class="push-err">推送失败：${esc(
+              bad.map((x) => x.error).join("；") || "未知错误",
+            )}</span>`;
+          }
+        } catch (e) {
+          chip.innerHTML = `<span class="push-err">推送失败：${esc(e.message)}</span>`;
+        }
       }
 
       // AI 回复末尾的 [添加日程] {json} 标记 → 确认卡片，用户点击后才真正保存
@@ -7574,21 +7638,29 @@
           btn.disabled = false;
         }
       });
-      $("#testPushBtn").addEventListener("click", async () => {
+      async function runPushTest(channel, btn) {
         try {
+          if (btn) btn.disabled = true;
           await api("/api/settings", {
             method: "POST",
             body: JSON.stringify(collectSettings()),
           });
-          const r = await api("/api/push/test", { method: "POST" });
+          const r = await api("/api/push/test", {
+            method: "POST",
+            body: JSON.stringify(channel ? { channel } : {}),
+          });
           const msgs = r.results.map(
-            (x) => `${x.channel}: ${x.ok ? "成功" : x.error}`,
+            (x) => `${pushChannelName(x.channel)}：${x.ok ? "已发送" : x.error}`,
           );
           toast(msgs.join("；"), 5000);
         } catch (e) {
           toast(e.message, 4000);
+        } finally {
+          if (btn) btn.disabled = false;
         }
-      });
+      }
+      $("#testPushBtn").addEventListener("click", (e) => runPushTest("", e.currentTarget));
+      $("#testWecomBtn").addEventListener("click", (e) => runPushTest("wecom", e.currentTarget));
 
       /* ---------- 启动 ---------- */
       /* ---------- 多用户：登录 / 注册 / 邀请码 ---------- */

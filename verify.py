@@ -14,7 +14,8 @@ import subprocess
 import socket
 from app.ai import (build_context, _request_headers, _sse_delta, SYSTEM_PROMPT,
                     weeks_mentioned, last_room_query, room_query_context,
-                    free_sections, free_sections_context, _free_spans)
+                    free_sections, free_sections_context, _free_spans,
+                    _config_status_lines, current_section_lines)
 from app.providers.httpjson import courses_from_payload
 from app.browser_login import (
     build_candidate, pick_best, _headers_for_config, _parse_body, _public_candidates,
@@ -29,7 +30,8 @@ from app.curl_import import parse_curl, guess_mapping
 from app.config import load_config as _load_cfg, save_config as _save_cfg
 from app import db as _db
 from datetime import date, datetime, timedelta
-from app.push import push_all, send_wecom, _wecom_url, WECOM_API
+from app.push import (push_all, send_wecom, _wecom_url, WECOM_API,
+                      send_selected, available_channels)
 from app.scheduler import (run_sync, format_changes, courses_on, section_time,
                            run_reminders, push_exam_reviews, TZ)
 import app.scheduler as _sched
@@ -440,6 +442,21 @@ if _fs_orig:
     db.save_snapshot(_fs_orig["courses"], _fs_orig["source"])
 check("空闲节次.提示词引用", "用户空闲节次" in SYSTEM_PROMPT, "")
 
+# 当前节次：AI 回答「现在去哪自习」不能漏掉正在上的这一节
+from datetime import datetime as _dt
+_cs_cfg = load_config()
+_cs_1430 = current_section_lines(_cs_cfg, _dt(2026, 11, 9, 14, 30))
+check("当前节次.正在上的一节",
+      "正在上第 5 节" in _cs_1430 and "必须包含第 5 节" in _cs_1430, _cs_1430)
+_cs_0955 = current_section_lines(_cs_cfg, _dt(2026, 11, 9, 9, 55))
+check("当前节次.课间给最近一节",
+      "不在上课时段" in _cs_0955 and "第 3 节" in _cs_0955, _cs_0955)
+_cs_2300 = current_section_lines(_cs_cfg, _dt(2026, 11, 9, 23, 0))
+check("当前节次.今天已放学", "都已结束" in _cs_2300, _cs_2300)
+check("当前节次.注入AI上下文", "当前节次" in build_context(_fs_cfg), "")
+check("当前节次.提示词含现在规则",
+      "正在上的这一节" in SYSTEM_PROMPT and "现在" in SYSTEM_PROMPT, "")
+
 # 应用辅导 + 配置状态注入 AI 上下文
 _ctx_cfg = build_context(load_config())
 check("辅导.AI 上下文含配置现状",
@@ -449,6 +466,26 @@ _prompt_guide = SYSTEM_PROMPT.format(context="占位上下文")
 check("辅导.提示词含应用使用说明",
       "应用使用辅导" in _prompt_guide and "Bark" in _prompt_guide
       and "一键订阅" in _prompt_guide, "")
+check("推送.提示词含推送标记规则",
+      "[推送]" in _prompt_guide and '"channels"' in _prompt_guide
+      and "企业微信" in _prompt_guide and "12. 用户明确要求" in _prompt_guide, "")
+# 可用通道：只列已开启且已配置的通道，且不泄露具体 Key / webhook
+_pcfg = load_config()
+_pcfg["push"] = {**_pcfg.get("push", {}), "bark_enabled": True,
+                 "bark_key": "SECRETKEY123", "wecom_enabled": True,
+                 "wecom_webhook": "http://127.0.0.1:9/hook"}
+_plines = _config_status_lines(_pcfg)
+check("推送.上下文列出可用通道",
+      "可用于主动推送的通道" in _plines and '"bark"' in _plines
+      and '"wecom"' in _plines and "SECRETKEY123" not in _plines
+      and "127.0.0.1" not in _plines, _plines)
+_pcfg["push"]["bark_enabled"] = False
+_pcfg["push"]["wecom_enabled"] = False
+_plines_off = _config_status_lines(_pcfg)
+check("推送.未开启时不列通道",
+      "无（不能主动推送" in _plines_off, _plines_off)
+check("推送.可用通道函数与开关一致",
+      available_channels(_pcfg) == [], str(available_channels(_pcfg)))
 # 敏感值不泄露：配置了 Bark Key 后，上下文不应出现具体 Key
 _cfg_sens = load_config()
 _cfg_sens["push"] = {**_cfg_sens.get("push", {}),
@@ -965,6 +1002,27 @@ async def main():
           any(x["channel"] == "wecom" and x["status"] == "ok" for x in _wlogs))
     check("群机器人.默认关闭", load_config()["push"]["wecom_enabled"] is False
           and load_config()["push"]["wecom_webhook"] == "")
+    # 按通道发送：测试可绕过启用开关，AI 主动推送要求已启用
+    _scfg = {"push": {"bark_enabled": False, "bark_key": "",
+                      "wecom_enabled": True, "wecom_webhook": WECOM_OK}}
+    check("推送.可用通道只列已启用",
+          available_channels(_scfg) == ["wecom"], str(available_channels(_scfg)))
+    _sr = await send_selected(_scfg, "标题", "正文", ["wecom"])
+    check("推送.按通道发送", _sr[0]["ok"] is True and _wecom_hits
+          and _wecom_hits[-1][1]["text"]["content"].endswith("正文"), str(_sr))
+    _sr = await send_selected(_scfg, "t", "b", ["bark"])
+    check("推送.未配置通道友好失败",
+          _sr[0]["ok"] is False and "未配置" in _sr[0]["error"], str(_sr))
+    _sr = await send_selected(_scfg, "t", "b", ["sms"])
+    check("推送.未知通道拒绝",
+          _sr[0]["ok"] is False and "不支持" in _sr[0]["error"], str(_sr))
+    _sr = await send_selected({**_scfg, "push": {**_scfg["push"],
+                                                 "wecom_enabled": False}},
+                              "t", "b", ["wecom"], need_enabled=True)
+    check("推送.未启用时拒绝 AI 发送",
+          _sr[0]["ok"] is False and "未启用" in _sr[0]["error"], str(_sr))
+    _sr = await send_selected(_scfg, "t", "b", ["wecom"], need_enabled=True)
+    check("推送.已启用时允许 AI 发送", _sr[0]["ok"] is True, str(_sr))
 
     # 7. 日志落库
     logs = db.get_logs(10)
@@ -1229,6 +1287,37 @@ async def http_tests(port: int):
               str(st.get("rooms"))[:160])
         await ca.post(f"{base}/api/settings", json={"rooms": {
             "default_campus": "", "default_campus_name": ""}})
+        # 推送：企业微信单通道测试（免启用开关）与 AI 主动推送（需已启用）
+        await ca.post(f"{base}/api/settings", json={"push": {
+            "bark_enabled": False, "bark_key": "",
+            "wecom_enabled": False, "wecom_webhook": WECOM_OK}})
+        r = (await ca.post(f"{base}/api/push/test", json={"channel": "wecom"})).json()
+        check("推送.企业微信单通道测试", r["results"][0]["channel"] == "wecom"
+              and r["results"][0]["ok"] is True, str(r)[:200])
+        r = (await ca.post(f"{base}/api/push/send", json={
+            "title": "AI 推送", "body": "明天 08:00 上课",
+            "channels": ["wecom"]})).json()
+        check("推送.AI 发送未启用被拒", r["results"][0]["ok"] is False
+              and "未启用" in r["results"][0]["error"], str(r)[:200])
+        await ca.post(f"{base}/api/settings", json={"push": {"wecom_enabled": True}})
+        r = (await ca.post(f"{base}/api/push/send", json={
+            "title": "AI 推送", "body": "明天 08:00 上课",
+            "channels": ["wecom"]})).json()
+        check("推送.AI 发送成功", r["results"][0]["ok"] is True
+              and "明天 08:00 上课" in _wecom_hits[-1][1]["text"]["content"],
+              str(r)[:200])
+        d = (await ca.post(f"{base}/api/push/send", json={
+            "title": "自动通道", "body": "内容"})).json()
+        check("推送.未指定通道用已启用通道",
+              d["results"][0]["channel"] == "wecom", str(d)[:200])
+        r = await ca.post(f"{base}/api/push/send", json={"title": "x", "body": "  "})
+        check("推送.空内容被拒", r.status_code == 400, str(r.status_code))
+        st_push = (await ca.get(f"{base}/api/status")).json()
+        check("推送.状态列出企业微信通道",
+              "wecom" in st_push.get("push_channels", []),
+              str(st_push.get("push_channels")))
+        await ca.post(f"{base}/api/settings", json={"push": {
+            "wecom_enabled": False, "wecom_webhook": ""}})
         r = await ca.post(f"{base}/api/ingest",
                           json={"payload": {"code": 200, "data": {"courses": tt["courses"]}},
                                 "push": False, "source": "test"})
