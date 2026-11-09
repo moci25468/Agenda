@@ -3880,20 +3880,7 @@
           </div>
           <div id="tomorrowList"></div>
         </div>
-        <!-- 个人日程与考试：和今日合并，考完前一直列在这里 -->
-        <div class="card">
-          <div class="day-head">
-            <span class="date">日程</span>
-            <div class="day-meta">
-              <span class="muted" id="eventSub"></span>
-              <button class="small" id="addEventBtn">添加日程</button>
-            </div>
-          </div>
-          <div id="eventList"></div>
-        </div>
-        <p class="hint">
-          个人日程保存在你的服务器中，会并入今日安排、每日推送与 AI 问答；也可以在 AI 助手里说一句「明天下午三点开会」直接添加。考试会自动列在日程里，考完自动移除。
-        </p>
+        <!-- 个人日程与考试统一在「日程」页查看（本周日程 / 考试安排），今日页不再重复列 -->
       </section>
 
       <!-- 周视图 -->
@@ -4947,33 +4934,9 @@
       }
       let eventsCache = [];
       async function loadEvents() {
-        const [data, exams] = await Promise.all([
-          api("/api/events"),
-          api("/api/exams").catch(() => ({ exams: [] })),
-        ]);
+        // 今日页已不再单列日程卡片；这里只维护缓存，供「日程」页的本周日程列表渲染
+        const data = await api("/api/events");
         eventsCache = data.events;
-        const upcoming = data.events.filter((e) => !e.finished);
-        const past = data.events.filter((e) => e.finished);
-        // 未考完的考试一直列在日程里，按日期与开始时间混排；考完自动移除
-        const upcomingExams = (exams.exams || []).filter((e) => !e.finished);
-        const items = [
-          ...upcoming.map((e) => ({
-            sort: `${e.date} ${e.start || "00:00"}`, html: eventRow(e, true),
-          })),
-          ...upcomingExams.map((e) => ({
-            sort: `${e.date} ${e.start || "00:00"}`, html: agendaExamRow(e),
-          })),
-        ].sort((a, b) => a.sort.localeCompare(b.sort));
-        $("#eventSub").textContent = [
-          upcoming.length ? `${upcoming.length} 项日程` : "",
-          upcomingExams.length ? `${upcomingExams.length} 场考试` : "",
-        ].filter(Boolean).join(" · ");
-        let html = items.map((x) => x.html).join("");
-        if (past.length)
-          html += `<div class="exam-group">已结束</div>` + past.map((e) => eventRow(e, true)).join("");
-        $("#eventList").innerHTML = html ||
-          `<div class="empty"><div class="empty-title">还没有个人日程</div><div class="empty-sub">点击右上角「添加日程」，或在 AI 助手里说一句「明天下午三点开会」。</div></div>`;
-        // 周课表页的「本周日程」列表也随日程增删同步刷新
         renderWeekEvents();
       }
 
@@ -4997,7 +4960,6 @@
         $("#eventEditor").classList.add("hidden");
       }
 
-      $("#addEventBtn").addEventListener("click", () => openEventEditor());
       $("#addWeekEventBtn").addEventListener("click", () =>
         openWeekEventEditor(weekEventDefaultDate()));
       $("#addTomorrowEventBtn").addEventListener("click", openTomorrowEvent);
@@ -5061,7 +5023,6 @@
           toast(err.message, 4000);
         }
       }
-      $("#eventList").addEventListener("click", handleEventAction);
       $("#weekEventList").addEventListener("click", handleEventAction);
 
       /* ---------- 空教室 ---------- */
