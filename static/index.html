@@ -3525,8 +3525,14 @@
       .next-class .nc-count span { color: var(--sub); font-size: 10px; }
       .next-class .nc-arrow { flex: 0 0 auto; color: var(--sub); font-size: 14px; }
 
-      /* 周课表：只在「没课」的时段提供查空教室入口（有课的时间查空教室没意义） */
+      /* 周课表：只在「没课」的时段提供查空教室与加日程（有课的时间不需要） */
       #nav button svg { display: none; }
+      .week-cell .wc-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        width: 100%;
+      }
       .week-cell .wc-free {
         display: flex;
         align-items: center;
@@ -3904,6 +3910,17 @@
           <div class="week-grid" id="weekGrid"></div>
         </div>
         <p class="hint" id="weekHint"></p>
+        <!-- 本周日程：这一周的个人任务，空格子里「加日程」添加后立刻显示 -->
+        <div class="card" style="margin-top:16px">
+          <div class="day-head">
+            <span class="date">本周日程</span>
+            <div class="day-meta">
+              <span class="muted" id="weekEventSub"></span>
+              <button class="small" id="addWeekEventBtn">添加日程</button>
+            </div>
+          </div>
+          <div id="weekEventList"></div>
+        </div>
         <!-- 考试：并入课表页，随课表一起查看 -->
         <div class="card" style="margin-top:16px">
           <div class="day-head">
@@ -4886,6 +4903,48 @@
       }
 
       /* ---------- 个人日程（并入今日页） ---------- */
+      // 周课表页：显示当前查看周的个人日程，和空格子里的「加日程」形成闭环
+      function weekSectionTimes(s, e) {
+        const t = weekRender?.section_times || {};
+        const n = weekRender?.section_ends || {};
+        return { start: t[String(s)] || "", end: n[String(e)] || "" };
+      }
+      function weekEventDefaultDate() {
+        const r = weekRender;
+        const now = new Date();
+        const localToday =
+          `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+        if (!r || !Array.isArray(r.dates) || r.dates.length < 7) return localToday;
+        if (r.week === r.current_week) return r.today || localToday;
+        // 翻到别的周时，默认落到与今天相同的星期几，方便安排「这一周」的任务
+        const dow = now.getDay();
+        return r.dates[dow === 0 ? 6 : dow - 1] || r.dates[0];
+      }
+      function openWeekEventEditor(date, start, end) {
+        openEventEditor();
+        $("#eventDate").value = date || weekEventDefaultDate();
+        if (start && end) {
+          const t = weekSectionTimes(start, end);
+          if (t.start) $("#eventStart").value = t.start;
+          if (t.end) $("#eventEnd").value = t.end;
+        }
+        $("#eventEditorTitle").textContent = "添加本周日程";
+      }
+      function renderWeekEvents() {
+        const box = $("#weekEventList");
+        if (!box) return;
+        const dates = Array.isArray(weekRender?.dates) ? weekRender.dates : [];
+        const inWeek = new Set(dates);
+        const list = (eventsCache || [])
+          .filter((x) => x.date && inWeek.has(x.date))
+          .sort((a, b) =>
+            `${a.date} ${a.start || "00:00"}`.localeCompare(
+              `${b.date} ${b.start || "00:00"}`));
+        $("#weekEventSub").textContent = list.length ? `${list.length} 项日程` : "";
+        box.innerHTML = list.length
+          ? list.map((x) => eventRow(x, true)).join("")
+          : `<div class="empty"><div class="empty-title">这一周还没有个人日程</div><div class="empty-sub">点没课时段里的「加日程」，或用右上角「添加日程」快速安排本周任务。</div></div>`;
+      }
       let eventsCache = [];
       async function loadEvents() {
         const [data, exams] = await Promise.all([
@@ -4914,6 +4973,8 @@
           html += `<div class="exam-group">已结束</div>` + past.map((e) => eventRow(e, true)).join("");
         $("#eventList").innerHTML = html ||
           `<div class="empty"><div class="empty-title">还没有个人日程</div><div class="empty-sub">点击右上角「添加日程」，或在 AI 助手里说一句「明天下午三点开会」。</div></div>`;
+        // 周课表页的「本周日程」列表也随日程增删同步刷新
+        renderWeekEvents();
       }
 
       function openEventEditor(e = null) {
@@ -4937,6 +4998,8 @@
       }
 
       $("#addEventBtn").addEventListener("click", () => openEventEditor());
+      $("#addWeekEventBtn").addEventListener("click", () =>
+        openWeekEventEditor(weekEventDefaultDate()));
       $("#addTomorrowEventBtn").addEventListener("click", openTomorrowEvent);
       $("#closeEventEditorBtn").addEventListener("click", closeEventEditor);
       $("#eventEditor").addEventListener("click", (e) => {
@@ -4974,7 +5037,8 @@
           $("#saveEventBtn").disabled = false;
         }
       });
-      $("#eventList").addEventListener("click", async (e) => {
+      // 今日页「日程」与周课表页「本周日程」共用同一套编辑/删除逻辑
+      async function handleEventAction(e) {
         const btn = e.target.closest("button[data-act]");
         if (!btn) return;
         const row = btn.closest(".event-row");
@@ -4996,7 +5060,9 @@
         } catch (err) {
           toast(err.message, 4000);
         }
-      });
+      }
+      $("#eventList").addEventListener("click", handleEventAction);
+      $("#weekEventList").addEventListener("click", handleEventAction);
 
       /* ---------- 空教室 ---------- */
       let roomMeta = null;
@@ -5419,7 +5485,8 @@
                 a.name.localeCompare(b.name, "zh"),
             );
           const b = blocks[bi];
-          // 有课的格子只展示课程；没课的格子才给「查空教室」，按这个大节的节次去查
+          // 有课的格子只展示课程；没课的格子并列给「查空教室」和「加日程」，
+          // 都按这个大节的节次/日期，方便直接给这一周的空档安排任务
           const content = list.length
             ? list
                 .map((c) => {
@@ -5437,7 +5504,10 @@
       </div>`;
                 })
                 .join("")
-            : `<button type="button" class="wc-free" data-wc-rooms data-date="${iso}" data-start="${b.s}" data-end="${b.e}" title="这个时段没课，查空教室自习">查空教室<span>↗</span></button>`;
+            : `<div class="wc-actions">
+        <button type="button" class="wc-free" data-wc-rooms data-date="${iso}" data-start="${b.s}" data-end="${b.e}" title="这个时段没课，查空教室自习">查空教室<span>↗</span></button>
+        <button type="button" class="wc-free wc-event" data-wc-event data-date="${iso}" data-start="${b.s}" data-end="${b.e}" title="给这个空闲时段添加一条日程">加日程<span>＋</span></button>
+      </div>`;
           return `<div class="week-cell${list.length ? "" : " free"}${isToday ? " today" : ""}">${content}</div>`;
         };
         const heads = data.dates
@@ -5458,6 +5528,7 @@
           })
           .join("");
         $("#weekGrid").innerHTML = `<div></div>${heads}${rows}`;
+        renderWeekEvents();
       }
 
       async function loadWeek(week) {
@@ -5467,6 +5538,16 @@
         if (data.week === data.current_week) loadWeather();
       }
 
+      // 没课的空格子 → 加日程：预填该天日期与这个大节的起止时间
+      $("#weekGrid").addEventListener("click", (e) => {
+        const btn = e.target.closest("button[data-wc-event]");
+        if (!btn) return;
+        openWeekEventEditor(
+          btn.dataset.date,
+          parseInt(btn.dataset.start, 10),
+          parseInt(btn.dataset.end, 10),
+        );
+      });
       // 没课的空格子 → 查空教室：按这个大节的节次查。
       // 跨节课程可能让网格看起来没课、实际被占用，所以用 my-free 校验一次，
       // 真被占用时自动改查当天最接近的空闲时段。
