@@ -3375,11 +3375,25 @@
 
       @media (max-width: 720px) {
         .wrap { padding: 20px 15px 42px; }
-        #app > header { align-items: flex-start; gap: 12px; margin-bottom: 15px; }
+        #app > header {
+          align-items: center;
+          gap: 10px;
+          margin-bottom: 15px;
+          flex-wrap: nowrap;
+        }
+        .brand-lockup { min-width: 0; }
+        .brand-lockup > div { min-width: 0; }
+        .header-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         h1 { font-size: 27px; }
         .brand-cn { vertical-align: 4px; }
-        .header-right { justify-content: flex-end; gap: 6px; }
-        .header-right button.small { padding: 5px 10px; }
+        .header-right {
+          width: auto;
+          flex: 0 0 auto;
+          flex-wrap: nowrap;
+          justify-content: flex-end;
+          gap: 6px;
+        }
+        .header-right button.small { padding: 5px 8px; }
         #userBox { display: none; }
         .statusbar { flex-wrap: nowrap; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
         nav { top: 8px; gap: 3px; margin-bottom: 18px; padding: 5px; border-radius: 13px; }
