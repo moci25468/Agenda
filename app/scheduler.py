@@ -10,14 +10,15 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from . import db
-from .config import load_config
+from .config import load_config, resolve_course_source
 from .models import (Course, Event, Exam, apply_course_overrides, apply_exam_overrides,
                      current_week,
                      diff_courses, event_line, DEFAULT_SECTION_TIMES, DEFAULT_SECTION_ENDS)
 from .providers import get_provider
+from .providers.base import AuthExpiredError
 from .push import push_all
 from .study import review_message
-from .weather import weather_line
+from .weather import weather_line, daily_summary
 
 TZ = ZoneInfo("Asia/Shanghai")
 WEEKDAY_CN = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
@@ -151,9 +152,8 @@ async def run_sync(push: bool = True) -> dict:
     except Exception as e:  # noqa: BLE001
         msg = f"课表拉取失败：{e}"
         db.add_sync_log("fail", msg)
-        # 凭证过期等失败主动告警，避免静默停更
-        if cfg.get("alert_on_fail", True) and ("过期" in str(e) or "Cookie" in str(e) or "cURL" in str(e)):
-            await push_all(cfg, "课表同步失败", f"{msg}\n\n请打开门户重新登录，或在「课表来源」重新接入。")
+        # 凭证过期主动告警（按数据源每天去重），避免静默停更
+        await _alert_auth_expired(cfg, resolve_course_source(cfg), e)
         return {"ok": False, "message": msg, "changes": {}, "pushed": []}
 
     exam_payload = exams if provider.supports_exams else None
@@ -161,6 +161,7 @@ async def run_sync(push: bool = True) -> dict:
     exam_error = getattr(provider, "last_exam_error", "") or ""
     if exam_error:
         db.add_sync_log("fail", f"考试拉取失败（课表已正常更新）：{exam_error}")
+        await _alert_auth_expired(cfg, "zhengfang", exam_error)
     # 门户 / 通用接口只提供课表；若另填了正方凭证，额外拉考试，不影响课表同步。
     if not provider.supports_exams:
         from .providers.zhengfang import ZhengfangProvider, zhengfang_configured
@@ -171,6 +172,7 @@ async def run_sync(push: bool = True) -> dict:
             except Exception as e:  # noqa: BLE001
                 exam_error = str(e)
                 db.add_sync_log("fail", f"考试拉取失败（课表已正常更新）：{e}")
+                await _alert_auth_expired(cfg, "zhengfang", e)
 
     result = await apply_snapshot(cfg, courses, provider.name, push,
                                   exams=exam_payload, exam_source=exam_source)
@@ -195,6 +197,36 @@ def _push_ready(cfg: dict) -> bool:
                 or (p.get("wecom_enabled") and (p.get("wecom_webhook") or "").strip()))
 
 
+async def _alert_auth_expired(cfg: dict, source: str, err) -> list[dict]:
+    """登录态过期时主动推一条提醒，按数据源每天去重，修复后不再打扰。
+
+    err 可以是异常或错误文本；只有真正的登录失效（AuthExpiredError 或含过期 /
+    Cookie / 登录失败等关键词）才告警，普通网络抖动不打扰用户。
+    """
+    if not cfg.get("alert_on_fail", True):
+        return []
+    text = str(err)
+    expired = isinstance(err, AuthExpiredError) or any(
+        w in text for w in ("过期", "Cookie", "cURL", "登录失败", "未登录", "登录失效"))
+    if not expired or not _push_ready(cfg):
+        return []
+    day_s = datetime.now(TZ).date().isoformat()
+    key = f"auth_alert:{source}"
+    if db.reminder_sent(day_s, key):
+        return []
+    if source == "zhengfang":
+        title = "正方教务登录失效"
+        body = ("正方教务登录已失效，考试与空教室暂时无法同步 / 查询。\n"
+                "请到「课表来源 → 正方教务」重新填写学号密码或更新 Cookie。")
+    else:
+        title = "门户登录已过期"
+        body = ("融合门户登录已过期，课表暂停自动更新。\n"
+                "请到「课表来源」重新扫码登录，或导入新的 cURL / 更新 Cookie。")
+    db.mark_reminder(day_s, key)  # 先标记再推，推送失败也不重复打扰
+    results = await push_all(cfg, title, body)
+    return [{"title": title, "key": key, "results": results}]
+
+
 def _courses_after(cfg: dict, courses: list[Course], moment: datetime) -> list[Course]:
     """过滤出「moment 时刻之后仍未结束」的课（结束时间 > 当前时刻）。"""
     out = []
@@ -205,10 +237,23 @@ def _courses_after(cfg: dict, courses: list[Course], moment: datetime) -> list[C
     return out
 
 
-async def push_next_day_summary(now: datetime | None = None) -> list[dict]:
-    """每晚 22:00 定时推送「明日课表 + 明日日程」，按天去重（每天只推一次）。
+def _hhmm(value, fallback: str) -> str:
+    """把配置里的时间规范成 HH:MM；非法值回退默认，避免任务崩溃。"""
+    try:
+        hh, mm = str(value).split(":")[:2]
+        hh, mm = int(hh), int(mm)
+        if 0 <= hh <= 23 and 0 <= mm <= 59:
+            return f"{hh:02d}:{mm:02d}"
+    except (ValueError, AttributeError, TypeError):
+        pass
+    return fallback
 
-    与同步推送解耦：同步时若今天还有课只推「今日剩余」，明天的课交给本任务统一推。
+
+async def push_next_day_summary(now: datetime | None = None) -> list[dict]:
+    """每天按用户配置的时间推送「明日安排」，时间与内容均可在设置里调，按天去重。
+
+    与同步推送解耦：同步时若今天还有课只推「今日剩余」，明天的安排交给本任务统一推。
+    每分钟轮询一次，只在 now 命中配置时间（默认 22:00）的那一分钟触发。
     """
     cfg = load_config()
     if not cfg.get("push_next_day", True):
@@ -217,28 +262,52 @@ async def push_next_day_summary(now: datetime | None = None) -> list[dict]:
         return []
     now = now or datetime.now(TZ)
     now = now.replace(tzinfo=TZ) if now.tzinfo is None else now.astimezone(TZ)
+    p = cfg.get("push", {})
+    if now.strftime("%H:%M") != _hhmm(p.get("daily_time"), "22:00"):
+        return []
     tomorrow = (now + timedelta(days=1)).date()
     tomorrow_s = tomorrow.isoformat()
     dedup_key = "next_day"
     if db.reminder_sent(tomorrow_s, dedup_key):
         return []
-    snap = db.get_snapshot()
-    if not snap:
-        return []
-    courses = apply_course_overrides(
-        [Course.from_dict(d) for d in snap["courses"]], cfg.get("course_overrides"))
-    next_courses = courses_on(cfg, courses, tomorrow)
+    show_courses = p.get("daily_courses", True)
+    show_events = p.get("daily_events", True)
+    show_weather = p.get("daily_weather", False)
+    head = f"{tomorrow.strftime('%m月%d日')} {WEEKDAY_CN[tomorrow.isoweekday() - 1]}"
     parts = []
-    if next_courses:
-        parts.append(f"【明日课表】{tomorrow.strftime('%m月%d日')} {WEEKDAY_CN[tomorrow.isoweekday() - 1]}\n"
-                     + "\n".join(course_line(cfg, c) for c in next_courses))
-    else:
-        parts.append(f"【明日课表】{tomorrow.strftime('%m月%d日')} 没有课，好好休息。")
-    next_events = [Event.from_dict(d) for d in
-                   db.list_events(date_from=tomorrow_s, date_to=tomorrow_s)]
-    if next_events:
-        parts.append("【明日日程】\n" + "\n".join(event_line(e) for e in next_events))
-    title = "明日安排提醒" if next_events else "明日课表提醒"
+    if show_courses:
+        snap = db.get_snapshot()
+        if snap:
+            courses = apply_course_overrides(
+                [Course.from_dict(d) for d in snap["courses"]], cfg.get("course_overrides"))
+            next_courses = courses_on(cfg, courses, tomorrow)
+            if next_courses:
+                parts.append(f"【明日课表】{head}\n"
+                             + "\n".join(course_line(cfg, c) for c in next_courses))
+            else:
+                parts.append(f"【明日课表】{head} 没有课，好好休息。")
+    if show_events:
+        lines = [event_line(e) for e in
+                 (Event.from_dict(d) for d in
+                  db.list_events(date_from=tomorrow_s, date_to=tomorrow_s))]
+        exam_snap = db.get_exam_snapshot()
+        if exam_snap:
+            exams = apply_exam_overrides(
+                [Exam.from_dict(d) for d in exam_snap["exams"]], cfg.get("exam_overrides"))
+            for e in exams:
+                if e.date == tomorrow_s and not e.is_finished():
+                    room = f" @{e.room}" if e.room else ""
+                    lines.append(f"[考试] {e.display_time()} {e.name}{room}")
+        if lines:
+            parts.append("【明日日程】\n" + "\n".join(lines))
+    if show_weather:
+        wline = await daily_summary(cfg, tomorrow_s)
+        if wline:
+            place = str((cfg.get("weather") or {}).get("place") or "青岛黄岛区")
+            parts.append(f"【明日天气】{place}：{wline}")
+    if not parts:
+        return []  # 内容全关或暂无数据时不打扰，也不占用去重标记
+    title = "明日课表提醒" if (show_courses and len(parts) == 1) else "明日安排提醒"
     # 先标记再推，推送失败也不重复打扰
     db.mark_reminder(tomorrow_s, dedup_key)
     results = await push_all(cfg, title, "\n\n".join(parts))
@@ -407,7 +476,7 @@ def _job_wrapper():
 
 
 def _next_day_job_wrapper():
-    """每晚 22:00 逐用户推「明日课表 + 明日日程」。"""
+    """每分钟逐用户检查「明日安排」推送时间（各用户配置不同），命中且当天未推才推。"""
     from .user_context import current_user_id, set_current_user
 
     user_ids = db.list_user_ids() or [1]
@@ -432,10 +501,11 @@ def start_scheduler(cfg: dict):
         id=REMINDER_JOB_ID, replace_existing=True, max_instances=1,
         coalesce=True, misfire_grace_time=120,
     )
-    # 每晚 22:00 推「明日课表 + 明日日程」，按天去重
+    # 「明日安排」每分钟检查一次各用户配置的推送时间（默认 22:00），按天去重
     _scheduler.add_job(
-        _next_day_job_wrapper, CronTrigger(hour=22, minute=0, timezone=TZ),
-        id=NEXT_DAY_JOB_ID, replace_existing=True, misfire_grace_time=3600,
+        _next_day_job_wrapper, IntervalTrigger(minutes=1, timezone=TZ),
+        id=NEXT_DAY_JOB_ID, replace_existing=True, max_instances=1,
+        coalesce=True, misfire_grace_time=120,
     )
     reschedule(cfg)
 

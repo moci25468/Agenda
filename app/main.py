@@ -191,6 +191,19 @@ async def index():
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/manifest.webmanifest")
+async def pwa_manifest():
+    return FileResponse(STATIC_DIR / "manifest.webmanifest",
+                        media_type="application/manifest+json")
+
+
+@app.get("/sw.js")
+async def pwa_service_worker():
+    # 根路径作用域：Service Worker 需放在站点根并显式声明允许的作用域
+    return FileResponse(STATIC_DIR / "sw.js", media_type="application/javascript",
+                        headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"})
+
+
 @app.get("/api/status")
 async def status():
     cfg = load_config()

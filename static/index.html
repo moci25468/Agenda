@@ -2,11 +2,24 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#315c49" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#f5f5f7" />
     <meta name="description" content="Agenda 知序 — 青岛理工大学日程、课表、考试与校园问答。" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Agenda" />
     <title>Agenda · 知序</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/static/icons/icon-180.png" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23365b49'/%3E%3Cpath d='M18 22h28M18 32h28M18 42h18' stroke='%23f7f7f4' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E" />
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {});
+        });
+      }
+    </script>
     <style>
       :root {
         --bg: #f5f5f7;
@@ -3877,7 +3890,34 @@
                 >同步后推送次日课表预览</span
               >
             </div>
+            <div class="full check">
+              <input type="checkbox" id="alertOnFail" /><span
+                >登录失效 / 同步失败时推送提醒</span
+              >
+            </div>
           </div>
+        </div>
+
+        <div class="card">
+          <h2>每日安排推送</h2>
+          <div class="form-grid">
+            <label class="field"
+              ><span>推送时间</span
+              ><input name="push.daily_time" type="time" placeholder="22:00"
+            /></label>
+          </div>
+          <div class="check">
+            <input type="checkbox" id="dailyCourses" /><span>明日课表</span>
+          </div>
+          <div class="check">
+            <input type="checkbox" id="dailyEvents" /><span>明日日程与考试</span>
+          </div>
+          <div class="check">
+            <input type="checkbox" id="dailyWeather" /><span>明日天气概况</span>
+          </div>
+          <p class="hint">
+            每天到点推送一次明天的安排（需先开启 Bark 或群机器人）。内容可自由组合，全部关闭则不推送。
+          </p>
         </div>
 
         <div class="card">
@@ -6255,6 +6295,10 @@
             el.value = typeof v === "object" ? JSON.stringify(v) : v;
         });
         $("#pushNextDay").checked = !!cfg.push_next_day;
+        $("#alertOnFail").checked = cfg.alert_on_fail !== false;
+        $("#dailyCourses").checked = cfg.push?.daily_courses !== false;
+        $("#dailyEvents").checked = cfg.push?.daily_events !== false;
+        $("#dailyWeather").checked = !!cfg.push?.daily_weather;
         $("#barkEnabled").checked = !!cfg.push?.bark_enabled;
         $("#wecomEnabled").checked = !!cfg.push?.wecom_enabled;
         $("#reminderEnabled").checked = cfg.push?.reminder_enabled !== false;
@@ -6270,7 +6314,11 @@
           setNested(cfg, el.name, v);
         });
         cfg.push_next_day = $("#pushNextDay").checked;
+        cfg.alert_on_fail = $("#alertOnFail").checked;
         cfg.push = cfg.push || {};
+        cfg.push.daily_courses = $("#dailyCourses").checked;
+        cfg.push.daily_events = $("#dailyEvents").checked;
+        cfg.push.daily_weather = $("#dailyWeather").checked;
         cfg.push.bark_enabled = $("#barkEnabled").checked;
         cfg.push.wecom_enabled = $("#wecomEnabled").checked;
         cfg.push.reminder_enabled = $("#reminderEnabled").checked;

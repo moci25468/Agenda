@@ -84,8 +84,69 @@ def room_query_context(history: list[dict] | None) -> str:
         line += f"，{scope}"
     line += ("。用户没有明确更换日期、节次或校区时，追问（例如「小一点的教室」「人少的」"
              "「换一间」「我没课的时候」）沿用这组条件，不要切回今天或默认日期；"
-             "「我没课的时候」指这同一天里用户课表空闲的节次。")
+             "「我没课的时候」指这同一天里用户课表空闲的节次（见上下文「用户空闲节次」）。")
     return line
+
+
+def _free_spans(occupied: set[int], max_section: int = 12) -> list[tuple[int, int]]:
+    """把空闲节次合并成连续区间，如 {1,2,5,6} → [(3,4),(7,12)]。"""
+    spans = []
+    s = 1
+    while s <= max_section:
+        if s in occupied:
+            s += 1
+            continue
+        e = s
+        while e + 1 <= max_section and e + 1 not in occupied:
+            e += 1
+        spans.append((s, e))
+        s = e + 1
+    return spans
+
+
+def free_sections(cfg: dict, day) -> list[tuple[int, int]] | None:
+    """算出某天没课的节次区间；课表尚未同步时返回 None（区别于「全天没课」）。"""
+    snap = db.get_snapshot()
+    if not snap:
+        return None
+    courses = apply_course_overrides(
+        [Course.from_dict(d) for d in snap["courses"]], cfg.get("course_overrides"))
+    occupied: set[int] = set()
+    for c in courses_on(cfg, courses, day):
+        occupied.update(range(c.start, c.end + 1))
+    return _free_spans(occupied)
+
+
+def free_sections_context(cfg: dict, history: list[dict] | None) -> str:
+    """把今天 / 明天 / 最近一次空教室查询日期的空闲节次算好注入，省去模型自己数课表。"""
+    now = datetime.now(_SCHOOL_TZ) if _SCHOOL_TZ else datetime.now()
+    today = now.date()
+    tomorrow = today + timedelta(days=1)
+    days = {today, tomorrow}
+    q = last_room_query(history)
+    if q:
+        try:
+            days.add(datetime.strptime(q["date"], "%Y-%m-%d").date())
+        except ValueError:
+            pass
+    rows = []
+    for d in sorted(days):
+        free = free_sections(cfg, d)
+        if free is None:
+            continue
+        tag = "，今天" if d == today else ("，明天" if d == tomorrow else "")
+        head = f"{d.strftime('%Y-%m-%d')}（{WEEKDAY_CN[d.isoweekday() - 1]}{tag}）"
+        if not free:
+            rows.append(f"- {head}：全天有课，没有空闲节次。")
+        elif free == [(1, 12)]:
+            rows.append(f"- {head}：当天无课，第 1–12 节都空闲。")
+        else:
+            spans = "、".join(f"{a}–{b}" if a != b else f"{a}" for a, b in free)
+            rows.append(f"- {head}：没课的节次 {spans}。")
+    if not rows:
+        return ""
+    return ("用户空闲节次（已按课表算好，问「我没课的时候 / 空闲时间」直接据此回答，"
+            "不要自己重新数课表）：\n" + "\n".join(rows))
 
 
 def exam_line(e: Exam) -> str:
@@ -348,7 +409,7 @@ SYSTEM_PROMPT = """你是「Agenda 知序」，一个友好、简洁的校园 AI
 10. 用户询问空教室或自习教室时（如「今天下午哪里有空教室」），末尾单独一行输出：
     [查空教室] {{"date": "YYYY-MM-DD", "start": 1, "end": 2, "campus": "", "building": ""}}
     date 按注入的今天推算；start/end 为节次（1-12，一般上午 1-4、下午 5-8、晚上 9-11），用户没说节次时按上午/下午/晚上选对应大节；campus 填校区名（市北/长江路/临沂/黄岛），用户没提校区时优先填上下文里的「用户默认校区」，没有默认值再留空，用户明确说了别的校区就按用户说的填；building 填教学楼名，未指定留空；一次最多一行。系统会实时查询并把结果卡片展示给用户，结果会回写进对话供后续参考。上下文提示未配置时不要输出标记，改为引导用户去「课表来源」填写正方学号密码；不要自己编造教室名单。
-10.1 空教室多轮追问：上下文里有「最近一次空教室查询条件」时，只要用户没有明确改日期、节次或校区，追问（「小一点的教室」「人少一点」「换一间」「我没课的时候」等）必须沿用那组日期和节次，不要切回今天或默认值；「我没课的时候」指同一天里用户课表空闲的节次，需要结合注入的课表判断。用户明确说了新日期、节次或校区时才替换对应字段。
+10.1 空教室多轮追问：上下文里有「最近一次空教室查询条件」时，只要用户没有明确改日期、节次或校区，追问（「小一点的教室」「人少一点」「换一间」「我没课的时候」等）必须沿用那组日期和节次，不要切回今天或默认值；「我没课的时候」指同一天里用户课表空闲的节次，优先使用上下文里已算好的「用户空闲节次」，不要自己重新数课表。用户明确说了新日期、节次或校区时才替换对应字段。
 11. 每次回答末尾还要给出 2-3 个与当前话题紧密相关、用户最可能接着问的选项，最后一行输出：
     [追问] ["第一个完整问题或指令", "第二个完整问题或指令", "第三个完整问题或指令"]
     每项 6-20 个汉字，可直接点击发送；要具体、有实际下一步价值，不要重复用户刚问的问题，不要用「了解更多」「继续」这种空泛表述，不要编号。追问可引用当前回答（如「那明天呢」「换成周五再查」）。用户只是告别或明确说不需要继续时可省略。
@@ -479,6 +540,9 @@ async def _prepare(message: str, history: list[dict] | None):
     continuity = room_query_context(history)
     if continuity:
         context += "\n\n" + continuity
+    free_ctx = free_sections_context(cfg, history)
+    if free_ctx:
+        context += "\n\n" + free_ctx
     messages = [{"role": "system", "content":
                  SYSTEM_PROMPT.format(context=context)}]
     for h in (history or [])[-10:]:

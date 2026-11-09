@@ -13,7 +13,8 @@ import time
 import subprocess
 import socket
 from app.ai import (build_context, _request_headers, _sse_delta, SYSTEM_PROMPT,
-                    weeks_mentioned, last_room_query, room_query_context)
+                    weeks_mentioned, last_room_query, room_query_context,
+                    free_sections, free_sections_context, _free_spans)
 from app.providers.httpjson import courses_from_payload
 from app.browser_login import (
     build_candidate, pick_best, _headers_for_config, _parse_body, _public_candidates,
@@ -313,6 +314,29 @@ check("空教室.失败结果不算条件",
                         '[空教室结果] {"error": "超时", "date": "2026-11-10", '
                         '"start": 5, "end": 8}'}]) is None, "")
 check("空教室.提示词含追问规则", "10.1 空教室多轮追问" in SYSTEM_PROMPT, "")
+
+# 空闲节次：后端按课表算好注入 AI，问「我没课的时候」不再靠模型自己数课表
+check("空闲节次.区间合并", _free_spans({1, 2, 5, 6}) == [(3, 4), (7, 12)]
+      and _free_spans(set()) == [(1, 12)]
+      and _free_spans(set(range(1, 13))) == [], "")
+_fs_orig = db.get_snapshot()
+db.save_snapshot([
+    Course("占用A", day=2, start=1, end=2, weeks=list(range(1, 31))).to_dict(),
+    Course("占用B", day=2, start=5, end=6, weeks=list(range(1, 31))).to_dict(),
+], "test")
+_fs_cfg = load_config()
+_fs_cfg["semester_start"] = "2026-08-31"
+check("空闲节次.按课表算空闲",
+      free_sections(_fs_cfg, date(2026, 11, 10)) == [(3, 4), (7, 12)],
+      str(free_sections(_fs_cfg, date(2026, 11, 10))))
+_fs_ctx = free_sections_context(_fs_cfg, [
+    {"role": "assistant", "content":
+     '[空教室结果] {"date": "2026-11-12", "start": 1, "end": 2}'}])
+check("空闲节次.注入含查询日期", "用户空闲节次" in _fs_ctx
+      and "2026-11-12" in _fs_ctx and "当天无课" in _fs_ctx, _fs_ctx)
+if _fs_orig:
+    db.save_snapshot(_fs_orig["courses"], _fs_orig["source"])
+check("空闲节次.提示词引用", "用户空闲节次" in SYSTEM_PROMPT, "")
 
 # 应用辅导 + 配置状态注入 AI 上下文
 _ctx_cfg = build_context(load_config())
@@ -631,6 +655,74 @@ check("定时推送.未推则推送明日", len(_push_calls) == 1
 # 清理本段测试的去重记录，避免影响后续
 with db.get_conn() as conn:
     conn.execute("DELETE FROM reminders WHERE user_id = 1")
+
+# 每日推送：时间可配置 + 内容可选（课表 / 日程考试 / 天气）
+_dc = load_config()
+_dc["push"] = {**_dc.get("push", {}), "daily_time": "21:30",
+               "daily_courses": True, "daily_events": True, "daily_weather": False}
+save_config(_dc)
+_push_calls.clear()
+asyncio.run(_sched.push_next_day_summary(now=_at("2026-11-09T22:00:00")))
+check("每日推送.非配置时间不推", not _push_calls, str(_push_calls))
+_push_calls.clear()
+asyncio.run(_sched.push_next_day_summary(now=_at("2026-11-09T21:30:00")))
+check("每日推送.命中配置时间推送", len(_push_calls) == 1
+      and "明日课表" in _push_calls[0][1], str(_push_calls))
+with db.get_conn() as conn:
+    conn.execute("DELETE FROM reminders WHERE user_id = 1")
+_dc["push"] = {**_dc["push"], "daily_courses": False, "daily_events": False,
+               "daily_weather": True}
+save_config(_dc)
+_orig_daily = _sched.daily_summary
+
+
+async def _fake_daily(cfg, day_s):
+    return "多云，12~18℃，最高降水概率 40%"
+
+
+_sched.daily_summary = _fake_daily
+_push_calls.clear()
+asyncio.run(_sched.push_next_day_summary(now=_at("2026-11-09T21:30:00")))
+check("每日推送.内容可选只推天气", len(_push_calls) == 1
+      and "明日天气" in _push_calls[0][1]
+      and "明日课表" not in _push_calls[0][1], str(_push_calls))
+_sched.daily_summary = _orig_daily
+with db.get_conn() as conn:
+    conn.execute("DELETE FROM reminders WHERE user_id = 1")
+_dc["push"] = {**_dc["push"], "daily_weather": False}
+save_config(_dc)
+_push_calls.clear()
+asyncio.run(_sched.push_next_day_summary(now=_at("2026-11-09T21:30:00")))
+check("每日推送.内容全关不推", not _push_calls, str(_push_calls))
+
+# 凭据失效主动提醒：登录过期触发、按数据源每天去重、普通错误与开关关闭不打扰
+from app.providers.base import AuthExpiredError
+with db.get_conn() as conn:
+    conn.execute("DELETE FROM reminders WHERE user_id = 1")
+_ac = load_config()
+_ac["alert_on_fail"] = True
+save_config(_ac)
+_push_calls.clear()
+asyncio.run(_sched._alert_auth_expired(_ac, "portal", AuthExpiredError("门户登录已过期")))
+check("凭据提醒.过期推送", len(_push_calls) == 1
+      and _push_calls[0][0] == "门户登录已过期", str(_push_calls))
+_push_calls.clear()
+asyncio.run(_sched._alert_auth_expired(_ac, "portal", AuthExpiredError("门户登录已过期")))
+check("凭据提醒.当天去重", not _push_calls, str(_push_calls))
+_push_calls.clear()
+asyncio.run(_sched._alert_auth_expired(_ac, "zhengfang", AuthExpiredError("教务会话已过期")))
+check("凭据提醒.正方独立去重", len(_push_calls) == 1
+      and _push_calls[0][0] == "正方教务登录失效", str(_push_calls))
+_push_calls.clear()
+asyncio.run(_sched._alert_auth_expired(_ac, "portal", ValueError("网络超时")))
+check("凭据提醒.普通错误不打扰", not _push_calls, str(_push_calls))
+_ac["alert_on_fail"] = False
+save_config(_ac)
+with db.get_conn() as conn:
+    conn.execute("DELETE FROM reminders WHERE user_id = 1")
+_push_calls.clear()
+asyncio.run(_sched._alert_auth_expired(_ac, "portal", AuthExpiredError("门户登录已过期")))
+check("凭据提醒.开关关闭不推", not _push_calls, str(_push_calls))
 
 _push_calls.clear()
 _rcfg = load_config()
@@ -984,6 +1076,21 @@ async def http_tests(port: int):
           (await anon.get(f"{base}/api/status")).status_code == 401)
     check("鉴权.天气接口未登录被拒",
           (await anon.get(f"{base}/api/weather")).status_code == 401)
+    mf = await anon.get(f"{base}/manifest.webmanifest")
+    check("PWA.manifest 可访问", mf.status_code == 200
+          and "manifest" in mf.headers.get("content-type", "")
+          and mf.json().get("display") == "standalone", str(mf.status_code))
+    sw = await anon.get(f"{base}/sw.js")
+    check("PWA.SW 根作用域", sw.status_code == 200
+          and sw.headers.get("service-worker-allowed") == "/"
+          and "fetch" in sw.text, str(sw.headers.get("service-worker-allowed")))
+    ic = await anon.get(f"{base}/static/icons/icon-192.png")
+    check("PWA.图标可访问", ic.status_code == 200
+          and ic.headers.get("content-type", "").startswith("image/png"),
+          str(ic.status_code))
+    idx = await anon.get(f"{base}/")
+    check("PWA.首页引用 manifest", 'rel="manifest"' in idx.text
+          and "apple-touch-icon" in idx.text, "")
     st = (await anon.get(f"{base}/api/auth/status")).json()
     check("注册.首次需初始化", st.get("needs_setup") is True
           and st.get("invite_required") is False, str(st))
