@@ -7071,9 +7071,7 @@
           toast("已记住");
         } catch (e) { $("#memoryError").textContent = e.message; }
       });
-      $("#memoryInput").addEventListener("keydown", (e) => {
-        if (e.key === "Enter") $("#memoryAddBtn").click();
-      });
+      bindImeSafeEnter($("#memoryInput"), () => $("#memoryAddBtn").click());
       $("#memoryList").addEventListener("click", async (e) => {
         const btn = e.target.closest("button[data-mem-del]");
         if (!btn) return;
@@ -7594,6 +7592,27 @@
       }
 
       /* ---------- 事件绑定 ---------- */
+      // 中文/日文等输入法组词时，回车只用于把候选词上屏，不能触发发送/添加。
+      // 三重判断覆盖不同浏览器：isComposing、IME 期间的 keyCode 229、
+      // 以及 compositionstart/end 维护的状态（部分浏览器事件顺序不一致）。
+      function bindImeSafeEnter(el, action) {
+        let composing = false;
+        let justComposed = false;
+        el.addEventListener("compositionstart", () => { composing = true; });
+        el.addEventListener("compositionend", () => {
+          composing = false;
+          // compositionend 可能早于确认用的那次 keydown，延后一帧再放行，
+          // 避免刚上屏的英文被误当成发送；之后正常再按回车不受影响。
+          justComposed = true;
+          setTimeout(() => { justComposed = false; }, 0);
+        });
+        el.addEventListener("keydown", (e) => {
+          if (e.key !== "Enter") return;
+          if (e.isComposing || e.keyCode === 229 || composing || justComposed) return;
+          e.preventDefault();
+          action();
+        });
+      }
       $("#nav").addEventListener("click", (e) => {
         const btn = e.target.closest("button[data-tab]");
         if (btn) switchTab(btn.dataset.tab);
@@ -7625,9 +7644,7 @@
         if (weekData && !$("#tab-today").classList.contains("hidden")) renderNextClass();
       }, 30000);
       $("#chatSend").addEventListener("click", () => sendChat());
-      $("#chatInput").addEventListener("keydown", (e) => {
-        if (e.key === "Enter") sendChat();
-      });
+      bindImeSafeEnter($("#chatInput"), () => sendChat());
       $("#chatChips").addEventListener("click", (e) => {
         const btn = e.target.closest("button");
         if (!btn) return;
