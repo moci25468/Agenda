@@ -482,6 +482,11 @@
       .week-cell.today {
         background: #f7fbff;
       }
+      .week-cell.free {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
       .mini-course {
         background: var(--accent-soft);
         border-radius: 8px;
@@ -3516,24 +3521,29 @@
       .next-class .nc-count span { color: var(--sub); font-size: 10px; }
       .next-class .nc-arrow { flex: 0 0 auto; color: var(--sub); font-size: 14px; }
 
-      /* 周课表卡片：直达空教室 */
+      /* 周课表：只在「没课」的时段提供查空教室入口（有课的时间查空教室没意义） */
       #nav button svg { display: none; }
-      .mini-course .mc-rooms {
-        display: inline-flex;
+      .week-cell .wc-free {
+        display: flex;
         align-items: center;
+        justify-content: center;
         gap: 3px;
+        width: 100%;
         min-height: 0;
-        margin-top: 6px;
-        padding: 2px 7px;
-        border: 1px solid var(--line);
-        border-radius: 5px;
-        background: var(--card);
+        padding: 5px 4px;
+        border: 1px dashed var(--line);
+        border-radius: 6px;
+        background: transparent;
         color: var(--sub);
         font-size: 10px;
         font-weight: 500;
+        opacity: 0.5;
+        transition: opacity 0.15s, border-color 0.15s, color 0.15s;
       }
-      .mini-course .mc-rooms:hover { border-color: var(--accent); background: var(--card); color: var(--accent); }
-      .mini-course .mc-rooms span { font-size: 9px; }
+      .week-cell:hover .wc-free,
+      .wc-free:hover { opacity: 1; }
+      .wc-free:hover { border-color: var(--accent); background: var(--card); color: var(--accent); }
+      .wc-free span { font-size: 9px; }
 
       /* 空教室：座位筛选、折叠分组、座位数强调 */
       .room-result-selects { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -3754,7 +3764,8 @@
         .auth-features > div { border-bottom-color: var(--line); }
         #nav { background: rgba(39, 43, 36, 0.94); box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.3); }
         .next-class:hover { background: var(--accent-soft); }
-        .mini-course .mc-rooms:hover { background: var(--card); }
+        .week-cell .wc-free { border-color: rgba(255, 255, 255, 0.16); }
+        .wc-free:hover { background: var(--card); }
       }
       @media (prefers-reduced-motion: reduce) {
         *,
@@ -5393,27 +5404,27 @@
                 a.end - b.end ||
                 a.name.localeCompare(b.name, "zh"),
             );
-          return `<div class="week-cell${isToday ? " today" : ""}">${
-            list.length
-              ? list
-                  .map((c) => {
-                    const w = weatherAt(iso, c.start_time);
-                    const wline = w
-                      ? `<div class="w">${esc(w.text)}${
-                          w.temp != null ? " " + w.temp + "℃" : ""
-                        }${w.pop >= 30 ? " · " + w.pop + "%" : ""}</div>`
-                      : "";
-                    return `<div class="mini-course">
+          const b = blocks[bi];
+          // 有课的格子只展示课程；没课的格子才给「查空教室」，按这个大节的节次去查
+          const content = list.length
+            ? list
+                .map((c) => {
+                  const w = weatherAt(iso, c.start_time);
+                  const wline = w
+                    ? `<div class="w">${esc(w.text)}${
+                        w.temp != null ? " " + w.temp + "℃" : ""
+                      }${w.pop >= 30 ? " · " + w.pop + "%" : ""}</div>`
+                    : "";
+                  return `<div class="mini-course">
         <div class="t">${esc(c.start_time)}–${esc(c.end_time)} · ${c.start}-${c.end}节</div>
         <div class="n">${esc(c.name)}</div>
         <div class="r">${esc(c.room || "教室待定")}${c.note ? " · " + esc(c.note) : ""}</div>
         ${wline}
-        <button type="button" class="mc-rooms" data-mc-rooms data-date="${iso}" data-end="${c.end}" data-room="${escAttr(c.room || "")}" data-campus="${escAttr(c.campus || "")}" title="查这天你没课的空闲节次">查空教室<span>↗</span></button>
       </div>`;
-                  })
-                  .join("")
-              : ""
-          }</div>`;
+                })
+                .join("")
+            : `<button type="button" class="wc-free" data-wc-rooms data-date="${iso}" data-start="${b.s}" data-end="${b.e}" title="这个时段没课，查空教室自习">查空教室<span>↗</span></button>`;
+          return `<div class="week-cell${list.length ? "" : " free"}${isToday ? " today" : ""}">${content}</div>`;
         };
         const heads = data.dates
           .map((iso, i) => {
@@ -5442,9 +5453,11 @@
         if (data.week === data.current_week) loadWeather();
       }
 
-      // 课程卡片 → 空教室：带日期与教学楼，节次查当天课后的空闲时段（有课的时间查了没意义）
+      // 没课的空格子 → 查空教室：按这个大节的节次查。
+      // 跨节课程可能让网格看起来没课、实际被占用，所以用 my-free 校验一次，
+      // 真被占用时自动改查当天最接近的空闲时段。
       $("#weekGrid").addEventListener("click", async (e) => {
-        const btn = e.target.closest("button[data-mc-rooms]");
+        const btn = e.target.closest("button[data-wc-rooms]");
         if (!btn || btn.disabled) return;
         btn.disabled = true;
         try {
@@ -5452,43 +5465,27 @@
             roomMeta = await api("/api/rooms/meta");
             roomFillMeta(true);
           }
-          const campusName = btn.dataset.campus;
-          if (campusName) {
-            const hit = roomMeta.campuses.find(
-              (c) => c.name.includes(campusName) || campusName.includes(c.name),
-            );
-            if (hit && hit.id !== roomMeta.campus) {
-              roomMeta = await api("/api/rooms/meta?campus=" + encodeURIComponent(hit.id));
-              roomFillMeta(true);
-            }
-          }
-          const roomName = btn.dataset.room;
-          const b = roomName
-            ? roomMeta.buildings.find((x) => roomName.includes(x.name))
-            : null;
-          const free = await api("/api/rooms/my-free?date_s=" + encodeURIComponent(btn.dataset.date));
+          const date = btn.dataset.date;
+          const wantStart = parseInt(btn.dataset.start, 10) || 1;
+          const wantEnd = parseInt(btn.dataset.end, 10) || wantStart;
+          const free = await api("/api/rooms/my-free?date_s=" + encodeURIComponent(date));
           if (free.spans === null) { toast("课表还没同步，无法判断空闲节次", 4000); return; }
-          const blocks = roomFreeBlocks(free.spans, roomMaxJc());
-          if (!blocks.length) { toast("这一天你都有课，没有空闲节次可查", 4000); return; }
-          const courseEnd = parseInt(btn.dataset.end, 10) || 2;
-          const block = blocks.find((x) => x.start > courseEnd) || blocks[0];
-          roomPending = {
-            date: btn.dataset.date,
-            start: block.start,
-            end: block.end,
-            building: b ? b.id : "",
-          };
+          const freeBlocks = roomFreeBlocks(free.spans, roomMaxJc());
+          if (!freeBlocks.length) { toast("这一天你都有课，没有空闲时段可查", 4000); return; }
+          const exact = freeBlocks.find((x) => x.start === wantStart && x.end === wantEnd);
+          const block = exact || freeBlocks.reduce(
+            (best, x) =>
+              Math.abs(x.start - wantStart) < Math.abs(best.start - wantStart) ? x : best,
+            freeBlocks[0],
+          );
+          if (!exact)
+            toast(`第 ${wantStart}-${wantEnd} 节有课，已改查第 ${block.start}-${block.end} 节`, 3500);
           switchTab("rooms");
-          // 空教室页已有结果时不会自动加载，这里直接按课程条件查询
-          if (roomPending) {
-            const p = roomPending;
-            roomPending = null;
-            $("#roomDate").value = p.date;
-            $("#roomStart").value = String(p.start);
-            $("#roomEnd").value = String(p.end);
-            $("#roomBuilding").value = p.building;
-            await queryRooms();
-          }
+          $("#roomDate").value = date;
+          $("#roomStart").value = String(block.start);
+          $("#roomEnd").value = String(block.end);
+          await queryRooms();
+          refreshRoomFree();
         } catch (err) {
           toast(err.message, 4000);
         } finally {
