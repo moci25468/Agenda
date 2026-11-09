@@ -3538,6 +3538,21 @@
       /* 空教室：座位筛选、折叠分组、座位数强调 */
       .room-result-selects { display: flex; gap: 8px; flex-wrap: wrap; }
       .room-result-bar { flex-wrap: wrap; }
+      .room-free { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0 2px; }
+      .rf-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+      .rf-chip {
+        padding: 4px 11px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--card);
+        color: var(--text);
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .rf-chip:hover { border-color: var(--accent); color: var(--accent); }
+      .rf-chip.active { border-color: var(--accent); color: var(--accent); }
+      .rf-chip span { margin-left: 4px; color: var(--sub); font-size: 11px; }
+      .rf-none { color: var(--sub); font-size: 12px; }
       .room-building { border-top: 1px solid var(--line); }
       .room-building:first-child { border-top: 0; }
       .room-building summary {
@@ -3905,6 +3920,10 @@
             <label class="field"><span>校区</span><select id="roomCampus"></select></label>
             <label class="field"><span>教学楼</span><select id="roomBuilding"></select></label>
             <div class="field room-query"><span>&nbsp;</span><button class="primary" id="roomQueryBtn">查询</button></div>
+          </div>
+          <div class="room-free hidden" id="roomFreeRow">
+            <button type="button" class="small" id="roomFreeBtn">查我没课的时候</button>
+            <div class="rf-chips" id="roomFreeChips"></div>
           </div>
           <div class="room-result-bar hidden" id="roomResultBar">
             <span class="muted" id="roomCount"></span>
@@ -5002,6 +5021,88 @@
         return { start, end: Math.min(start + 1, Math.max(maxJc, start)) };
       }
 
+      // 空闲区间 → 可查询的两节一档（不跨占用节次，超出教务节次表的截断）
+      function roomFreeBlocks(spans, maxJc) {
+        const blocks = [];
+        for (const s of spans || []) {
+          for (let a = s.start; a <= s.end && a <= maxJc; a += 2)
+            blocks.push({ start: a, end: Math.min(a + 1, s.end, maxJc) });
+        }
+        return blocks;
+      }
+      function roomMaxJc() {
+        const nums = [...$("#roomStart").options]
+          .map((o) => parseInt(o.value, 10)).filter(Boolean);
+        return nums.length ? Math.max(...nums) : 12;
+      }
+      // 今天选正在/即将开始的空闲块，其他日期选第一个
+      function roomPickFreeBlock(blocks, periods, isToday) {
+        if (!blocks.length) return null;
+        if (!isToday) return blocks[0];
+        const now = new Date();
+        const hm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+        const timeOf = (jc, idx) => {
+          const p = (periods || []).find((x) => x.jc === jc);
+          return p && p.time && p.time.includes("-") ? p.time.split("-")[idx] : "";
+        };
+        const cur = blocks.find((b) => {
+          const s = timeOf(b.start, 0), e = timeOf(b.end, 1);
+          return s && e && s <= hm && hm <= e;
+        });
+        const next = blocks.find((b) => timeOf(b.start, 0) > hm);
+        return cur || next || blocks[0];
+      }
+
+      let roomFreeCache = null;
+      function renderRoomFree() {
+        const row = $("#roomFreeRow");
+        const d = $("#roomDate").value || (roomMeta && roomMeta.today) || "";
+        const data = roomFreeCache;
+        if (!data || data.date !== d || data.spans === null) {
+          row.classList.add("hidden");
+          return;
+        }
+        row.classList.remove("hidden");
+        const chips = $("#roomFreeChips");
+        if (!data.spans.length) {
+          $("#roomFreeBtn").classList.add("hidden");
+          chips.innerHTML = `<span class="rf-none">这一天你都有课，换个日期试试</span>`;
+          return;
+        }
+        $("#roomFreeBtn").classList.remove("hidden");
+        const blocks = roomFreeBlocks(data.spans, roomMaxJc());
+        const periods = (roomMeta && roomMeta.periods) || [];
+        const s = parseInt($("#roomStart").value, 10);
+        const e = parseInt($("#roomEnd").value, 10);
+        chips.innerHTML = blocks.map((b) => {
+          const p = periods.find((x) => x.jc === b.start);
+          const t = p && p.time ? p.time.split("-")[0] : "";
+          const label = b.start === b.end ? `第 ${b.start} 节` : `第 ${b.start}–${b.end} 节`;
+          return `<button type="button" class="rf-chip${b.start === s && b.end === e ? " active" : ""}" data-free-start="${b.start}" data-free-end="${b.end}">${label}${t ? `<span>${esc(t)}</span>` : ""}</button>`;
+        }).join("");
+      }
+      async function refreshRoomFree() {
+        const d = $("#roomDate").value || (roomMeta && roomMeta.today) || "";
+        if (!d) return null;
+        try {
+          const data = await api("/api/rooms/my-free?date_s=" + encodeURIComponent(d));
+          if (d !== ($("#roomDate").value || (roomMeta && roomMeta.today))) return null;
+          roomFreeCache = data;
+          renderRoomFree();
+          return data;
+        } catch (e) { return null; }
+      }
+      // 今天的默认节次避开有课时段：课表已同步时优先当前/最近将开始的空闲块
+      function roomApplyFreeDefault(free) {
+        if (!free || free.spans === null || !roomMeta) return;
+        if (($("#roomDate").value || roomMeta.today) !== roomMeta.today) return;
+        const blocks = roomFreeBlocks(free.spans, roomMaxJc());
+        if (!blocks.length) return;
+        const b = roomPickFreeBlock(blocks, roomMeta.periods || [], true);
+        $("#roomStart").value = String(b.start);
+        $("#roomEnd").value = String(b.end);
+      }
+
       function roomFillSelect(sel, options, keepValue) {
         const prev = keepValue ? sel.value : "";
         sel.innerHTML = options
@@ -5088,9 +5189,15 @@
             $("#roomEnd").value = String(p.end);
             $("#roomBuilding").value = p.building;
             await queryRooms();
+            refreshRoomFree();
             return;
           }
-          if (!roomLastQuery) await queryRooms();
+          if (!roomLastQuery) {
+            roomApplyFreeDefault(await refreshRoomFree());
+            await queryRooms();
+          } else {
+            refreshRoomFree();
+          }
         } catch (e) {
           roomError("空教室暂不可用", e.message);
         }
@@ -5194,6 +5301,7 @@
           roomOpenState = null;
           renderRooms();
           roomSaveFilters();
+          renderRoomFree();
         } catch (e) {
           roomError("查询失败", e.message);
         } finally {
@@ -5204,6 +5312,25 @@
       }
 
       $("#roomQueryBtn").addEventListener("click", queryRooms);
+      $("#roomDate").addEventListener("change", () => { renderRoomFree(); refreshRoomFree(); });
+      $("#roomFreeChips").addEventListener("click", (e) => {
+        const chip = e.target.closest("button[data-free-start]");
+        if (!chip) return;
+        $("#roomStart").value = chip.dataset.freeStart;
+        $("#roomEnd").value = chip.dataset.freeEnd;
+        queryRooms();
+      });
+      $("#roomFreeBtn").addEventListener("click", async () => {
+        const data = await refreshRoomFree();
+        if (!data || data.spans === null) { toast("课表还没同步，先去同步课表", 4000); return; }
+        const blocks = roomFreeBlocks(data.spans, roomMaxJc());
+        if (!blocks.length) { toast("这一天你都有课，换个日期试试", 4000); return; }
+        const isToday = ($("#roomDate").value || roomMeta.today) === roomMeta.today;
+        const b = roomPickFreeBlock(blocks, roomMeta.periods || [], isToday);
+        $("#roomStart").value = String(b.start);
+        $("#roomEnd").value = String(b.end);
+        queryRooms();
+      });
       $("#roomCategory").addEventListener("change", () => { roomSaveFilters(); renderRooms(); });
       $("#roomSeats").addEventListener("change", () => { roomSaveFilters(); renderRooms(); });
       $("#roomBuilding").addEventListener("change", roomSaveFilters);
@@ -5278,7 +5405,7 @@
         <div class="n">${esc(c.name)}</div>
         <div class="r">${esc(c.room || "教室待定")}${c.note ? " · " + esc(c.note) : ""}</div>
         ${wline}
-        <button type="button" class="mc-rooms" data-mc-rooms data-date="${iso}" data-start="${c.start}" data-end="${c.end}" data-room="${escAttr(c.room || "")}" data-campus="${escAttr(c.campus || "")}">查空教室<span>↗</span></button>
+        <button type="button" class="mc-rooms" data-mc-rooms data-date="${iso}" data-end="${c.end}" data-room="${escAttr(c.room || "")}" data-campus="${escAttr(c.campus || "")}" title="查这天你没课的空闲节次">查空教室<span>↗</span></button>
       </div>`;
                   })
                   .join("")
@@ -5312,7 +5439,7 @@
         if (data.week === data.current_week) loadWeather();
       }
 
-      // 课程卡片 → 空教室：把日期、节次、校区与教学楼直接带过去
+      // 课程卡片 → 空教室：带日期与教学楼，节次查当天课后的空闲时段（有课的时间查了没意义）
       $("#weekGrid").addEventListener("click", async (e) => {
         const btn = e.target.closest("button[data-mc-rooms]");
         if (!btn || btn.disabled) return;
@@ -5336,10 +5463,16 @@
           const b = roomName
             ? roomMeta.buildings.find((x) => roomName.includes(x.name))
             : null;
+          const free = await api("/api/rooms/my-free?date_s=" + encodeURIComponent(btn.dataset.date));
+          if (free.spans === null) { toast("课表还没同步，无法判断空闲节次", 4000); return; }
+          const blocks = roomFreeBlocks(free.spans, roomMaxJc());
+          if (!blocks.length) { toast("这一天你都有课，没有空闲节次可查", 4000); return; }
+          const courseEnd = parseInt(btn.dataset.end, 10) || 2;
+          const block = blocks.find((x) => x.start > courseEnd) || blocks[0];
           roomPending = {
             date: btn.dataset.date,
-            start: parseInt(btn.dataset.start, 10) || 1,
-            end: parseInt(btn.dataset.end, 10) || 2,
+            start: block.start,
+            end: block.end,
             building: b ? b.id : "",
           };
           switchTab("rooms");

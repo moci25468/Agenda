@@ -1485,6 +1485,17 @@ async def http_tests(port: int):
         check("空教室.节次倒置被拒", r.status_code == 400, str(r.status_code))
         r = await ca.get(f"{base}/api/rooms/free", params={"date_s": "2020-01-01"})
         check("空教室.开学前被拒", r.status_code == 400, str(r.status_code))
+        r = await ca.get(f"{base}/api/rooms/my-free", params={"date_s": today_iso})
+        j = r.json()
+        _fs_expected = free_sections(load_config(), date.fromisoformat(today_iso))
+        check("空教室.空闲节次接口", r.status_code == 200
+              and j.get("date") == today_iso
+              and ((j.get("spans") is None and _fs_expected is None)
+                   or (j.get("spans") is not None and _fs_expected is not None
+                       and [(s["start"], s["end"]) for s in j["spans"]] == _fs_expected)),
+              str(r.text)[:160])
+        r = await ca.get(f"{base}/api/rooms/my-free", params={"date_s": "11/09"})
+        check("空教室.空闲节次非法日期", r.status_code == 400, str(r.status_code))
 
         # 对话落库：读取 → 回存（过滤非法角色）→ 截断式回存 → 清空
         h = (await ca.get(f"{base}/api/chat/history")).json()

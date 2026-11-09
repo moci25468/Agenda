@@ -721,6 +721,23 @@ async def rooms_free(date_s: str = "", start: int = 1, end: int = 2,
             "week": week, "day": d.isoweekday(), "start": start, "end": end}
 
 
+@app.get("/api/rooms/my-free")
+async def rooms_my_free(date_s: str = ""):
+    """某天没课的节次区间（按课表算好），供前端一键查「我没课的时候」。
+
+    spans 为 null 表示课表尚未同步；为空列表表示全天有课。不依赖正方凭证。
+    """
+    date_s = (date_s or date.today().isoformat()).strip()
+    try:
+        d = date.fromisoformat(date_s)
+    except ValueError:
+        raise HTTPException(400, "日期格式应为 YYYY-MM-DD")
+    spans = ai.free_sections(load_config(), d)
+    return {"date": date_s,
+            "spans": None if spans is None
+            else [{"start": a, "end": b} for a, b in spans]}
+
+
 @app.get("/api/exams")
 async def exams():
     """考试安排：未结束的按时间升序在前，已结束的置后（含手动调整）。"""
