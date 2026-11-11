@@ -1357,6 +1357,7 @@
       /* 登录：像一本课表的扉页 */
       .auth-screen {
         min-height: calc(100vh - 3px);
+        min-height: calc(100dvh - 3px);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -1999,6 +2000,7 @@
         }
         .chat-box {
           height: calc(100vh - 238px);
+          height: calc(100dvh - 238px);
           min-height: 500px;
         }
         .chat-head {
@@ -2191,6 +2193,7 @@
           flex-direction: column;
           align-self: start;
           min-height: calc(100vh - 75px);
+          min-height: calc(100dvh - 75px);
         }
         .sidebar header {
           display: block;
@@ -2332,6 +2335,7 @@
         }
         .chat-box {
           height: min(680px, calc(100vh - 205px));
+          height: min(680px, calc(100dvh - 205px));
           min-height: 540px;
         }
       }
@@ -2497,6 +2501,7 @@
         .sidebar {
           top: 28px;
           min-height: calc(100vh - 59px);
+          min-height: calc(100dvh - 59px);
           padding: 25px 18px 20px;
           border: 1px solid rgba(255, 255, 255, 0.05);
           border-radius: 12px;
@@ -2868,6 +2873,7 @@
         }
         .chat-box {
           height: calc(100vh - 250px);
+          height: calc(100dvh - 250px);
           min-height: 480px;
         }
       }
@@ -2894,6 +2900,7 @@
       /* 登录页：双栏产品信息 + 克制表单 */
       .auth-screen {
         min-height: 100vh;
+        min-height: 100dvh;
         padding: 48px 32px;
       }
       .auth-layout {
@@ -3248,6 +3255,7 @@
       /* AI：轻量对话卡片 + 可点击追问 */
       .chat-box {
         height: clamp(600px, calc(100vh - 235px), 760px);
+        height: clamp(600px, calc(100dvh - 235px), 760px);
         min-height: 0;
         padding: 0;
         overflow: hidden;
@@ -3435,7 +3443,7 @@
         .day-head .date, .today-card .day-head .date { font-size: 25px; }
         .course-row { gap: 16px; padding: 19px 0; }
         .course-time { flex-basis: 106px; }
-        .chat-box { height: calc(100dvh - 238px); min-height: 520px; border-radius: 17px; }
+        .chat-box { height: calc(100vh - 238px); height: calc(100dvh - 238px); min-height: 520px; border-radius: 17px; }
         .chat-head { padding: 17px 18px; }
         .chat-head p { max-width: 360px; }
         .chat-msgs { padding: 18px; }
@@ -3466,7 +3474,7 @@
         .course-time { flex-basis: 88px; }
         .course-time .range { font-size: 13px; }
         .course-name { font-size: 15px; }
-        .chat-box { height: calc(100dvh - 225px); min-height: 500px; }
+        .chat-box { height: calc(100vh - 225px); height: calc(100dvh - 225px); min-height: 500px; }
         .chat-head { padding: 15px; }
         .chat-head p { display: none; }
         .chat-head-actions button { min-height: 31px; padding: 5px 9px; }
