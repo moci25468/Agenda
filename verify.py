@@ -784,14 +784,14 @@ check("同步推送.明日已推不重复", not _push_calls, str(_push_calls))
 
 # 4) 每晚 22:00 定时任务按天去重：已推过则不再推
 _push_calls.clear()
-asyncio.run(_sched.push_next_day_summary(now=_at("2026-11-09T22:00:00")))
+asyncio.run(_sched.push_next_day_summary(now=_at(_today.isoformat() + "T22:00:00")))
 check("定时推送.明日已推则跳过", not _push_calls, str(_push_calls))
 
 # 清理去重记录，验证定时任务在「未推过」时能推
 with db.get_conn() as conn:
     conn.execute("DELETE FROM reminders WHERE user_id = 1")
 _push_calls.clear()
-asyncio.run(_sched.push_next_day_summary(now=_at("2026-11-09T22:00:00")))
+asyncio.run(_sched.push_next_day_summary(now=_at(_today.isoformat() + "T22:00:00")))
 check("定时推送.未推则推送明日", len(_push_calls) == 1
       and "明日课表" in _push_calls[0][0], str(_push_calls))
 
@@ -810,10 +810,10 @@ _dc["push"] = {**_dc.get("push", {}), "daily_time": "21:30",
                "daily_courses": True, "daily_events": True, "daily_weather": False}
 save_config(_dc)
 _push_calls.clear()
-asyncio.run(_sched.push_next_day_summary(now=_at("2026-11-09T22:00:00")))
+asyncio.run(_sched.push_next_day_summary(now=_at(_today.isoformat() + "T22:00:00")))
 check("每日推送.非配置时间不推", not _push_calls, str(_push_calls))
 _push_calls.clear()
-asyncio.run(_sched.push_next_day_summary(now=_at("2026-11-09T21:30:00")))
+asyncio.run(_sched.push_next_day_summary(now=_at(_today.isoformat() + "T21:30:00")))
 check("每日推送.命中配置时间推送", len(_push_calls) == 1
       and "明日课表" in _push_calls[0][1], str(_push_calls))
 with db.get_conn() as conn:
@@ -830,7 +830,7 @@ async def _fake_daily(cfg, day_s):
 
 _sched.daily_summary = _fake_daily
 _push_calls.clear()
-asyncio.run(_sched.push_next_day_summary(now=_at("2026-11-09T21:30:00")))
+asyncio.run(_sched.push_next_day_summary(now=_at(_today.isoformat() + "T21:30:00")))
 check("每日推送.内容可选只推天气", len(_push_calls) == 1
       and "明日天气" in _push_calls[0][1]
       and "明日课表" not in _push_calls[0][1], str(_push_calls))
@@ -840,7 +840,7 @@ with db.get_conn() as conn:
 _dc["push"] = {**_dc["push"], "daily_weather": False}
 save_config(_dc)
 _push_calls.clear()
-asyncio.run(_sched.push_next_day_summary(now=_at("2026-11-09T21:30:00")))
+asyncio.run(_sched.push_next_day_summary(now=_at(_today.isoformat() + "T21:30:00")))
 check("每日推送.内容全关不推", not _push_calls, str(_push_calls))
 
 # 凭据失效主动提醒：登录过期触发、按数据源每天去重、普通错误与开关关闭不打扰

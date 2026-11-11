@@ -163,10 +163,24 @@
       .muted {
         color: var(--sub);
       }
+      /* 空状态：唯一一套组件定义，各皮肤只用 --empty-pad 调整间距 */
       .empty {
+        --empty-pad: 40px;
         text-align: center;
         color: var(--sub);
-        padding: 40px 0;
+        padding: var(--empty-pad) 20px;
+      }
+      .empty-title {
+        color: var(--text);
+        font-size: 16px;
+        font-weight: 600;
+        line-height: 1.5;
+      }
+      .empty-sub {
+        margin-top: 6px;
+        color: var(--sub);
+        font-size: 12px;
+        line-height: 1.7;
       }
       .hidden {
         display: none !important;
@@ -1518,19 +1532,7 @@
         background: var(--warn-soft);
         font-size: 11px;
       }
-      .empty {
-        padding: 58px 20px;
-      }
-      .empty-title {
-        color: var(--text);
-        font-size: 17px;
-        font-weight: 550;
-      }
-      .empty-sub {
-        margin-top: 5px;
-        color: var(--sub);
-        font-size: 12px;
-      }
+      .empty { --empty-pad: 58px; }
 
       /* 考试 */
       .exam-row {
@@ -2758,9 +2760,7 @@
       .course-name {
         font-size: 16px;
       }
-      .empty {
-        padding: 46px 20px;
-      }
+      .empty { --empty-pad: 46px; }
       .exam-date .md {
         font-size: 16px;
         font-weight: 600;
@@ -3230,9 +3230,7 @@
       .course-time .sections { margin-top: 4px; }
       .course-name { font-size: 16px; font-weight: 620; transition: color 0.15s ease; }
       .course-meta { margin-top: 5px; line-height: 1.65; }
-      .empty { padding: 54px 22px; }
-      .empty-title { color: var(--text); font-size: 16px; font-weight: 600; }
-      .empty-sub { margin-top: 7px; line-height: 1.7; }
+      .empty { --empty-pad: 54px; }
       .source-card { border-color: var(--line); border-radius: 14px; background: #fcfdfb; }
       .source-card-head { padding-bottom: 12px; }
       .week-nav { margin-bottom: 18px; padding: 0; }
@@ -3897,6 +3895,54 @@
         font-size: 12px; color: var(--sub);
       }
       .install-actions { display: flex; gap: 6px; }
+
+      /* 顶部安全区：刘海 / 灵动岛 / PWA 状态栏不遮挡内容。
+         每条都先写原值作回退，再写 env() 覆盖：不支持 env() 的旧浏览器会忽略后一条。 */
+      .wrap { margin-top: 0; margin-top: env(safe-area-inset-top, 0px); }
+      .top-progress { top: 0; top: env(safe-area-inset-top, 0px); }
+      .settings-nav { top: 10px; top: calc(10px + env(safe-area-inset-top, 0px)); }
+      #tab-settings .card {
+        scroll-margin-top: 76px;
+        scroll-margin-top: calc(76px + env(safe-area-inset-top, 0px));
+      }
+
+      /* 空状态修饰类：替代散落的内联 style，放在最后确保覆盖各皮肤 */
+      .empty.compact { --empty-pad: 20px; }
+      .empty-sub.tight { margin-top: 0; padding: 2px 0 8px; }
+      .empty-sub.center { text-align: center; }
+      .empty .small, .empty button.small { margin-top: 12px; }
+
+      /* Toast 语义色：ID + 属性选择器，特异性高于各皮肤里的 #toast 定义。
+         用固定实色而非 --ok/--fail/--warn：那组变量在深色模式下会被改成浅色高亮文字色，
+         拿来做背景配白字会看不清。 */
+      #toast[data-type="success"] { background: #2f7d4f; color: #fff; border-color: transparent; }
+      #toast[data-type="error"] { background: #c0392b; color: #fff; border-color: transparent; }
+      #toast[data-type="warn"] { background: #a35f00; color: #fff; border-color: transparent; }
+
+      /* 应用内确认 / 输入对话框：替代原生 confirm / prompt */
+      .confirm-layer {
+        position: fixed; inset: 0; z-index: 120;
+        display: flex; align-items: center; justify-content: center;
+        padding: 20px; background: rgba(0, 0, 0, 0.42);
+        backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+      }
+      .confirm-box {
+        width: 100%; max-width: 340px; padding: 22px 20px 18px;
+        border: 1px solid var(--line); border-radius: 16px;
+        background: var(--card); color: var(--text);
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.24);
+        animation: confirm-in 0.16s ease-out;
+      }
+      @keyframes confirm-in {
+        from { opacity: 0; transform: translateY(8px) scale(0.98); }
+      }
+      .confirm-box h3 { font-size: 16px; font-weight: 600; }
+      .confirm-text { margin-top: 10px; font-size: 13px; line-height: 1.7; color: var(--sub); }
+      .confirm-box input { width: 100%; margin-top: 14px; }
+      .confirm-error { margin-top: 8px; font-size: 12px; color: var(--fail); }
+      .confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+      .confirm-actions button { min-width: 78px; }
+      #confirmOk.danger { background: var(--fail); border-color: var(--fail); color: #fff; }
     </style>
     <style>
       @media (prefers-reduced-motion: reduce) {
@@ -4843,6 +4889,20 @@
     </div>
     <div id="toast"></div>
 
+    <!-- 应用内确认 / 输入对话框，替代原生 confirm / prompt -->
+    <div id="confirmLayer" class="confirm-layer hidden" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+      <div class="confirm-box">
+        <h3 id="confirmTitle">请确认</h3>
+        <p id="confirmText" class="confirm-text"></p>
+        <input id="confirmInput" class="hidden" type="text" autocomplete="off" />
+        <p id="confirmError" class="confirm-error hidden"></p>
+        <div class="confirm-actions">
+          <button class="small" id="confirmCancel">取消</button>
+          <button class="primary" id="confirmOk">确定</button>
+        </div>
+      </div>
+    </div>
+
     <script>
       const $ = (s) => document.querySelector(s);
       const $$ = (s) => document.querySelectorAll(s);
@@ -4894,13 +4954,88 @@
           requestEnd();
         }
       }
-      function toast(msg, ms = 2600) {
+      function toast(msg, ms = 2600, type = "") {
         const t = $("#toast");
         t.textContent = msg;
+        // 显式 type 优先；未指定时按文案兜底推断，让历史调用点也能获得语义色
+        let kind = type;
+        if (!kind) {
+          const s = String(msg ?? "");
+          if (/失败|错误|无法|没能|不可用|失效|异常|超时|请先|请填写|请选择|还没|稍后再试|没有空闲|已改查|不合法|格式/.test(s))
+            kind = "warn";
+          else if (/^(已|日程已|设置已|密码已|对话已|用户已|邀请码已|模型|正方已)/.test(s))
+            kind = "success";
+        }
+        t.dataset.type = kind || "info";
         t.classList.add("show");
         clearTimeout(t._timer);
         t._timer = setTimeout(() => t.classList.remove("show"), ms);
       }
+
+      /* 应用内对话框：替代原生 confirm / prompt，跟随主题、支持 Esc 与点遮罩关闭 */
+      let dialogSettle = null;
+      function settleDialog(value) {
+        if (!dialogSettle) return;
+        const fn = dialogSettle;
+        dialogSettle = null;
+        const layer = $("#confirmLayer");
+        layer.classList.add("hidden");
+        const prev = layer._prevFocus;
+        if (prev && typeof prev.focus === "function") prev.focus();
+        fn(value);
+      }
+      function showDialog(opts) {
+        return new Promise((resolve) => {
+          if (dialogSettle) settleDialog(null); // 防止并发时旧 Promise 悬挂
+          const layer = $("#confirmLayer");
+          const inp = $("#confirmInput");
+          layer._prevFocus = document.activeElement;
+          layer._opts = opts;
+          $("#confirmTitle").textContent = opts.title || "请确认";
+          $("#confirmText").textContent = opts.message || "";
+          $("#confirmOk").textContent = opts.ok || "确定";
+          $("#confirmCancel").textContent = opts.cancel || "取消";
+          $("#confirmOk").classList.toggle("danger", opts.danger !== false);
+          inp.classList.toggle("hidden", !opts.input);
+          inp.type = opts.password ? "password" : "text";
+          inp.value = "";
+          inp.placeholder = opts.placeholder || "";
+          $("#confirmError").classList.add("hidden");
+          layer.classList.remove("hidden");
+          dialogSettle = resolve;
+          (opts.input ? inp : $("#confirmCancel")).focus();
+        });
+      }
+      function confirmDialog(message, opts = {}) {
+        return showDialog({ ...opts, message }).then((v) => v === true);
+      }
+      function inputDialog(message, opts = {}) {
+        return showDialog({ ...opts, message, input: true });
+      }
+      $("#confirmCancel").addEventListener("click", () => settleDialog(null));
+      $("#confirmOk").addEventListener("click", () => {
+        const opts = $("#confirmLayer")._opts || {};
+        if (!opts.input) { settleDialog(true); return; }
+        const val = $("#confirmInput").value.trim();
+        const err = opts.validate ? opts.validate(val) : val ? "" : "不能为空";
+        if (err) {
+          const box = $("#confirmError");
+          box.textContent = err;
+          box.classList.remove("hidden");
+          return;
+        }
+        settleDialog(val);
+      });
+      $("#confirmLayer").addEventListener("click", (e) => {
+        if (e.target === e.currentTarget) settleDialog(null);
+      });
+      bindImeSafeEnter($("#confirmInput"), () => $("#confirmOk").click());
+      document.addEventListener("keydown", (e) => {
+        if (e.key !== "Escape" || $("#confirmLayer").classList.contains("hidden")) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        settleDialog(null);
+      }, true);
       function esc(s) {
         const d = document.createElement("div");
         d.textContent = s ?? "";
@@ -5099,7 +5234,7 @@
           `${d.getMonth() + 1} 月 ${d.getDate()} 日 ${dow}`;
         $("#tomorrowList").innerHTML = items.length
           ? items.map((x) => x.html).join("")
-          : `<div class="empty-sub" style="text-align:center">明天暂时没有课程和日程，点击下方按钮提前安排。</div>`;
+          : `<div class="empty-sub center">明天暂时没有课程和日程，点击下方按钮提前安排。</div>`;
         block.classList.remove("hidden");
       }
 
@@ -5234,7 +5369,7 @@
           openEventEditor(item);
           return;
         }
-        if (!confirm(`删除日程「${item.title}」？`)) return;
+        if (!(await confirmDialog(`删除日程「${item.title}」？`, { ok: "删除" }))) return;
         try {
           await api("/api/events", {
             method: "POST",
@@ -5244,7 +5379,7 @@
           toast("日程已删除");
           await Promise.all([loadStatus(), loadToday()]);
         } catch (err) {
-          toast(err.message, 4000);
+          toast(err.message, 4000, "error");
         }
       }
       $("#weekEventList").addEventListener("click", handleEventAction);
@@ -5438,7 +5573,7 @@
           if (!roomMeta || campus) {
             if (!roomMeta)
               $("#roomResult").innerHTML =
-                `<div class="empty-sub" style="padding:2px 0 8px">正在连接正方教务，首次约需几秒钟…</div>` +
+                `<div class="empty-sub tight">正在连接正方教务，首次约需几秒钟…</div>` +
                 skeletonRows(4);
             roomMeta = await api("/api/rooms/meta" + (campus ? "?campus=" + encodeURIComponent(campus) : ""));
           }
@@ -5561,7 +5696,7 @@
         $("#roomQueryBtn").textContent = "查询中…";
         $("#roomResultBar").classList.add("hidden");
         $("#roomResult").innerHTML =
-          `<div class="empty-sub" style="padding:2px 0 8px">正在查询正方教务…</div>` +
+          `<div class="empty-sub tight">正在查询正方教务…</div>` +
           skeletonRows(4);
         try {
           const data = await api("/api/rooms/free?" + params.toString());
@@ -5778,7 +5913,7 @@
           await queryRooms();
           refreshRoomFree();
         } catch (err) {
-          toast(err.message, 4000);
+          toast(err.message, 4000, "error");
         } finally {
           btn.disabled = false;
         }
@@ -5866,7 +6001,7 @@
           setTimeout(() => URL.revokeObjectURL(url), 1000);
           toast("已导出日历文件，请到系统日历中导入", 2500);
         } catch (e) {
-          toast(e.message || "导出失败", 3000);
+          toast(e.message || "导出失败", 3000, "error");
         } finally {
           btn.disabled = false;
           btn.textContent = old;
@@ -5914,7 +6049,7 @@
             try { await navigator.clipboard.writeText(info.webcal); } catch (e) {}
           }
         } catch (e) {
-          toast(e.message || "订阅失败", 3000);
+          toast(e.message || "订阅失败", 3000, "error");
         } finally {
           btn.disabled = false;
           btn.textContent = old;
@@ -5942,7 +6077,7 @@
         try {
           courseData = await api("/api/courses");
         } catch (e) {
-          toast(e.message, 4000);
+          toast(e.message, 4000, "error");
           return;
         }
         const cs = courseData.courses || [];
@@ -6010,7 +6145,7 @@
             await loadWeek(viewWeek ?? Math.max(weekData?.current_week || 1, 1));
           return true;
         } catch (e) {
-          toast(e.message, 4000);
+          toast(e.message, 4000, "error");
           return false;
         }
       }
@@ -6036,8 +6171,8 @@
         if (edit) fillCourseForm(edit.dataset.edit);
         else if (del) applyCourseAction("delete", del.dataset.del);
       });
-      $("#resetCoursesBtn").addEventListener("click", () => {
-        if (confirm("恢复自动课表？会清除所有手动添加、修改和隐藏的课程。"))
+      $("#resetCoursesBtn").addEventListener("click", async () => {
+        if (await confirmDialog("恢复自动课表？会清除所有手动添加、修改和隐藏的课程。", { ok: "恢复" }))
           applyCourseAction("reset");
       });
       $("#restoreHiddenBtn").addEventListener("click", () =>
@@ -6106,7 +6241,7 @@
         try {
           examAdjustData = await api("/api/exams");
         } catch (e) {
-          toast(e.message, 4000);
+          toast(e.message, 4000, "error");
           return;
         }
         const list = examAdjustData.exams || [];
@@ -6165,7 +6300,7 @@
           await Promise.all([loadStatus(), loadExams(), loadToday()]);
           return true;
         } catch (e) {
-          toast(e.message, 4000);
+          toast(e.message, 4000, "error");
           return false;
         }
       }
@@ -6189,8 +6324,8 @@
         if (edit) fillExamForm(edit.dataset.editExam);
         else if (del) applyExamAction("delete", del.dataset.delExam);
       });
-      $("#resetExamsBtn").addEventListener("click", () => {
-        if (confirm("恢复自动考试？会清除所有手动添加、修改和隐藏的考试。"))
+      $("#resetExamsBtn").addEventListener("click", async () => {
+        if (await confirmDialog("恢复自动考试？会清除所有手动添加、修改和隐藏的考试。", { ok: "恢复" }))
           applyExamAction("reset");
       });
       $("#restoreHiddenExamsBtn").addEventListener("click", () =>
@@ -6270,8 +6405,8 @@
           box.innerHTML = examData.supported
             ? `<div class="empty">暂无考试安排，点「立即同步」从教务拉取</div>`
             : examData.provider === "portal"
-              ? `<div class="empty">门户只提供课表；填写正方账号后，同步会额外拉取考试<br><button class="small" id="examToSettings" style="margin-top:12px">去课表来源填写正方账号</button></div>`
-              : `<div class="empty">当前数据源不支持考试查询，请在课表来源接入正方教务<br><button class="small" id="examToSettings" style="margin-top:12px">去课表来源</button></div>`;
+              ? `<div class="empty">门户只提供课表；填写正方账号后，同步会额外拉取考试<br><button class="small" id="examToSettings">去课表来源填写正方账号</button></div>`
+              : `<div class="empty">当前数据源不支持考试查询，请在课表来源接入正方教务<br><button class="small" id="examToSettings">去课表来源</button></div>`;
           $("#examHint").textContent = examData.supported
             ? "考试数据来自正方教务，随每次同步更新；点「编辑考试」可手动添加或调整，临时调考以教务系统为准。"
             : "";
@@ -6465,7 +6600,7 @@
         document.body.appendChild(ta);
         ta.select();
         try { document.execCommand("copy"); done(); }
-        catch (e) { toast("复制失败，请手动选择文本", 2500); }
+        catch (e) { toast("复制失败，请手动选择文本", 2500, "error"); }
         ta.remove();
       }
       let chatBusy = false;
@@ -6819,7 +6954,7 @@
             });
             chip.innerHTML = "<span>已撤销这条记忆</span>";
           } catch (err) {
-            toast(err.message, 4000);
+            toast(err.message, 4000, "error");
           }
         });
       }
@@ -6876,7 +7011,7 @@
             await Promise.all([loadStatus(), loadToday()]);
           } catch (err) {
             btn.disabled = false;
-            toast(err.message, 4000);
+            toast(err.message, 4000, "error");
           }
         });
       }
@@ -7105,7 +7240,7 @@
               $("#roomBuilding").value = p.building;
               await queryRooms();
             }
-          } catch (err) { toast(err.message, 4000); }
+          } catch (err) { toast(err.message, 4000, "error"); }
           finally { btn.disabled = false; }
         });
       }
@@ -7219,14 +7354,14 @@
       $("#chatClearBtn").addEventListener("click", async () => {
         if (chatBusy) return;
         if (!chatHistory.length) { toast("对话已经是空的"); return; }
-        if (!confirm("清空全部对话？长期记忆会保留。")) return;
+        if (!(await confirmDialog("清空全部对话？长期记忆会保留。", { ok: "清空" }))) return;
         try {
           await api("/api/chat/clear", { method: "POST" });
           chatHistory = [];
           chatRenderLimit = CHAT_WINDOW;
           $("#chatMsgs").innerHTML = `<div class="msg ai">${CHAT_WELCOME}</div>`;
           toast("对话已清空");
-        } catch (e) { toast(e.message, 4000); }
+        } catch (e) { toast(e.message, 4000, "error"); }
       });
       async function loadMemories() {
         const r = await api("/api/memories");
@@ -7272,14 +7407,14 @@
         const btn = e.target.closest("button[data-mem-del]");
         if (!btn) return;
         const row = btn.closest(".memory-row");
-        if (!confirm("删除这条记忆？")) return;
+        if (!(await confirmDialog("删除这条记忆？", { ok: "删除" }))) return;
         try {
           await api("/api/memories", {
             method: "POST",
             body: JSON.stringify({ action: "delete", id: row.dataset.id }),
           });
           await loadMemories();
-        } catch (err) { toast(err.message, 4000); }
+        } catch (err) { toast(err.message, 4000, "error"); }
       });
       document.addEventListener("keydown", (e) => {
         if (e.key === "Escape" && !$("#memorySheet").classList.contains("hidden"))
@@ -7367,7 +7502,7 @@
             }
           }
         } catch (e) {
-          toast(e.message, 4000);
+          toast(e.message, 4000, "error");
         }
       }
       async function doSync() {
@@ -7382,7 +7517,7 @@
             await loadExams();
           }
         } catch (e) {
-          toast(e.message, 4000);
+          toast(e.message, 4000, "error");
         } finally {
           $("#syncBtn").disabled = false;
         }
@@ -7425,7 +7560,7 @@
           }
           loadDefaultCampus(s.zhengfang.configured);
         } catch (e) {
-          toast(e.message, 4000);
+          toast(e.message, 4000, "error");
         }
       }
 
@@ -7490,7 +7625,7 @@
             try { localStorage.setItem(roomFilterKey(), JSON.stringify(saved)); } catch (e) {}
           }
         } catch (e) {
-          toast(e.message, 4000);
+          toast(e.message, 4000, "error");
         } finally {
           btn.disabled = false;
         }
@@ -7518,7 +7653,7 @@
           $("#adminStats").innerHTML = items
             .map(([l, n]) => `<div class="stat-box"><div class="num">${n}</div><div class="lbl">${l}</div></div>`)
             .join("");
-        } catch (e) { toast(e.message, 4000); }
+        } catch (e) { toast(e.message, 4000, "error"); }
       }
       async function loadAdminUsers() {
         if (!currentUser || currentUser.role !== "admin") return;
@@ -7550,7 +7685,7 @@
             ? rows.join("")
             : '<div class="empty">暂无用户</div>';
         } catch (e) {
-          toast(e.message, 4000);
+          toast(e.message, 4000, "error");
         }
       }
       async function loadAdminSources() {
@@ -7578,7 +7713,7 @@
           $("#adminSourceList").innerHTML = rows.length
             ? rows.join("")
             : '<div class="empty">暂无用户</div>';
-        } catch (e) { toast(e.message, 4000); }
+        } catch (e) { toast(e.message, 4000, "error"); }
       }
       async function loadAdminLog() {
         if (!currentUser || currentUser.role !== "admin") return;
@@ -7596,7 +7731,7 @@
           $("#adminLogList").innerHTML = rows.length
             ? rows.join("")
             : '<div class="empty">暂无操作记录</div>';
-        } catch (e) { toast(e.message, 4000); }
+        } catch (e) { toast(e.message, 4000, "error"); }
       }
 
       /* ---------- 外观主题（跟随系统 / 浅色 / 深色） ---------- */
@@ -7885,7 +8020,7 @@
           await loadStatus();
           await loadToday();
         } catch (e) {
-          toast(e.message, 5000);
+          toast(e.message, 5000, "error");
         } finally {
           $("#importCurlBtn").disabled = false;
         }
@@ -7896,14 +8031,14 @@
             method: "POST",
           });
           if (!r.ok) {
-            toast(r.message, 6000);
+            toast(r.message, 6000, "error");
             return;
           }
           toast(r.message, 4000);
           $("#browserLoginState").textContent = "正在启动浏览器…";
           pollBrowserLogin();
         } catch (e) {
-          toast(e.message, 5000);
+          toast(e.message, 5000, "error");
         }
       });
       $("#browserLoginStopBtn").addEventListener("click", async () => {
@@ -7911,7 +8046,7 @@
           await api("/api/provider/browser-login/stop", { method: "POST" });
           toast("已请求取消");
         } catch (e) {
-          toast(e.message, 4000);
+          toast(e.message, 4000, "error");
         }
       });
 
@@ -7956,20 +8091,20 @@
               ? `可用模型（${r.models.length}）：\n${r.models.join("\n")}\n\n复制想要的模型名填到「模型」框即可。`
               : "该服务未返回模型列表（部分网关不提供 /models 接口）。",
           );
-          toast("模型探测完成", 2500);
+          toast("模型探测完成", 2500, "success");
         } catch (e) {
           showAiDiag("探测失败：" + e.message);
-          toast(e.message, 5000);
+          toast(e.message, 5000, "error");
         }
       });
       $("#aiTestBtn").addEventListener("click", async () => {
         try {
           const r = await saveThenProbe("/api/ai/test", "POST");
           showAiDiag(`连接正常\n模型：${r.model}\n回复：${r.reply}`);
-          toast("模型连接正常", 2500);
+          toast("模型连接正常", 2500, "success");
         } catch (e) {
           showAiDiag("连接失败：" + e.message);
-          toast(e.message, 5000);
+          toast(e.message, 5000, "error");
         }
       });
       $("#saveSettingsBtn").addEventListener("click", () =>
@@ -8052,7 +8187,7 @@
           );
           toast(msgs.join("；"), 5000);
         } catch (e) {
-          toast(e.message, 4000);
+          toast(e.message, 4000, "error");
         } finally {
           if (btn) btn.disabled = false;
           loadPushLog();
@@ -8298,7 +8433,7 @@
             </div>`;
           });
           $("#inviteList").innerHTML = rows.length ? rows.join("") : '<div class="empty">暂无邀请码</div>';
-        } catch (e) { toast(e.message, 4000); }
+        } catch (e) { toast(e.message, 4000, "error"); }
       }
       function renderAccountInfo() {
         if (!currentUser) return;
@@ -8389,7 +8524,7 @@
             }
           }
         } catch (e) {
-          toast("加载失败：" + e.message, 5000);
+          toast("加载失败：" + e.message, 5000, "error");
         }
       }
       $("#authTabLogin").addEventListener("click", () => switchAuthTab("login"));
@@ -8441,25 +8576,25 @@
           const r = await api("/api/auth/invites", { method: "POST" });
           toast("新邀请码：" + r.code, 8000);
           await refreshInvites();
-        } catch (e) { toast(e.message, 5000); }
+        } catch (e) { toast(e.message, 5000, "error"); }
       });
       $("#genInviteBatchBtn").addEventListener("click", async () => {
         try {
           const r = await api("/api/auth/invites/batch", { method: "POST" });
           toast("已生成 " + r.codes.length + " 个邀请码", 5000);
           await refreshInvites();
-        } catch (e) { toast(e.message, 5000); }
+        } catch (e) { toast(e.message, 5000, "error"); }
       });
       $("#refreshInvitesBtn").addEventListener("click", refreshInvites);
       $("#inviteList").addEventListener("click", async (e) => {
         const btn = e.target.closest("button[data-invite]");
         if (!btn) return;
-        if (!confirm("确定撤销该邀请码？撤销后此码立即失效。")) return;
+        if (!(await confirmDialog("确定撤销该邀请码？撤销后此码立即失效。", { ok: "撤销" }))) return;
         try {
           await api(`/api/auth/invites/${encodeURIComponent(btn.dataset.invite)}`, { method: "DELETE" });
           toast("邀请码已撤销", 2500);
           await refreshInvites();
-        } catch (err) { toast(err.message, 4000); }
+        } catch (err) { toast(err.message, 4000, "error"); }
       });
       // 搜索 / 排序
       let adminSearchTimer = null;
@@ -8477,7 +8612,10 @@
         const ids = [...$$("#adminUserList .admin-user-check:checked")]
           .map((b) => parseInt(b.dataset.uid, 10));
         if (!ids.length) { toast("请先勾选用户", 3000); return; }
-        if (!confirm(`确定${active ? "启用" : "停用"}选中的 ${ids.length} 个用户？`)) return;
+        if (!(await confirmDialog(`确定${active ? "启用" : "停用"}选中的 ${ids.length} 个用户？`, {
+          ok: active ? "启用" : "停用",
+          danger: !active,
+        }))) return;
         try {
           const r = await api("/api/auth/users/batch-active", {
             method: "POST",
@@ -8487,7 +8625,7 @@
           await loadAdminUsers();
           await loadAdminStats();
           await loadAdminLog();
-        } catch (e) { toast(e.message, 4000); }
+        } catch (e) { toast(e.message, 4000, "error"); }
       }
       $("#adminBatchDisable").addEventListener("click", () => batchActive(false));
       $("#adminBatchEnable").addEventListener("click", () => batchActive(true));
@@ -8522,7 +8660,7 @@
             method: "POST",
             body: JSON.stringify({ display_name, student_id }),
           });
-          toast("用户信息已更新", 2500);
+          toast("用户信息已更新", 2500, "success");
           closeEditUser();
           await loadAdminUsers();
           await loadAdminLog();
@@ -8563,7 +8701,14 @@
             });
             toast("已更新角色", 2500);
           } else if (act === "reset-pwd") {
-            const pwd = prompt("为该用户设置新密码（至少 6 位）：");
+            const pwd = await inputDialog("为该用户设置新密码（至少 6 位）：", {
+              title: "重置密码",
+              ok: "保存",
+              placeholder: "至少 6 位",
+              password: true,
+              danger: false,
+              validate: (v) => (v.length >= 6 ? "" : "密码至少 6 位"),
+            });
             if (!pwd) return;
             await api(`/api/auth/users/${id}/reset-password`, {
               method: "POST",
@@ -8571,7 +8716,7 @@
             });
             toast("密码已重置，该用户需用新密码登录", 4000);
           } else if (act === "delete") {
-            if (!confirm("确定删除该用户？其课表与配置将一并删除，无法恢复。")) return;
+            if (!(await confirmDialog("确定删除该用户？其课表与配置将一并删除，无法恢复。", { ok: "删除" }))) return;
             await api(`/api/auth/users/${id}`, { method: "DELETE" });
             toast("用户已删除", 2500);
           }
@@ -8579,7 +8724,7 @@
           await loadAdminStats();
           await loadAdminLog();
         } catch (err) {
-          toast(err.message, 4000);
+          toast(err.message, 4000, "error");
         }
       });
 
