@@ -285,9 +285,16 @@ db.save_exam_snapshot([exam.to_dict()], "test")
 esnap = db.get_exam_snapshot()
 check("考试.快照落库", bool(esnap) and esnap["source"] == "test"
       and esnap["exams"][0]["name"] == "高等数学", str(esnap)[:160])
+# AI 上下文只展示尚未结束的考试：固定日期会过期，这里临时换成明天的同一场考试
+_future_day = (date.today() + timedelta(days=1)).isoformat()
+_future_exam = Exam.from_dict({"name": "高等数学",
+                               "time": f"{_future_day} 09:00-11:00",
+                               "room": "1-201", "seat": "12"})
+db.save_exam_snapshot([_future_exam.to_dict()], "test")
 ctx = build_context(load_config())
 check("考试.AI 上下文可回答教室座号",
       "高等数学" in ctx and "@1-201" in ctx and "座号 12" in ctx, ctx[-220:])
+db.save_exam_snapshot(esnap["exams"], esnap["source"])  # 恢复，避免影响后续用例
 
 # 个人日程：模型、落库、AI 上下文
 _ev = Event.from_dict({"title": "社团例会", "date": "2026-11-09",

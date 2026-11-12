@@ -3975,6 +3975,35 @@
       .chat-error-msg { margin-top: 4px; font-size: 12px; line-height: 1.6; color: var(--text); word-break: break-word; }
       .chat-error-actions { margin-top: 9px; }
       .chat-error-actions button { font-size: 11px; padding: 5px 12px; }
+
+      /* P2-10 首屏启动骨架 */
+      .boot-splash {
+        position: fixed; inset: 0; z-index: 200;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 18px; padding: 24px;
+        background: var(--bg); color: var(--text);
+      }
+      .boot-mark { font-size: 22px; font-weight: 650; letter-spacing: -0.02em; }
+      .boot-mark span { color: var(--accent); font-weight: 500; }
+      .boot-lines { width: min(260px, 70vw); display: grid; gap: 10px; }
+      .boot-lines .sk { height: 12px; border-radius: 6px; }
+      .boot-lines .sk:nth-child(2) { width: 78%; }
+      .boot-lines .sk:nth-child(3) { width: 56%; }
+      .boot-hint { font-size: 12px; color: var(--sub); }
+
+      /* P2-10 弱网 / 离线提示条：固定实色，深色下同样可读 */
+      .net-banner {
+        position: fixed; top: 0; left: 0; right: 0; z-index: 110;
+        display: flex; align-items: center; justify-content: center; gap: 10px;
+        flex-wrap: wrap; padding: 9px 14px;
+        padding-top: calc(9px + env(safe-area-inset-top, 0px));
+        background: #c0392b; color: #fff; font-size: 12px;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+      }
+      .net-banner button {
+        background: rgba(255, 255, 255, 0.18); border-color: rgba(255, 255, 255, 0.35);
+        color: #fff; font-size: 11px; padding: 3px 10px;
+      }
     </style>
     <style>
       @media (prefers-reduced-motion: reduce) {
@@ -4009,6 +4038,17 @@
     </script>
   </head>
   <body>
+    <!-- 首屏启动骨架：boot 完成前不露出空白，也不与登录页/主界面互相闪烁 -->
+    <div id="bootSplash" class="boot-splash" role="status" aria-label="正在加载 Agenda 知序">
+      <div class="boot-mark">Agenda <span>知序</span></div>
+      <div class="boot-lines"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>
+      <div class="boot-hint">正在准备你的课表…</div>
+    </div>
+    <!-- 弱网 / 离线兜底：持续可见，直到恢复或用户重试成功 -->
+    <div id="netBanner" class="net-banner hidden" role="alert">
+      <span id="netBannerText">网络连接异常，显示的内容可能不是最新</span>
+      <button class="small" id="netRetryBtn" type="button">重试</button>
+    </div>
     <div class="top-progress" id="topProgress" aria-hidden="true"></div>
     <div id="authScreen" class="auth-screen">
       <div class="auth-layout">
@@ -4064,13 +4104,13 @@
         </div>
       </header>
       <div class="statusbar" id="statusbar"></div>
-      <nav id="nav" aria-label="主导航">
-        <button data-tab="today" class="active"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 9.5h17M8 3v4M16 3v4M8.5 14l2.2 2.2 4.3-4.4"/></svg>今日</button>
-        <button data-tab="week"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M10 4v16"/></svg>日程</button>
-        <button data-tab="ai"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5c.7 3.8 2.7 5.8 6.5 6.5-3.8.7-5.8 2.7-6.5 6.5-.7-3.8-2.7-5.8-6.5-6.5 3.8-.7 5.8-2.7 6.5-6.5z"/><path d="M18.5 15.5c.3 1.7 1.2 2.6 2.9 2.9-1.7.3-2.6 1.2-2.9 2.9-.3-1.7-1.2-2.6-2.9-2.9 1.7-.3 2.6-1.2 2.9-2.9z"/></svg>AI 助手</button>
-        <button data-tab="source"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 14.5l5-5M8.5 11.5l-2.2 2.2a3.6 3.6 0 0 0 5.1 5.1l2.1-2.2M15.5 12.5l2.2-2.2a3.6 3.6 0 0 0-5.1-5.1l-2.1 2.2"/></svg>课表来源</button>
-        <button data-tab="admin" id="adminNavBtn" class="hidden"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="3"/><path d="M3.5 19.5c.6-3 2.7-4.5 5.5-4.5s4.9 1.5 5.5 4.5M16 5.7a2.8 2.8 0 0 1 0 5.6M17 15.2c2 .5 3.2 1.9 3.6 4.3"/></svg>用户管理</button>
-        <button data-tab="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17.5 7H20M4 17h2.5M11 17h9"/><circle cx="15.2" cy="7" r="2.2"/><circle cx="8.7" cy="17" r="2.2"/></svg>设置</button>
+      <nav id="nav" role="tablist" aria-label="主导航">
+        <button data-tab="today" class="active" role="tab" aria-selected="true" aria-controls="tab-today"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 9.5h17M8 3v4M16 3v4M8.5 14l2.2 2.2 4.3-4.4"/></svg>今日</button>
+        <button data-tab="week" role="tab" aria-selected="false" aria-controls="tab-week"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M10 4v16"/></svg>日程</button>
+        <button data-tab="ai" role="tab" aria-selected="false" aria-controls="tab-ai"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5c.7 3.8 2.7 5.8 6.5 6.5-3.8.7-5.8 2.7-6.5 6.5-.7-3.8-2.7-5.8-6.5-6.5 3.8-.7 5.8-2.7 6.5-6.5z"/><path d="M18.5 15.5c.3 1.7 1.2 2.6 2.9 2.9-1.7.3-2.6 1.2-2.9 2.9-.3-1.7-1.2-2.6-2.9-2.9 1.7-.3 2.6-1.2 2.9-2.9z"/></svg>AI 助手</button>
+        <button data-tab="source" role="tab" aria-selected="false" aria-controls="tab-source"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 14.5l5-5M8.5 11.5l-2.2 2.2a3.6 3.6 0 0 0 5.1 5.1l2.1-2.2M15.5 12.5l2.2-2.2a3.6 3.6 0 0 0-5.1-5.1l-2.1 2.2"/></svg>课表来源</button>
+        <button data-tab="admin" id="adminNavBtn" class="hidden" role="tab" aria-selected="false" aria-controls="tab-admin"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="3"/><path d="M3.5 19.5c.6-3 2.7-4.5 5.5-4.5s4.9 1.5 5.5 4.5M16 5.7a2.8 2.8 0 0 1 0 5.6M17 15.2c2 .5 3.2 1.9 3.6 4.3"/></svg>用户管理</button>
+        <button data-tab="settings" role="tab" aria-selected="false" aria-controls="tab-settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17.5 7H20M4 17h2.5M11 17h9"/><circle cx="15.2" cy="7" r="2.2"/><circle cx="8.7" cy="17" r="2.2"/></svg>设置</button>
       </nav>
 
       <!-- 今日 -->
@@ -4120,7 +4160,7 @@
             <button class="small" id="weekJumpBtn">跳转</button>
             <div class="week-menu-wrap">
               <button class="small" id="weekMoreBtn" aria-label="更多操作">更多</button>
-              <div class="week-menu hidden" id="weekMenu">
+              <div class="week-menu hidden" id="weekMenu" role="menu" aria-label="周课表更多操作">
                 <button id="editCoursesBtn">编辑课表</button>
                 <button id="exportIcsBtn">导出日历</button>
                 <button id="subscribeIcsBtn">一键订阅</button>
@@ -4919,7 +4959,7 @@
         <p class="hint" id="cpError" style="color:var(--fail)"></p>
       </div>
     </div>
-    <div id="toast"></div>
+    <div id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
     <!-- 应用内确认 / 输入对话框，替代原生 confirm / prompt -->
     <div id="confirmLayer" class="confirm-layer hidden" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
@@ -4985,11 +5025,36 @@
             throw new Error("登录已失效，请重新登录");
           }
           if (!r.ok) throw new Error(data.detail || `请求失败 (${r.status})`);
+          setNetBanner(false);
           return data;
+        } catch (e) {
+          // TypeError 表示网络层失败（断网 / DNS / 服务不可达）；业务错误不弹横幅
+          if (e instanceof TypeError) setNetBanner(true);
+          throw e;
         } finally {
           requestEnd();
         }
       }
+      function setNetBanner(show) {
+        const el = $("#netBanner");
+        if (el) el.classList.toggle("hidden", !show);
+      }
+      window.addEventListener("offline", () => setNetBanner(true));
+      window.addEventListener("online", () => setNetBanner(false));
+      $("#netRetryBtn").addEventListener("click", async () => {
+        try {
+          await api("/api/status");   // 成功时 api() 会自动收起横幅
+          toast("网络已恢复", 2500, "success");
+        } catch (e) {
+          toast("仍然连不上，请检查网络或稍后再试", 3500, "error");
+        }
+      });
+      function hideBootSplash() {
+        const el = $("#bootSplash");
+        if (el) el.classList.add("hidden");
+      }
+      // 极端情况下（脚本异常导致 boot 没跑完）也不把用户卡在启动页
+      setTimeout(hideBootSplash, 10000);
       function toast(msg, ms = 2600, type = "") {
         const t = $("#toast");
         t.textContent = msg;
@@ -5066,12 +5131,6 @@
         if (e.target === e.currentTarget) settleDialog(null);
       });
       bindImeSafeEnter($("#confirmInput"), () => $("#confirmOk").click());
-      document.addEventListener("keydown", (e) => {
-        if (e.key !== "Escape" || $("#confirmLayer").classList.contains("hidden")) return;
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        settleDialog(null);
-      }, true);
       function esc(s) {
         const d = document.createElement("div");
         d.textContent = s ?? "";
@@ -6201,13 +6260,6 @@
       $("#courseEditor").addEventListener("click", (e) => {
         if (e.target.id === "courseEditor") closeCourseEditor();
       });
-      document.addEventListener("keydown", (e) => {
-        if (
-          e.key === "Escape" &&
-          !$("#courseEditor").classList.contains("hidden")
-        )
-          closeCourseEditor();
-      });
       $("#courseList").addEventListener("click", (ev) => {
         const edit = ev.target.closest("[data-edit]");
         const del = ev.target.closest("[data-del]");
@@ -6353,13 +6405,6 @@
       $("#cancelExamAdjustBtn").addEventListener("click", resetExamForm);
       $("#examEditor").addEventListener("click", (e) => {
         if (e.target.id === "examEditor") closeExamEditor();
-      });
-      document.addEventListener("keydown", (e) => {
-        if (
-          e.key === "Escape" &&
-          !$("#examEditor").classList.contains("hidden")
-        )
-          closeExamEditor();
       });
       $("#examAdjustList").addEventListener("click", (ev) => {
         const edit = ev.target.closest("[data-edit-exam]");
@@ -7497,11 +7542,6 @@
           await loadMemories();
         } catch (err) { toast(err.message, 4000, "error"); }
       });
-      document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape" && !$("#memorySheet").classList.contains("hidden"))
-          closeMemorySheet();
-      });
-
       /* ---------- 日志（已移除独立页，保留空实现避免引用报错） ---------- */
       async function loadLogs() {}
 
@@ -7944,9 +7984,12 @@
         saveTab(tab);
         // 移动端底部导航切页后回到顶部，避免停在上一页的滚动位置
         if (window.matchMedia("(max-width: 720px)").matches) window.scrollTo(0, 0);
-        $$("#nav button").forEach((b) =>
-          b.classList.toggle("active", b.dataset.tab === tab),
-        );
+        $$("#nav button").forEach((b) => {
+          const on = b.dataset.tab === tab;
+          b.classList.toggle("active", on);
+          b.setAttribute("aria-selected", on ? "true" : "false");
+          b.tabIndex = on ? 0 : -1;
+        });
         ["today", "week", "rooms", "ai", "source", "admin", "settings"].forEach((t) =>
           $("#tab-" + t).classList.toggle("hidden", t !== tab),
         );
@@ -8107,6 +8150,22 @@
       $("#nav").addEventListener("click", (e) => {
         const btn = e.target.closest("button[data-tab]");
         if (btn) switchTab(btn.dataset.tab);
+      });
+      // tablist 的方向键导航：配合 roving tabindex，键盘也能切换页面
+      $("#nav").addEventListener("keydown", (e) => {
+        const tabs = [...$$("#nav button[role=tab]")]
+          .filter((b) => !b.classList.contains("hidden"));
+        const i = tabs.indexOf(document.activeElement);
+        if (i < 0) return;
+        let next = -1;
+        if (e.key === "ArrowRight" || e.key === "ArrowDown") next = (i + 1) % tabs.length;
+        else if (e.key === "ArrowLeft" || e.key === "ArrowUp") next = (i - 1 + tabs.length) % tabs.length;
+        else if (e.key === "Home") next = 0;
+        else if (e.key === "End") next = tabs.length - 1;
+        else return;
+        e.preventDefault();
+        tabs[next].focus();
+        switchTab(tabs[next].dataset.tab);
       });
       $("#syncBtn").addEventListener("click", doSync);
       $("#examList").addEventListener("click", (e) => {
@@ -8385,9 +8444,6 @@
       });
       document.addEventListener("click", (e) => {
         if (!e.target.closest(".week-menu-wrap")) weekMenu.classList.add("hidden");
-      });
-      document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape") weekMenu.classList.add("hidden");
       });
       weekMenu.addEventListener("click", () => weekMenu.classList.add("hidden"));
 
@@ -8684,6 +8740,8 @@
           }
         } catch (e) {
           toast("加载失败：" + e.message, 5000, "error");
+        } finally {
+          hideBootSplash();
         }
       }
       $("#authTabLogin").addEventListener("click", () => switchAuthTab("login"));
@@ -8723,11 +8781,6 @@
       $("#confirmDeleteBtn").addEventListener("click", deleteAccount);
       $("#deleteAccountSheet").addEventListener("click", (e) => {
         if (e.target.id === "deleteAccountSheet") closeDeleteSheet();
-      });
-      document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape" &&
-            !$("#deleteAccountSheet").classList.contains("hidden"))
-          closeDeleteSheet();
       });
       $("#inviteBtn").addEventListener("click", () => switchTab("admin"));
       $("#genInviteBtn").addEventListener("click", async () => {
@@ -8928,17 +8981,56 @@
           $("#confirmChangePwdBtn").disabled = false;
         }
       });
+      /* ---------- 统一 Esc 与焦点陷阱：所有弹层集中登记，新增弹层只需加一行 ---------- */
+      const ESC_LAYERS = [
+        ["#confirmLayer", () => settleDialog(null)],
+        ["#eventEditor", () => closeEventEditor()],
+        ["#courseEditor", () => closeCourseEditor()],
+        ["#examEditor", () => closeExamEditor()],
+        ["#memorySheet", () => closeMemorySheet()],
+        ["#deleteAccountSheet", () => closeDeleteSheet()],
+        ["#editUserSheet", () => closeEditUser()],
+        ["#changePwdSheet", () => $("#changePwdSheet").classList.add("hidden")],
+        // 下面三个是轻量浮层：只响应 Esc，不做焦点陷阱（否则会挡住正常 Tab 导航）
+        ["#weekMenu", () => $("#weekMenu").classList.add("hidden"), false],
+        ["#weekJump", () => $("#weekJump").classList.add("hidden"), false],
+        ["#searchResults", () => {
+          const b = $("#searchResults");
+          b.classList.add("hidden");
+          b.innerHTML = "";
+        }, false],
+      ];
+      function openLayers() {
+        return ESC_LAYERS.filter(([sel]) => {
+          const el = $(sel);
+          return el && !el.classList.contains("hidden");
+        });
+      }
       document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape" &&
-            !$("#changePwdSheet").classList.contains("hidden"))
-          $("#changePwdSheet").classList.add("hidden");
-        if (e.key === "Escape" &&
-            !$("#editUserSheet").classList.contains("hidden"))
-          closeEditUser();
-        if (e.key === "Escape" &&
-            !$("#eventEditor").classList.contains("hidden"))
-          closeEventEditor();
-      });
+        const layers = openLayers();
+        if (!layers.length) return;
+        const el = $(layers[0][0]);
+        if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          layers[0][1]();     // 只关最上层，再按一次才轮到下一层
+          return;
+        }
+        if (e.key !== "Tab" || layers[0][2] === false) return;
+        // 焦点陷阱：Tab 只在当前最上层弹层内循环，不会跑到背后的页面
+        const focusables = [...el.querySelectorAll(
+          'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])'
+        )].filter((x) => x.offsetParent !== null || x === document.activeElement);
+        if (!focusables.length) return;
+        const first = focusables[0], last = focusables[focusables.length - 1];
+        if (!el.contains(document.activeElement)) {
+          e.preventDefault(); first.focus();
+        } else if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault(); last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault(); first.focus();
+        }
+      }, true);
 
       boot();
     </script>
