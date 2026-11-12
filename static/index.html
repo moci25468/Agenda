@@ -3943,6 +3943,38 @@
       .confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
       .confirm-actions button { min-width: 78px; }
       #confirmOk.danger { background: var(--fail); border-color: var(--fail); color: #fff; }
+
+      /* P1-4 骨架：紧凑列表用的行距 */
+      .sk-inline .sk-row { padding: 10px 0; }
+
+      /* P1-5 统一按压反馈：覆盖各皮肤原有的 translateY，禁用态不响应 */
+      button:not(:disabled), .week-cell, .sr-item, .reply-followup {
+        transition: transform 0.12s ease, background-color 0.16s ease,
+                    border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+      }
+      button:not(:disabled):active,
+      .week-cell:active, .sr-item:active, .reply-followup:active {
+        transform: scale(0.97);
+      }
+
+      /* P1-6 表单内联校验 */
+      .field-error { margin-top: 6px; font-size: 11px; line-height: 1.6; color: var(--fail); }
+      input.invalid, select.invalid, textarea.invalid {
+        border-color: var(--fail);
+        box-shadow: 0 0 0 2px color-mix(in srgb, var(--fail) 18%, transparent);
+      }
+
+      /* P1-7 AI 出错内联卡片 */
+      .chat-error {
+        margin-top: 10px; padding: 10px 12px;
+        border: 1px solid color-mix(in srgb, var(--fail) 35%, var(--line));
+        border-radius: 10px;
+        background: color-mix(in srgb, var(--fail) 9%, var(--card));
+      }
+      .chat-error-head { font-size: 12px; font-weight: 600; color: var(--fail); }
+      .chat-error-msg { margin-top: 4px; font-size: 12px; line-height: 1.6; color: var(--text); word-break: break-word; }
+      .chat-error-actions { margin-top: 9px; }
+      .chat-error-actions button { font-size: 11px; padding: 5px 12px; }
     </style>
     <style>
       @media (prefers-reduced-motion: reduce) {
@@ -4935,6 +4967,10 @@
           `<div class="sk-row"><div class="sk sk-a"></div><div class="sk-lines"><div class="sk sk-b"></div><div class="sk sk-c"></div></div></div>`
         ).join("");
       }
+      // 仅在容器还空着时铺骨架，避免已有缓存数据时来回闪烁
+      function showSkeleton(box, n = 2) {
+        if (box && !box.children.length) box.innerHTML = skeletonRows(n);
+      }
       async function api(path, opts = {}) {
         requestBegin();
         try {
@@ -5294,9 +5330,16 @@
       let eventsCache = [];
       async function loadEvents() {
         // 今日页已不再单列日程卡片；这里只维护缓存，供「日程」页的本周日程列表渲染
-        const data = await api("/api/events");
-        eventsCache = data.events;
-        renderWeekEvents();
+        const box = $("#weekEventList");
+        showSkeleton(box, 2);
+        try {
+          const data = await api("/api/events");
+          eventsCache = data.events;
+          renderWeekEvents();
+        } catch (e) {
+          if (box) box.innerHTML =
+            `<div class="empty"><div class="empty-title">日程加载失败</div><div class="empty-sub">${esc(e.message)}</div></div>`;
+        }
       }
 
       function openEventEditor(e = null) {
@@ -6636,6 +6679,34 @@
         truncateChat(hidx);
         sendChat(userMsg.content, { resend: true });
       }
+      // 失败时在对话流里留一张明确的错误卡片，而不是让提示一闪而过
+      function renderChatError(bubble, message, partial) {
+        bubble.classList.remove("thinking", "streaming");
+        // renderAiContent 会挂一组小按钮，这里移除以免出现两个「重试」
+        const oldBar = bubble.querySelector(".msg-actions");
+        if (oldBar) oldBar.remove();
+        const card = document.createElement("div");
+        card.className = "chat-error";
+        const head = document.createElement("div");
+        head.className = "chat-error-head";
+        head.textContent = partial ? "回答中断" : "发送失败";
+        const msg = document.createElement("div");
+        msg.className = "chat-error-msg";
+        msg.textContent = message || "网络或模型服务暂时不可用";
+        const actions = document.createElement("div");
+        actions.className = "chat-error-actions";
+        const retry = document.createElement("button");
+        retry.className = "small";
+        retry.type = "button";
+        retry.textContent = "重试";
+        retry.addEventListener("click", () => {
+          const hidx = Number(bubble.dataset.hidx);
+          if (Number.isInteger(hidx)) retryFrom(hidx);
+        });
+        actions.appendChild(retry);
+        card.append(head, msg, actions);
+        bubble.appendChild(card);
+      }
       $("#chatMsgs").addEventListener("click", (e) => {
         const btn = e.target.closest("button");
         if (!btn) return;
@@ -6714,16 +6785,22 @@
         });
       }
       async function loadChatHistory() {
+        const box = $("#chatMsgs");
+        // 首次进入时欢迎语还在，加载期间用骨架承接，弱网下不会像卡住
+        const isFirst = !chatHistory.length;
+        if (isFirst) box.innerHTML = skeletonRows(3);
         try {
           const r = await api("/api/chat/history");
           const msgs = r.messages || [];
-          if (!msgs.length) return;
+          if (!msgs.length) { if (isFirst) renderChatWindow(); return; }
           chatHistory = msgs;
           chatRenderLimit = CHAT_WINDOW;
           renderChatWindow();
           // 所有消息渲染完后滚到底，避免最后一条 AI 长回复把位置顶回中间
           requestAnimationFrame(() => scrollChatToBottom(true));
-        } catch (e) {}
+        } catch (e) {
+          if (isFirst) renderChatWindow();   // 失败也恢复欢迎语，别把骨架留在页面上
+        }
       }
       // AI 回复末尾的 [追问] ["...", "..."] → 可点击选项；正文不暴露控制标记
       function extractFollowups(text) {
@@ -7329,15 +7406,13 @@
             chatHistory.push({ role: "assistant", content: acc });
             bubble.dataset.hidx = chatHistory.length - 1;
             renderAiContent(bubble, acc);
-            // 用 insertAdjacentHTML 追加，避免重建 DOM 导致卡片上已绑定的点击事件丢失
-            bubble.insertAdjacentHTML("beforeend",
-              `<div class="hint" style="color:var(--fail)">（已中断：${esc(e.message)}）</div>`);
+            renderChatError(bubble, `已生成部分内容后中断：${e.message}`, true);
           } else {
             bubble.classList.add("error");
-            bubble.textContent = e.message;
+            bubble.textContent = "";
             // 占位序号：编辑更早的消息时这条错误气泡也会被清掉；重试仍可用
             bubble.dataset.hidx = chatHistory.length;
-            attachMsgActions(bubble, "ai");
+            renderChatError(bubble, e.message, false);
           }
         } finally {
           // 取消待执行的流式帧，避免它在最终卡片渲染之后覆盖掉卡片
@@ -7364,17 +7439,23 @@
         } catch (e) { toast(e.message, 4000, "error"); }
       });
       async function loadMemories() {
-        const r = await api("/api/memories");
-        $("#memoryCount").textContent = `${r.memories.length} / 50 条`;
-        $("#memoryList").innerHTML = r.memories.length
-          ? r.memories.map((m) => `<div class="memory-row" data-id="${esc(m.id)}">
-              <div>
-                <div class="m-content">${esc(m.content)}</div>
-                <div class="m-date">${esc((m.created_at || "").slice(0, 10))}</div>
-              </div>
-              <button class="small" data-mem-del>删除</button>
-            </div>`).join("")
-          : `<div class="empty"><div class="empty-title">还没有长期记忆</div><div class="empty-sub">对知序说「记住我……」，或在上方手动添加。</div></div>`;
+        const box = $("#memoryList");
+        showSkeleton(box, 2);
+        try {
+          const r = await api("/api/memories");
+          $("#memoryCount").textContent = `${r.memories.length} / 50 条`;
+          box.innerHTML = r.memories.length
+            ? r.memories.map((m) => `<div class="memory-row" data-id="${esc(m.id)}">
+                <div>
+                  <div class="m-content">${esc(m.content)}</div>
+                  <div class="m-date">${esc((m.created_at || "").slice(0, 10))}</div>
+                </div>
+                <button class="small" data-mem-del>删除</button>
+              </div>`).join("")
+            : `<div class="empty"><div class="empty-title">还没有长期记忆</div><div class="empty-sub">对知序说「记住我……」，或在上方手动添加。</div></div>`;
+        } catch (e) {
+          box.innerHTML = `<div class="empty"><div class="empty-title">记忆加载失败</div><div class="empty-sub">${esc(e.message)}</div></div>`;
+        }
       }
       function closeMemorySheet() {
         $("#memorySheet").classList.add("hidden");
@@ -7457,6 +7538,81 @@
         $("#examReviewEnabled").checked = cfg.push?.exam_review_enabled !== false;
         $("#aiEnabled").checked = !!cfg.ai?.enabled;
       }
+      /* ---------- 设置表单内联校验（Webhook 规则与后端 push.wecom_input_error 一致） ---------- */
+      const CONFIG_MASK = "********";
+      const WECOM_HINT = "在企业微信群里点右上角「…」→ 群机器人 → 添加机器人，复制形如 https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=… 的地址";
+      const BARE_KEY_RE = /^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9a-fA-F]{64})$/;
+      function wecomInputError(v) {
+        v = (v || "").trim();
+        if (!v || v === CONFIG_MASK) return "";
+        if (v.includes("://")) {
+          let u;
+          try { u = new URL(v); } catch (e) { return ""; }
+          const host = (u.hostname || "").toLowerCase();
+          if (host === "work.weixin.qq.com" || host === "open.work.weixin.qq.com")
+            return `这是企业微信管理后台的网页地址，不是推送地址。${WECOM_HINT}`;
+          if (host === "qyapi.weixin.qq.com" && !(u.searchParams.get("key") || "").trim())
+            return `地址里缺少 key 参数。${WECOM_HINT}`;
+          return "";
+        }
+        return BARE_KEY_RE.test(v) ? "" :
+          `只填 key 时必须是 Webhook 里的 key（36 位带横线），当前值既不是完整地址也不是 key。${WECOM_HINT}`;
+      }
+      function fieldError(el) {
+        const v = (el.value || "").trim();
+        // 掩码表示沿用服务器已保存的值，不参与校验
+        if (!v || v === CONFIG_MASK) return "";
+        if (el.name === "push.wecom_webhook") return wecomInputError(v);
+        if (el.name === "push.bark_server" && !/^https?:\/\//i.test(v))
+          return "Bark 服务器地址需以 http:// 或 https:// 开头";
+        if (el.name === "push.reminder_advance") {
+          const n = Number(v);
+          if (!Number.isFinite(n) || n < 1 || n > 180)
+            return "提前提醒需在 1–180 分钟之间";
+        }
+        return "";
+      }
+      function setFieldError(el, msg) {
+        const wrap = el.closest("label.field") || el.parentElement;
+        let tip = wrap.querySelector(".field-error");
+        el.classList.toggle("invalid", !!msg);
+        if (msg) el.setAttribute("aria-invalid", "true");
+        else el.removeAttribute("aria-invalid");
+        if (!msg) { if (tip) tip.remove(); return; }
+        if (!tip) {
+          tip = document.createElement("p");
+          tip.className = "field-error";
+          wrap.appendChild(tip);
+        }
+        tip.textContent = msg;
+      }
+      function validateSettings() {
+        let first = null;
+        $$("#tab-settings [name]").forEach((el) => {
+          const msg = fieldError(el);
+          setFieldError(el, msg);
+          if (msg && !first) first = el;
+        });
+        // 开关已启用但必填项为空（掩码算已配置）
+        [["#barkEnabled", '[name="push.bark_key"]', "已启用 Bark，请先填写 Bark Key"],
+         ["#wecomEnabled", '[name="push.wecom_webhook"]', "已启用群机器人，请先填写 Webhook 地址"]]
+          .forEach(([toggle, sel, msg]) => {
+            const el = $(sel);
+            if (el && $(toggle)?.checked && !(el.value || "").trim()) {
+              setFieldError(el, msg);
+              if (!first) first = el;
+            }
+          });
+        if (first) {
+          toast("请先修正标红的设置项", 3000, "warn");
+          first.focus();
+        }
+        return !first;
+      }
+      $$("#tab-settings [name]").forEach((el) => {
+        el.addEventListener("input", () => setFieldError(el, fieldError(el)));
+        el.addEventListener("blur", () => setFieldError(el, fieldError(el)));
+      });
       function collectSettings() {
         const cfg = {};
         $$("#tab-settings [name]").forEach((el) => {
@@ -7484,6 +7640,7 @@
         // 已迁移到「课表来源」页，保留空实现避免旧引用报错
       }
       async function saveSettings(syncAfter = false) {
+        if (!validateSettings()) return;
         try {
           await api("/api/settings", {
             method: "POST",
@@ -8145,6 +8302,7 @@
         }
       });
       async function loadPushLog() {
+        showSkeleton($("#pushLogList"), 3);
         try {
           const r = await api("/api/push/log?limit=8");
           const logs = r.logs || [];
@@ -8172,6 +8330,7 @@
         }
       }
       async function runPushTest(channel, btn) {
+        if (!validateSettings()) return;
         try {
           if (btn) btn.disabled = true;
           await api("/api/settings", {
@@ -8304,7 +8463,7 @@
         if (!query) { box.classList.add("hidden"); box.innerHTML = ""; return; }
         const seq = ++searchSeq;
         box.classList.remove("hidden");
-        box.innerHTML = `<div class="sr-empty">正在搜索…</div>`;
+        box.innerHTML = `<div class="sk-inline">${skeletonRows(2)}</div>`;
         try {
           const r = await api("/api/search?q=" + encodeURIComponent(query));
           if (seq !== searchSeq) return;
