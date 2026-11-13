@@ -1140,7 +1140,7 @@
         padding: 3px 10px;
         font-size: 12px;
       }
-      @media (min-width: 720px) {
+      @media (min-width: 721px) {
         .sheet {
           align-items: center;
           padding: 24px;
@@ -1149,7 +1149,7 @@
           border-radius: var(--radius);
         }
       }
-      @media (max-width: 640px) {
+      @media (max-width: 720px) {
         .form-grid {
           grid-template-columns: 1fr;
         }
@@ -3004,7 +3004,7 @@
       .auth-form {
         gap: 16px;
       }
-      @media (max-width: 800px) {
+      @media (max-width: 720px) {
         .auth-screen {
           padding: 30px 20px;
         }
@@ -4004,6 +4004,59 @@
         background: rgba(255, 255, 255, 0.18); border-color: rgba(255, 255, 255, 0.35);
         color: #fff; font-size: 11px; padding: 3px 10px;
       }
+
+      /* 移动端周课表：按天分组的竖列表，替代 7 列横滚。
+         桌面仍用原网格，两套视图共用同一份 renderWeek 数据。 */
+      .week-days { display: none; }
+      .day-card {
+        border: 1px solid var(--line); border-radius: 12px;
+        background: var(--card); margin-bottom: 10px; overflow: hidden;
+      }
+      .day-card.today { border-color: var(--accent); }
+      .day-card-head {
+        display: flex; align-items: baseline; gap: 8px; padding: 10px 12px;
+        border-bottom: 1px solid var(--line); background: var(--accent-soft);
+      }
+      .day-card.today .day-card-head {
+        background: color-mix(in srgb, var(--accent) 14%, var(--card));
+      }
+      .day-name { font-size: 14px; font-weight: 650; }
+      .day-date { font-size: 12px; color: var(--sub); }
+      .day-today { margin-left: auto; font-size: 11px; font-weight: 600; color: var(--accent); }
+      .day-slot {
+        display: flex; gap: 10px; padding: 8px 12px;
+        border-bottom: 1px solid var(--line);
+      }
+      .day-slot:last-child { border-bottom: 0; }
+      .slot-label { flex: 0 0 86px; font-size: 11px; color: var(--sub); line-height: 1.5; }
+      .slot-label span { display: block; font-variant-numeric: tabular-nums; }
+      .day-slot .week-cell { flex: 1; min-width: 0; min-height: 0; padding: 0; }
+      .day-slot.free .week-cell { display: flex; align-items: center; }
+      .day-slot.free .wc-actions { flex-direction: row; gap: 6px; }
+      .day-slot.free .wc-free {
+        flex: 1; opacity: 1; font-size: 11px; padding: 5px 6px;
+      }
+      .day-skeleton {
+        padding: 6px 12px; border: 1px solid var(--line);
+        border-radius: 12px; background: var(--card);
+      }
+
+      /* 断点契约（收敛后）：
+         ≤480 小屏微调 | ≤720 移动端主档（底部导航、日视图） | ≥901 桌面双栏
+         900/901 是成对的分界，必须一起保留。新增响应式规则只用这三档。 */
+      @media (max-width: 720px) {
+        .week-grid-scroll { overflow-x: visible; }
+        .week-grid { display: none; }
+        .week-days { display: block; }
+        /* iOS 聚焦 <16px 输入框会自动放大整页，导致布局跳动。
+           用 !important 盖过各皮肤里的 ID 级字号（如 #curlInput / #adminSort）。 */
+        input:not([type="checkbox"]):not([type="radio"]),
+        select, textarea { font-size: 16px !important; }
+      }
+      html {
+        -webkit-text-size-adjust: 100%;
+        text-size-adjust: 100%;
+      }
     </style>
     <style>
       @media (prefers-reduced-motion: reduce) {
@@ -4174,6 +4227,8 @@
         </div>
         <div class="week-grid-scroll" id="weekGridScroll">
           <div class="week-grid" id="weekGrid"></div>
+          <!-- 手机端按天分组的竖列表，替代 7 列横滚（与滑动翻周手势不再冲突） -->
+          <div class="week-days" id="weekDays"></div>
         </div>
         <p class="hint" id="weekHint"></p>
         <div class="search-row">
@@ -5952,6 +6007,28 @@
           })
           .join("");
         $("#weekGrid").innerHTML = `<div></div>${heads}${rows}`;
+        // 手机端按天重排：同一份数据、同一套格子内容，只是从「行优先」改成「天优先」
+        const daysHtml = data.dates.map((iso, i) => {
+          const d = new Date(iso + "T00:00:00");
+          const slots = blocks.map((b, bi) => {
+            const st = data.section_times[String(b.s)] || "";
+            const et = data.section_ends[String(b.e)] || "";
+            const cell = cellHtml(i + 1, bi, iso === data.today, iso);
+            const free = cell.includes('class="week-cell free');
+            return `<div class="day-slot${free ? " free" : ""}">
+        <div class="slot-label">第 ${b.s}-${b.e} 节 <span>${esc(st)}–${esc(et)}</span></div>
+        ${cell}
+      </div>`;
+          }).join("");
+          return `<div class="day-card${iso === data.today ? " today" : ""}" data-day="${iso}">
+        <div class="day-card-head"><span class="day-name">${WEEKDAY[i]}</span>
+          <span class="day-date">${d.getMonth() + 1}/${d.getDate()}</span>
+          ${iso === data.today ? '<span class="day-today">今天</span>' : ""}</div>
+        <div class="day-slots">${slots}</div>
+      </div>`;
+        }).join("");
+        const daysBox = $("#weekDays");
+        if (daysBox) daysBox.innerHTML = daysHtml;
         renderWeekEvents();
       }
 
@@ -5964,6 +6041,10 @@
             `<div style="grid-column:1/-1"><div class="sk-grid">${
               Array.from({ length: 10 }, () => '<div class="sk"></div>').join("")
             }</div></div>`;
+        // 手机上网格是隐藏的，骨架要铺在日视图容器里才看得见
+        const daysBox = $("#weekDays");
+        if (daysBox && !daysBox.children.length)
+          daysBox.innerHTML = `<div class="day-skeleton">${skeletonRows(4)}</div>`;
         const data = await api("/api/timetable?week=" + week);
         if (seq !== weekLoadSeq) return;
         viewWeek = data.week;
@@ -5972,7 +6053,7 @@
       }
 
       // 没课的空格子 → 加日程：预填该天日期与这个大节的起止时间
-      $("#weekGrid").addEventListener("click", (e) => {
+      $("#weekGridScroll").addEventListener("click", (e) => {
         const btn = e.target.closest("button[data-wc-event]");
         if (!btn) return;
         openWeekEventEditor(
@@ -5984,7 +6065,7 @@
       // 没课的空格子 → 查空教室：按这个大节的节次查。
       // 跨节课程可能让网格看起来没课、实际被占用，所以用 my-free 校验一次，
       // 真被占用时自动改查当天最接近的空闲时段。
-      $("#weekGrid").addEventListener("click", async (e) => {
+      $("#weekGridScroll").addEventListener("click", async (e) => {
         const btn = e.target.closest("button[data-wc-rooms]");
         if (!btn || btn.disabled) return;
         btn.disabled = true;
