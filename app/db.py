@@ -652,7 +652,10 @@ def delete_session(token: str):
 # ---------- 邀请码 ----------
 
 def create_invite(code: str, created_by: int, ttl: int, max_uses: int = 1):
-    """生成邀请码。max_uses 为这个码总共能被几个人用来注册（>=1）。"""
+    """生成邀请码。max_uses 为这个码总共能被几个人用来注册（>=1）。
+
+    自定义码可能与已有码重名，这里让 sqlite 抛 IntegrityError，由调用方转成友好提示。
+    """
     max_uses = max(1, int(max_uses or 1))
     with get_conn() as conn:
         conn.execute(
@@ -661,6 +664,16 @@ def create_invite(code: str, created_by: int, ttl: int, max_uses: int = 1):
                VALUES (?, ?, ?, ?, ?, 0)""",
             (code, created_by, now_str(), _dt(ttl), max_uses),
         )
+
+
+def invite_exists(code: str) -> bool:
+    """是否已有同名邀请码（不区分大小写，避免 QUT2026 与 qut2026 混淆）。"""
+    if not code:
+        return False
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM invites WHERE LOWER(code) = LOWER(?)", (code,)).fetchone()
+    return bool(row)
 
 
 def list_invites() -> list[dict]:

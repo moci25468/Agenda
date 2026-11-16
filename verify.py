@@ -1453,6 +1453,32 @@ async def http_tests(port: int):
         check("邀请码.注销账号后收回对应次数",
               row.get("used_count") == 0 and row.get("remaining") == 2, str(row)[:200])
 
+        # 自定义邀请码：管理员自己指定码内容
+        cus = (await ca.post(f"{base}/api/auth/invites",
+                             json={"code": "QUT2026-class", "max_uses": 2})).json()
+        check("邀请码.可自定义内容",
+              cus.get("code") == "QUT2026-class" and cus.get("custom") is True
+              and cus.get("max_uses") == 2, str(cus)[:160])
+        dup = await ca.post(f"{base}/api/auth/invites", json={"code": "QUT2026-class"})
+        check("邀请码.自定义重名被拒", dup.status_code == 400, str(dup.status_code))
+        dup = await ca.post(f"{base}/api/auth/invites", json={"code": "qut2026-CLASS"})
+        check("邀请码.自定义重名不区分大小写", dup.status_code == 400,
+              str(dup.status_code))
+        short = await ca.post(f"{base}/api/auth/invites", json={"code": "ab"})
+        check("邀请码.自定义太短被拒", short.status_code == 400, str(short.status_code))
+        bad = await ca.post(f"{base}/api/auth/invites", json={"code": "班级 2026"})
+        check("邀请码.自定义非法字符被拒", bad.status_code == 400, str(bad.status_code))
+        bad = await ca.post(f"{base}/api/auth/invites/batch",
+                            json={"count": 3, "code": "batch-code"})
+        check("邀请码.批量不支持自定义", bad.status_code == 400, str(bad.status_code))
+        rc = await ca.post(f"{base}/api/auth/register", json={
+            "username": "gina", "password": "GinaPass123", "invite": "QUT2026-class"})
+        check("邀请码.自定义码可用于注册", rc.status_code == 200, str(rc.status_code))
+        users_now = (await ca.get(f"{base}/api/auth/users")).json().get("users", [])
+        for u in users_now:
+            if u["username"] == "gina":
+                await ca.delete(f"{base}/api/auth/users/{u['id']}")
+
         async with _hx.AsyncClient(timeout=30, trust_env=False,
                                    cookies={"qut_session": token_b}) as cb:
             check("权限.普通用户不能看用户列表",

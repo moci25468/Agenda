@@ -5,6 +5,7 @@ import asyncio
 import json
 import re
 import secrets
+import sqlite3
 import uuid
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
@@ -1536,11 +1537,14 @@ async def auth_invites():
 
 MAX_INVITE_USES = 999
 MAX_INVITE_BATCH = 50
+INVITE_CODE_MIN, INVITE_CODE_MAX = 4, 32
+INVITE_CODE_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 class InviteCreateRequest(BaseModel):
     max_uses: int = 1  # 一个码最多可被多少人用来注册
     count: int = 1     # 一次生成几个（批量用）
+    code: str = ""     # 自定义邀请码，留空则随机生成
 
 
 def _clamp_int(value, lo: int, hi: int, default: int) -> int:
@@ -1551,27 +1555,52 @@ def _clamp_int(value, lo: int, hi: int, default: int) -> int:
     return max(lo, min(hi, n))
 
 
+def _custom_invite_code(raw: str) -> str:
+    """校验并返回自定义邀请码；留空返回空串（表示随机生成）。"""
+    code = (raw or "").strip()
+    if not code:
+        return ""
+    if not (INVITE_CODE_MIN <= len(code) <= INVITE_CODE_MAX):
+        raise HTTPException(
+            400, f"邀请码长度需在 {INVITE_CODE_MIN}-{INVITE_CODE_MAX} 位之间")
+    if not INVITE_CODE_RE.match(code):
+        raise HTTPException(400, "邀请码只能使用字母、数字、下划线（_）和短横线（-）")
+    if db.invite_exists(code):
+        raise HTTPException(400, "这个邀请码已经被用过了，换一个吧")
+    return code
+
+
 @app.post("/api/auth/invites")
 async def auth_new_invite(req: InviteCreateRequest | None = None):
     me = _require_admin()
     max_uses = _clamp_int(req.max_uses if req else 1, 1, MAX_INVITE_USES, 1)
     count = _clamp_int(req.count if req else 1, 1, MAX_INVITE_BATCH, 1)
+    custom = _custom_invite_code(req.code if req else "")
+    if custom and count > 1:
+        raise HTTPException(400, "自定义邀请码一次只能生成一个")
     codes = []
     for _ in range(count):
-        code = auth.new_invite()
-        db.create_invite(code, me["id"], auth.INVITE_TTL_SECONDS, max_uses)
+        code = custom or auth.new_invite()
+        try:
+            db.create_invite(code, me["id"], auth.INVITE_TTL_SECONDS, max_uses)
+        except sqlite3.IntegrityError:
+            raise HTTPException(400, "这个邀请码已经被用过了，换一个吧")
         codes.append(code)
     db.add_admin_log(me["id"], me["username"], "create_invite", codes[0],
+                     ("自定义 · " if custom else "") +
                      f"可复用 {max_uses} 次" + (f" × {count} 个" if count > 1 else ""))
-    return {"ok": True, "code": codes[0], "codes": codes, "max_uses": max_uses}
+    return {"ok": True, "code": codes[0], "codes": codes,
+            "max_uses": max_uses, "custom": bool(custom)}
 
 
 @app.post("/api/auth/invites/batch")
 async def auth_new_invites_batch(req: InviteCreateRequest | None = None):
-    """批量生成邀请码，返回多个。"""
+    """批量生成邀请码，返回多个（批量只能随机生成）。"""
     me = _require_admin()
     count = _clamp_int(req.count if req else 5, 1, MAX_INVITE_BATCH, 5)
     max_uses = _clamp_int(req.max_uses if req else 1, 1, MAX_INVITE_USES, 1)
+    if req and (req.code or "").strip():
+        raise HTTPException(400, "批量生成不支持自定义邀请码，请单独生成")
     codes = []
     for _ in range(count):
         code = auth.new_invite()
