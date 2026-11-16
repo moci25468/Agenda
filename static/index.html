@@ -4464,7 +4464,7 @@
 
         <div class="card">
           <h2>邀请码</h2>
-          <p class="hint">新用户凭邀请码注册。生成时可指定「可用次数」：填 1 就是一次性码，填 N 就是同一个码最多能被 N 个人用来注册。有效期 7 天。「自定义邀请码」留空则随机生成，自己填要 4–32 位，只能用字母、数字、<code>_</code>、<code>-</code>（太短太简单的码容易被猜，公开传播建议 8 位以上）。</p>
+          <p class="hint">新用户凭邀请码注册。生成时可指定「可用次数」：填 1 就是一次性码，填 N 就是同一个码最多能被 N 个人用来注册。有效期 7 天。「自定义邀请码」留空则随机生成；自己填可用中文、字母、数字、<code>_</code>、<code>-</code>，4–32 个字，不能有空格标点或表情（全角数字会自动转半角）。太短太简单的码容易被猜，公开传播建议 8 个字以上。</p>
           <div class="form-actions" style="align-items:center;gap:8px;flex-wrap:wrap">
             <label class="field" style="margin:0;max-width:130px">
               <span>可用次数</span>
@@ -4472,7 +4472,7 @@
             </label>
             <label class="field" style="margin:0;max-width:230px">
               <span>自定义邀请码（可选）</span>
-              <input id="inviteCustomCode" maxlength="32" placeholder="如 QUT2026-spring" autocomplete="off" spellcheck="false">
+              <input id="inviteCustomCode" maxlength="32" placeholder="如 计科2301班级群" autocomplete="off" spellcheck="false">
             </label>
             <button id="genInviteBtn">生成邀请码</button>
             <button id="genInviteBatchBtn">批量生成 5 个</button>
@@ -8886,12 +8886,13 @@
         $("#inviteMaxUses").value = inviteMaxUses();
       });
       function inviteCustomCode() {
-        const raw = ($("#inviteCustomCode").value || "").trim();
+        const raw = ($("#inviteCustomCode").value || "").normalize("NFKC").trim();
         if (!raw) return "";
-        if (raw.length < 4 || raw.length > 32)
-          throw new Error("自定义邀请码长度需在 4-32 位之间");
-        if (!/^[A-Za-z0-9_-]+$/.test(raw))
-          throw new Error("自定义邀请码只能用字母、数字、下划线（_）和短横线（-）");
+        const len = Array.from(raw).length;
+        if (len < 4 || len > 32)
+          throw new Error("自定义邀请码长度需在 4-32 个字符之间");
+        if (!/^[\p{L}\p{N}_-]+$/u.test(raw))
+          throw new Error("只能用中文/字母/数字/下划线（_）/短横线（-），不能有空格、标点或表情");
         return raw;
       }
       $("#genInviteBtn").addEventListener("click", async () => {

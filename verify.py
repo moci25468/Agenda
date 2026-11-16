@@ -1468,6 +1468,26 @@ async def http_tests(port: int):
         check("邀请码.自定义太短被拒", short.status_code == 400, str(short.status_code))
         bad = await ca.post(f"{base}/api/auth/invites", json={"code": "班级 2026"})
         check("邀请码.自定义非法字符被拒", bad.status_code == 400, str(bad.status_code))
+        # 中文邀请码：允许汉字，全角自动归一化成半角
+        cn = (await ca.post(f"{base}/api/auth/invites",
+                            json={"code": "计科2301班级群", "max_uses": 2})).json()
+        check("邀请码.中文码可创建", cn.get("code") == "计科2301班级群", str(cn)[:160])
+        fw = (await ca.post(f"{base}/api/auth/invites",
+                            json={"code": "测试２０２６"})).json()
+        check("邀请码.全角自动转半角", fw.get("code") == "测试2026", str(fw)[:160])
+        emo = await ca.post(f"{base}/api/auth/invites", json={"code": "开学啦🎉🎉"})
+        check("邀请码.表情被拒", emo.status_code == 400, str(emo.status_code))
+        rcn = await ca.post(f"{base}/api/auth/register", json={
+            "username": "hana", "password": "HanaPass123", "invite": "计科2301班级群"})
+        check("邀请码.中文码可注册", rcn.status_code == 200, str(rcn.text)[:160])
+        rfw = await ca.post(f"{base}/api/auth/register", json={
+            "username": "iris", "password": "IrisPass123", "invite": "测试２０２６"})
+        check("邀请码.注册时全角自动归一化", rfw.status_code == 200,
+              str(rfw.text)[:160])
+        users_now = (await ca.get(f"{base}/api/auth/users")).json().get("users", [])
+        for u in users_now:
+            if u["username"] in ("hana", "iris"):
+                await ca.delete(f"{base}/api/auth/users/{u['id']}")
         bad = await ca.post(f"{base}/api/auth/invites/batch",
                             json={"count": 3, "code": "batch-code"})
         check("邀请码.批量不支持自定义", bad.status_code == 400, str(bad.status_code))

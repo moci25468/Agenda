@@ -6,6 +6,7 @@ import json
 import re
 import secrets
 import sqlite3
+import unicodedata
 import uuid
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
@@ -1427,7 +1428,7 @@ async def auth_register(req: RegisterRequest, request: Request):
     if db.get_user_by_username(username):
         raise HTTPException(400, "用户名已存在")
     first = db.count_users() == 0
-    code = (req.invite or "").strip()
+    code = _normalize_invite_code(req.invite)
     if not first and not db.get_valid_invite(code):
         raise HTTPException(400, "邀请码无效、已用完或已过期")
     uid = db.create_user(username, auth.hash_password(req.password),
@@ -1538,9 +1539,6 @@ async def auth_invites():
 MAX_INVITE_USES = 999
 MAX_INVITE_BATCH = 50
 INVITE_CODE_MIN, INVITE_CODE_MAX = 4, 32
-INVITE_CODE_RE = re.compile(r"^[A-Za-z0-9_-]+$")
-
-
 class InviteCreateRequest(BaseModel):
     max_uses: int = 1  # 一个码最多可被多少人用来注册
     count: int = 1     # 一次生成几个（批量用）
@@ -1555,16 +1553,29 @@ def _clamp_int(value, lo: int, hi: int, default: int) -> int:
     return max(lo, min(hi, n))
 
 
+def _normalize_invite_code(raw: str) -> str:
+    """邀请码归一化：NFKC（全角转半角、统一兼容字符）+ 去首尾空白。
+
+    中文可以正常保留；`２３０１` 这类全角数字会被转成 `2301`，
+    避免「看起来一样但码不同」。存库与比对都用归一化后的值。
+    """
+    return unicodedata.normalize("NFKC", raw or "").strip()
+
+
 def _custom_invite_code(raw: str) -> str:
     """校验并返回自定义邀请码；留空返回空串（表示随机生成）。"""
-    code = (raw or "").strip()
+    code = _normalize_invite_code(raw)
     if not code:
         return ""
-    if not (INVITE_CODE_MIN <= len(code) <= INVITE_CODE_MAX):
+    length = len(code)  # 按字符数算，一个汉字算一个字
+    if not (INVITE_CODE_MIN <= length <= INVITE_CODE_MAX):
         raise HTTPException(
-            400, f"邀请码长度需在 {INVITE_CODE_MIN}-{INVITE_CODE_MAX} 位之间")
-    if not INVITE_CODE_RE.match(code):
-        raise HTTPException(400, "邀请码只能使用字母、数字、下划线（_）和短横线（-）")
+            400, f"邀请码长度需在 {INVITE_CODE_MIN}-{INVITE_CODE_MAX} 个字符之间")
+    bad = sorted({ch for ch in code if not (ch.isalnum() or ch in "_-")})
+    if bad:
+        raise HTTPException(
+            400, "邀请码只能用中文/字母/数字/下划线（_）/短横线（-），"
+                 f"不能有空格、标点或表情：{' '.join(bad)}")
     if db.invite_exists(code):
         raise HTTPException(400, "这个邀请码已经被用过了，换一个吧")
     return code
