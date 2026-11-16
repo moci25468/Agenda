@@ -6047,19 +6047,50 @@
       });
 
       /* ---------- 周视图 ---------- */
-      async function loadWeather() {
-        if (weatherLoading || weatherData) return;
+      // 天气是「今明两天」的短时数据：既要能在失败后自愈，也要定期换新，
+      // 不能像以前那样一次拉空就整场会话都没有天气。
+      let weatherFetchedAt = 0;
+      const WEATHER_TTL = 30 * 60 * 1000;
+      const WEATHER_RETRY_DELAYS = [0, 2500, 8000];
+
+      function weatherHasHours(d) {
+        return !!(d && d.enabled !== false && d.hours && Object.keys(d.hours).length);
+      }
+
+      async function loadWeather(opts = {}) {
+        if (weatherLoading) return;
+        const force = !!opts.force;
+        if (!force && weatherFetchedAt &&
+            Date.now() - weatherFetchedAt < WEATHER_TTL) return;
         weatherLoading = true;
         try {
-          weatherData = await api("/api/weather");
-        } catch (e) {
-          weatherData = { enabled: false, hours: {} };
+          for (let i = 0; i < WEATHER_RETRY_DELAYS.length; i++) {
+            if (WEATHER_RETRY_DELAYS[i])
+              await new Promise((r) => setTimeout(r, WEATHER_RETRY_DELAYS[i]));
+            try {
+              weatherData = (await api("/api/weather")) || { hours: {} };
+            } catch (e) {
+              // 别把 null 之外的失败状态固定下来，下一轮还要重试
+              weatherData = weatherData || { hours: {} };
+            }
+            weatherFetchedAt = Date.now();
+            if (weatherHasHours(weatherData)) break;
+            // 管理员主动在设置里关掉了天气，不必重试
+            if (weatherData && weatherData.enabled === false) break;
+          }
         } finally {
           weatherLoading = false;
         }
         // 天气比课表晚到时补画一次当前周
         if (weekRender && viewWeek === weekRender.current_week) renderWeek(weekRender);
       }
+
+      // 切回页面时，如果天气已过 30 分钟就换一次（手机上常见长时间驻留后台）
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) return;
+        if (weatherFetchedAt && Date.now() - weatherFetchedAt > WEATHER_TTL)
+          loadWeather({ force: true });
+      });
 
       function weatherAt(iso, hhmm) {
         if (!weatherData || !weatherData.enabled || !weatherData.hours) return null;
@@ -8089,7 +8120,7 @@
           toast("设置已保存");
           await loadStatus();
           weatherData = null;   // 位置可能改过，重新取一次天气
-          loadWeather();
+          loadWeather({ force: true });
           if (syncAfter) await doSync();
           else {
             await loadToday();

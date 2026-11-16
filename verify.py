@@ -538,6 +538,75 @@ _ctx_w = asyncio.run(_weather_context(load_config()))
 check("天气.AI 上下文注入", "今日天气" in _ctx_w and "明日天气" in _ctx_w, _ctx_w)
 _weather.fetch_hourly = _orig_fetch2
 
+# 天气接口抖动时不能把整块天气变空：先重试，再回落上次成功的数据
+class _BoomClient:
+    """模拟 Open-Meteo 不可达（超时/断网）。"""
+    calls = 0
+
+    def __init__(self, *a, **k):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def get(self, *a, **k):
+        _BoomClient.calls += 1
+        raise RuntimeError("boom")
+
+
+class _OkClient:
+    """模拟正常返回。"""
+    def __init__(self, *a, **k):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def get(self, *a, **k):
+        class _R:
+            status_code = 200
+
+            @staticmethod
+            def raise_for_status():
+                return None
+
+            @staticmethod
+            def json():
+                return {"hourly": {"time": [f"{_today_s}T08:00"],
+                                   "temperature_2m": [13.4],
+                                   "weather_code": [2],
+                                   "precipitation_probability": [7]}}
+        return _R()
+
+
+_weather.clear_cache()
+_orig_client = _weather.httpx.AsyncClient
+_weather.httpx.AsyncClient = _OkClient
+_ok_h = asyncio.run(_weather.fetch_hourly(35.96, 120.20))
+check("天气.正常抓取并缓存",
+      _ok_h.get(f"{_today_s}T08:00", {}).get("temp") == 13.4, str(_ok_h)[:120])
+_weather.httpx.AsyncClient = _BoomClient
+_weather._cache.clear()          # 仅清短期缓存，保留「上次成功」
+_BoomClient.calls = 0
+_stale = asyncio.run(_weather.fetch_hourly(35.96, 120.20))
+check("天气.抓取失败沿用上次成功数据",
+      _stale == _ok_h, str(_stale)[:120])
+check("天气.失败会重试一次", _BoomClient.calls == 2, str(_BoomClient.calls))
+# 从未成功过的地方，失败后返回空字典（而不是抛错）
+_weather.clear_cache()
+_weather.httpx.AsyncClient = _BoomClient
+_empty = asyncio.run(_weather.fetch_hourly(10.0, 100.0))
+check("天气.无历史数据时返回空表", _empty == {}, str(_empty)[:120])
+_weather.httpx.AsyncClient = _orig_client
+_weather.clear_cache()
+
+
 # 流式回复的 SSE 行解析（OpenAI 兼容格式）
 check("流式.SSE 解析增量",
       _sse_delta('data: {"choices":[{"delta":{"content":"你好"}}]}') == "你好")

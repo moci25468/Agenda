@@ -5,13 +5,19 @@
 """
 from __future__ import annotations
 
+import asyncio
+import logging
 import time
 
 import httpx
 
 API = "https://api.open-meteo.com/v1/forecast"
-CACHE_TTL = 1800
-FAIL_TTL = 300
+CACHE_TTL = 1800          # 成功后缓存 30 分钟
+FAIL_TTL = 60             # 失败只短暂回避，一分钟后就允许重试
+TIMEOUT = 10.0            # 跨境访问偶发 5s 级抖动，8s 太紧
+RETRY_DELAYS = (0.5,)     # 失败后再试一次，最多两次请求
+
+log = logging.getLogger(__name__)
 
 # WMO weather code → 中文描述
 WMO_TEXT = {
@@ -29,6 +35,8 @@ WMO_TEXT = {
 
 # (经度, 纬度) → (抓取时间, 逐小时数据)
 _cache: dict[tuple[float, float], tuple[float, dict]] = {}
+# 最近一次成功的数据：抓取失败时用它兜底，避免一次网络抖动就把天气全部变空
+_last_good: dict[tuple[float, float], dict] = {}
 
 
 def describe_code(code) -> str:
@@ -57,35 +65,63 @@ def _params(lat: float, lon: float) -> dict:
     }
 
 
+def _parse_hourly(data: dict) -> dict:
+    """把 Open-Meteo 返回的列表结构转成 {小时键: {temp, code, pop}}。"""
+    hourly = data.get("hourly") or {}
+    times = hourly.get("time") or []
+    temps = hourly.get("temperature_2m") or []
+    codes = hourly.get("weather_code") or []
+    pops = hourly.get("precipitation_probability") or []
+    out: dict[str, dict] = {}
+    for i, t in enumerate(times):
+        out[str(t)] = {
+            "temp": temps[i] if i < len(temps) else None,
+            "code": codes[i] if i < len(codes) else None,
+            "pop": pops[i] if i < len(pops) else None,
+        }
+    return out
+
+
 async def fetch_hourly(lat: float, lon: float) -> dict:
-    """拉取未来 2 天的逐小时天气，返回 {"YYYY-MM-DDTHH:00": {...}}。"""
+    """拉取未来 2 天的逐小时天气，返回 {"YYYY-MM-DDTHH:00": {...}}。
+
+    失败时先重试一次；仍失败则回落上次成功的数据（宁可显示几小时前的天气，
+    也不要整块变空），完全没有历史数据时返回 {}。
+    """
     key = (round(float(lat), 2), round(float(lon), 2))
     hit = _cache.get(key)
     now = time.monotonic()
     if hit and now - hit[0] < (CACHE_TTL if hit[1] else FAIL_TTL):
         return hit[1]
     params = _params(lat, lon)
-    try:
-        async with httpx.AsyncClient(timeout=8, trust_env=False) as client:
-            r = await client.get(API, params=params)
-            r.raise_for_status()
-            data = r.json()
-        hourly = data.get("hourly") or {}
-        times = hourly.get("time") or []
-        temps = hourly.get("temperature_2m") or []
-        codes = hourly.get("weather_code") or []
-        pops = hourly.get("precipitation_probability") or []
-        out: dict[str, dict] = {}
-        for i, t in enumerate(times):
-            out[str(t)] = {
-                "temp": temps[i] if i < len(temps) else None,
-                "code": codes[i] if i < len(codes) else None,
-                "pop": pops[i] if i < len(pops) else None,
-            }
-    except Exception:  # noqa: BLE001
-        out = {}
-    _cache[key] = (now, out)
-    return out
+    out: dict = {}
+    err = ""
+    for attempt in range(len(RETRY_DELAYS) + 1):
+        try:
+            async with httpx.AsyncClient(timeout=TIMEOUT, trust_env=False) as client:
+                r = await client.get(API, params=params)
+                r.raise_for_status()
+                out = _parse_hourly(r.json())
+            if out:
+                break
+            err = "接口返回空数据"
+        except Exception as e:  # noqa: BLE001
+            err = f"{type(e).__name__}: {e}"
+        if attempt < len(RETRY_DELAYS):
+            await asyncio.sleep(RETRY_DELAYS[attempt])
+    if out:
+        _last_good[key] = out
+        _cache[key] = (now, out)
+        return out
+    stale = _last_good.get(key) or {}
+    if stale:
+        log.warning("天气获取失败（%s, %s）：%s；沿用上次成功的数据", lat, lon, err)
+        # 按「有数据」缓存，避免持续不通时反复打接口
+        _cache[key] = (now, stale)
+    else:
+        log.warning("天气获取失败（%s, %s）：%s；暂无历史数据可兜底", lat, lon, err)
+        _cache[key] = (now, {})
+    return stale
 
 
 def _summary(item: dict | None) -> dict | None:
@@ -226,3 +262,4 @@ async def lesson_weather_map(cfg: dict) -> dict:
 def clear_cache():
     """测试或手动刷新用。"""
     _cache.clear()
+    _last_good.clear()
