@@ -4070,6 +4070,124 @@
         }
       }
     </style>
+    <style>
+      /* ---- AI 附件上传：回形针按钮 / 待发送文件条 / 消息里的附件标签 ---- */
+      .attach-btn {
+        flex: 0 0 auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 46px;
+        min-width: 46px;
+        min-height: 46px;
+        padding: 0;
+        border: 1px solid #dfe5dc;
+        border-radius: 12px;
+        background: #f7f9f5;
+        color: #5f6b60;
+      }
+      .attach-btn:hover {
+        border-color: #b8c6b7;
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+      .attach-btn svg { display: block; }
+      .chat-attach {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 10px 26px 0;
+        background: #fff;
+      }
+      .chat-attach:empty { display: none; }
+      .chat-file {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        max-width: 100%;
+        padding: 5px 6px 5px 10px;
+        border: 1px solid #dde5da;
+        border-radius: 10px;
+        background: #f6f9f4;
+        color: #4a554b;
+        font-size: 12px;
+        line-height: 1.4;
+      }
+      .chat-file .cf-name {
+        max-width: 200px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .chat-file .cf-size { color: #939a91; font-size: 11px; }
+      .chat-file.uploading { opacity: 0.65; }
+      .chat-file.failed {
+        border-color: #ead5cf;
+        background: var(--fail-soft, #fdf1ee);
+        color: #a3553f;
+      }
+      .chat-file button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        min-width: 20px;
+        height: 20px;
+        padding: 0;
+        border: none;
+        border-radius: 50%;
+        background: transparent;
+        color: #96a096;
+        font-size: 13px;
+        line-height: 1;
+      }
+      .chat-file button:hover { background: #e6ece2; color: #4a554b; }
+      .msg .msg-files {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 6px;
+      }
+      .msg .msg-file {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        max-width: 220px;
+        padding: 3px 8px;
+        border: 1px solid rgba(0, 0, 0, 0.08);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.55);
+        font-size: 11.5px;
+        line-height: 1.5;
+      }
+      .msg .msg-file span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .chat-box.dragging { position: relative; }
+      .chat-box.dragging::after {
+        content: "松开即可添加到对话";
+        position: absolute;
+        inset: 8px;
+        z-index: 5;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 2px dashed var(--accent, #5b7a5e);
+        border-radius: 14px;
+        background: rgba(246, 250, 245, 0.86);
+        color: var(--accent, #5b7a5e);
+        font-size: 13px;
+        letter-spacing: 0.04em;
+        pointer-events: none;
+      }
+      @media (max-width: 640px) {
+        .chat-attach { padding: 8px 18px 0; }
+        .attach-btn { width: 42px; min-width: 42px; min-height: 42px; }
+        .chat-file .cf-name { max-width: 140px; }
+      }
+    </style>
     <script>
       // 主题在页面渲染前尽早应用，避免浅色闪一下再变深色；设置页随后同步按钮状态
       (function () {
@@ -4311,7 +4429,7 @@
                 <h2>知序 AI 助手</h2>
                 <span class="ai-badge">个人校园助手</span>
               </div>
-              <p>基于你的课表、考试与日程回答；对话自动保存，刷新也不会丢失</p>
+              <p>基于你的课表、考试与日程回答，也能读你上传的课件、作业与表格；对话自动保存，刷新不会丢</p>
             </div>
             <div class="chat-head-actions">
               <button class="small" id="memoryBtn">记忆</button>
@@ -4319,7 +4437,7 @@
             </div>
           </div>
           <div class="chat-msgs" id="chatMsgs" aria-live="polite">
-            <div class="msg ai">你好，我是知序。课程、考试、空教室和个人日程都可以问我；也可以直接说「明天下午三点开会」或「记住我喜欢坐前排」。</div>
+            <div class="msg ai">你好，我是知序。课程、考试、空教室和个人日程都可以问我；也可以直接说「明天下午三点开会」或「记住我喜欢坐前排」。要读课件、作业要求、表格，点输入框左边的回形针传文件给我就行。</div>
           </div>
           <div class="chips" id="chatChips" aria-label="快捷操作">
             <span class="chips-label">快捷</span>
@@ -4329,7 +4447,18 @@
             <button type="button">这周哪天没课？</button>
             <button type="button">我最近有什么考试？</button>
           </div>
+          <div class="chat-attach" id="chatAttachList"></div>
           <div class="chat-input">
+            <button type="button" class="attach-btn" id="chatAttachBtn"
+                    aria-label="上传文件" title="上传文件（Word / PDF / Excel / PPT / 文本 / 图片）">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
+                   stroke="currentColor" stroke-width="1.7" stroke-linecap="round"
+                   stroke-linejoin="round" aria-hidden="true">
+                <path d="M20.5 11.6 12 20.1a5.3 5.3 0 0 1-7.5-7.5l8.6-8.6a3.5 3.5 0 0 1 5 5l-8.6 8.6a1.8 1.8 0 0 1-2.5-2.5l7.9-7.9"/>
+              </svg>
+            </button>
+            <input type="file" id="chatFileInput" multiple hidden
+                   accept=".txt,.text,.md,.markdown,.csv,.tsv,.json,.jsonl,.log,.pdf,.docx,.pptx,.xlsx,.xlsm,.html,.htm,.xml,.yaml,.yml,.toml,.ini,.conf,.py,.js,.ts,.jsx,.tsx,.java,.c,.h,.cpp,.go,.rs,.php,.rb,.sh,.sql,.tex,.png,.jpg,.jpeg,.webp,.gif,.bmp" />
             <input
               id="chatInput"
               placeholder="问问课程、考试，或记录一个安排…"
@@ -4339,7 +4468,7 @@
             <button class="primary" id="chatSend">发送</button>
           </div>
           <div class="chat-input-hint">
-            <span>Enter 发送 · 点击回复下方选项可继续追问</span>
+            <span>Enter 发送 · 可拖入文件或粘贴图片与你聊天</span>
             <span>课程与考试信息以教务系统为准</span>
           </div>
         </div>
@@ -6743,6 +6872,26 @@
           "msg " +
           (role === "user" ? "user" : "ai" + (isError ? " error" : ""));
         div.textContent = text;
+        // 用户消息里若带附件，把【附件：xxx】前缀拆成小标签，正文只留提问
+        if (role === "user" && typeof text === "string" && text.startsWith("【附件：")) {
+          const parsed = splitAttachPrefix(text);
+          if (parsed.files.length) {
+            div.textContent = "";
+            const bar = document.createElement("div");
+            bar.className = "msg-files";
+            parsed.files.forEach((f) => {
+              const tag = document.createElement("span");
+              tag.className = "msg-file";
+              tag.title = f.name;
+              const label = document.createElement("span");
+              label.textContent = f.name;
+              tag.appendChild(label);
+              bar.appendChild(tag);
+            });
+            div.appendChild(bar);
+            div.appendChild(document.createTextNode(parsed.text));
+          }
+        }
         if (hidx !== null) {
           div.dataset.hidx = hidx;
           attachMsgActions(div, role);
@@ -6782,7 +6931,7 @@
       }
       let chatBusy = false;
       const CHAT_WELCOME =
-        "你好，我是知序。课程、考试、空教室和个人日程都可以问我；也可以直接说「明天下午三点开会」或「记住我喜欢坐前排」。";
+        "你好，我是知序。课程、考试、空教室和个人日程都可以问我；也可以直接说「明天下午三点开会」或「记住我喜欢坐前排」。要读课件、作业要求、表格，点输入框左边的回形针传文件给我就行。";
 
       // 编辑重发：从某条消息起截断历史，再按窗口重渲染
       function truncateChat(k) {
@@ -6792,8 +6941,10 @@
       function startEditMsg(div, hidx) {
         const original = chatHistory[hidx]?.content;
         if (original == null) return;
+        // 编辑只改提问正文，附件前缀留着，重发时仍能带上文件
+        const parsed = splitAttachPrefix(original);
         div.classList.add("editing");
-        div.innerHTML = `<textarea>${esc(original)}</textarea>
+        div.innerHTML = `<textarea>${esc(parsed.text)}</textarea>
           <div class="msg-edit-actions">
             <button class="small" data-edit="no">取消</button>
             <button class="small primary" data-edit="ok">重发</button>
@@ -6804,8 +6955,7 @@
       }
       function cancelEditMsg(div, hidx) {
         div.classList.remove("editing");
-        div.textContent = chatHistory[hidx]?.content || "";
-        attachMsgActions(div, "user");
+        renderChatWindow();
       }
       function retryFrom(hidx) {
         const userMsg = chatHistory[hidx - 1];
@@ -6877,8 +7027,9 @@
         else if (btn.dataset.edit === "ok") {
           const text = div.querySelector("textarea").value.trim();
           if (!text) return;
+          const keep = splitAttachPrefix(chatHistory[hidx]?.content || "").files;
           truncateChat(hidx);
-          sendChat(text);
+          sendChat(text, { attachFiles: keep });
         }
       });
 
@@ -7455,15 +7606,174 @@
           finally { btn.disabled = false; }
         });
       }
+      /* ---------- AI 附件：上传、待发送列表、随消息发送 ---------- */
+      const ATTACH_MAX_FILES = 5;
+      const ATTACH_MAX_MB = 20;
+      let chatFiles = [];      // 待发送附件 [{id,name,size,kind,chars,note,uploading,failed}]
+      let attachUploading = 0;
+
+      function fmtFileSize(n) {
+        if (!n && n !== 0) return "";
+        if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB";
+        if (n >= 1024) return Math.round(n / 1024) + " KB";
+        return n + " B";
+      }
+      function renderAttachChips() {
+        const box = $("#chatAttachList");
+        if (!box) return;
+        box.innerHTML = "";
+        chatFiles.forEach((f, i) => {
+          const chip = document.createElement("div");
+          chip.className = "chat-file" +
+            (f.uploading ? " uploading" : f.failed ? " failed" : "");
+          chip.title = f.failed ? `${f.name}：${f.error || "读取失败"}`
+            : [f.name, f.note, f.chars ? `${f.chars} 字` : ""]
+              .filter(Boolean).join(" · ");
+          const status = f.uploading ? "读取中…" : f.failed ? "失败" : fmtFileSize(f.size);
+          chip.innerHTML = `<span class="cf-name">${esc(f.name)}</span>
+            <span class="cf-size">${esc(status)}</span>
+            <button type="button" aria-label="移除附件" title="移除">×</button>`;
+          chip.querySelector("button").addEventListener("click", () => {
+            const [gone] = chatFiles.splice(i, 1);
+            if (gone && gone.id) {
+              api(`/api/chat/attachments/${gone.id}`, { method: "DELETE" }).catch(() => {});
+            }
+            renderAttachChips();
+          });
+          box.appendChild(chip);
+        });
+      }
+      async function uploadAttach(file) {
+        if (!file) return;
+        if (attachUploading + chatFiles.filter((f) => !f.failed).length >= ATTACH_MAX_FILES) {
+          toast(`一次最多带 ${ATTACH_MAX_FILES} 个文件`, 3500);
+          return;
+        }
+        const name = file.name || `粘贴的图片-${Date.now()}.png`;
+        if (file.size > ATTACH_MAX_MB * 1024 * 1024) {
+          toast(`${name} 有 ${fmtFileSize(file.size)}，超过 ${ATTACH_MAX_MB} MB 上限`, 4500);
+          return;
+        }
+        const item = { name, size: file.size, uploading: true };
+        chatFiles.push(item);
+        attachUploading += 1;
+        renderAttachChips();
+        try {
+          const r = await api(`/api/chat/upload?name=${encodeURIComponent(name)}`, {
+            method: "POST",
+            headers: { "Content-Type": file.type || "application/octet-stream" },
+            body: file,
+          });
+          Object.assign(item, r, { uploading: false, failed: false });
+        } catch (e) {
+          item.uploading = false;
+          item.failed = true;
+          item.error = e.message || "读取失败";
+          toast(`${name} 读取失败：${item.error}`, 6000, "error");
+        } finally {
+          attachUploading -= 1;
+          renderAttachChips();
+        }
+      }
+      // 历史里的用户消息带上附件名（含内部 id），方便刷新/重试时还原
+      function attachPrefix(list) {
+        if (!list.length) return "";
+        return "【附件：" + list.map((f) => `${f.name}#${f.id}`).join("、") + "】\n";
+      }
+      function splitAttachPrefix(text) {
+        const m = /^【附件：([^】]*)】\n?/.exec(text || "");
+        if (!m) return { files: [], text: text || "" };
+        const files = m[1].split("、").map((s) => s.trim()).filter(Boolean)
+          .map((s) => {
+            const hit = /^(.*)#([0-9a-f]{12})$/.exec(s);
+            return hit ? { name: hit[1], id: hit[2] } : { name: s, id: "" };
+          });
+        return { files, text: (text || "").slice(m[0].length) };
+      }
+      function bindAttachInputs() {
+        const btn = $("#chatAttachBtn");
+        const input = $("#chatFileInput");
+        if (btn && input) {
+          btn.addEventListener("click", () => input.click());
+          input.addEventListener("change", async () => {
+            const files = Array.from(input.files || []);
+            input.value = "";   // 允许重复选同一个文件
+            for (const f of files) await uploadAttach(f);
+          });
+        }
+        const chatInput = $("#chatInput");
+        if (chatInput) {
+          chatInput.addEventListener("paste", (e) => {
+            const files = Array.from(e.clipboardData?.files || []);
+            if (!files.length) return;
+            e.preventDefault();
+            files.forEach((f) => uploadAttach(f));
+          });
+        }
+        const box = document.querySelector("#tab-ai .chat-box");
+        if (box) {
+          let depth = 0;
+          const hasFiles = (e) =>
+            Array.from(e.dataTransfer?.types || []).includes("Files");
+          box.addEventListener("dragenter", (e) => {
+            if (!hasFiles(e)) return;
+            e.preventDefault();
+            depth += 1;
+            box.classList.add("dragging");
+          });
+          box.addEventListener("dragover", (e) => {
+            if (!hasFiles(e)) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+          });
+          box.addEventListener("dragleave", (e) => {
+            if (!hasFiles(e)) return;
+            depth = Math.max(0, depth - 1);
+            if (!depth) box.classList.remove("dragging");
+          });
+          box.addEventListener("drop", (e) => {
+            if (!hasFiles(e)) return;
+            e.preventDefault();
+            depth = 0;
+            box.classList.remove("dragging");
+            Array.from(e.dataTransfer.files || [])
+              .slice(0, ATTACH_MAX_FILES).forEach((f) => uploadAttach(f));
+          });
+        }
+      }
+      bindAttachInputs();
+
       async function sendChat(text, opts = {}) {
         if (chatBusy) return;
         text = (text || $("#chatInput").value).trim();
-        if (!text) return;
+        let attachIds = [];
+        let histContent = text;
+        if (opts.resend) {
+          // 重发：从历史内容里把附件 id 还原出来，能带就把文件一起再发一遍
+          const parsed = splitAttachPrefix(text);
+          attachIds = parsed.files.map((f) => f.id).filter(Boolean);
+          text = parsed.text.trim();
+        } else if (opts.attachFiles && opts.attachFiles.length) {
+          // 编辑已有消息后重发：沿用原来的附件
+          const keep = opts.attachFiles.filter((f) => f.id);
+          attachIds = keep.map((f) => f.id);
+          histContent = attachPrefix(keep) + text;
+        } else {
+          if (attachUploading) { toast("文件还在读取中，稍等一下再发送", 3000); return; }
+          const ready = chatFiles.filter((f) => f.id && !f.failed);
+          if (!text && !ready.length) return;
+          if (!text) text = "帮我看看这个文件。";
+          attachIds = ready.map((f) => f.id);
+          histContent = attachPrefix(ready) + text;
+          chatFiles = chatFiles.filter((f) => f.failed);
+          renderAttachChips();
+        }
+        if (!text) text = "帮我看看这个文件。";
         $("#chatInput").value = "";
         // 重发模式：用户消息已在历史里，只补一条新的 AI 回复
         if (!opts.resend) {
-          chatHistory.push({ role: "user", content: text });
-          addMsg("user", text, false, chatHistory.length - 1);
+          chatHistory.push({ role: "user", content: histContent });
+          addMsg("user", histContent, false, chatHistory.length - 1);
         }
         chatBusy = true;
         $("#chatSend").disabled = true;
@@ -7492,6 +7802,7 @@
             body: JSON.stringify({
               message: text,
               history: chatHistory.slice(0, -1),
+              attachments: attachIds,
             }),
           });
           if (!resp.ok) {

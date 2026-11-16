@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import ai, auth, browser_login, db
+from . import ai, auth, browser_login, db, files
 from .config import (
     DEFAULT_CONFIG, MASK, global_config, load_config, masked_config, save_config,
 )
@@ -1257,14 +1257,48 @@ async def push_send(req: PushSendRequest):
 class ChatRequest(BaseModel):
     message: str
     history: list[dict] = []
+    attachments: list[str] = []      # 附件 id，由 /api/chat/upload 返回
+
+
+@app.post("/api/chat/upload")
+async def chat_upload(request: Request, name: str = ""):
+    """上传附件：请求体就是文件原始字节，文件名走 ?name=（不依赖 multipart）。"""
+    length = (request.headers.get("content-length") or "").strip()
+    limit = files.MAX_UPLOAD_BYTES
+    if length.isdigit() and int(length) > limit:
+        raise HTTPException(413, f"文件太大，单个文件上限 {limit // 1048576} MB")
+    data = await request.body()
+    if len(data) > limit:
+        raise HTTPException(413, f"文件太大，单个文件上限 {limit // 1048576} MB")
+    try:
+        return files.save(db._uid(), name or request.headers.get("x-filename") or "", data)
+    except files.FileError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/chat/attachments/{attach_id}")
+async def chat_attachment_drop(attach_id: str):
+    return {"ok": files.drop(db._uid(), attach_id)}
+
+
+EXPIRED_ATTACH_NOTE = "\n\n（说明：之前上传的附件已过期，这次没能读到；需要的话请重新上传。）"
+
+
+def _chat_attachments(ids: list[str]) -> tuple[list[dict], str]:
+    """取出本次消息要带的附件；全部失效时给模型一句提示，好如实告诉用户。"""
+    items = files.resolve(db._uid(), ids)
+    if ids and not items:
+        return items, EXPIRED_ATTACH_NOTE
+    return items, ""
 
 
 @app.post("/api/chat")
 async def chat_endpoint(req: ChatRequest):
     if not req.message.strip():
         raise HTTPException(400, "消息不能为空")
+    attachments, note = _chat_attachments(req.attachments)
     try:
-        reply = await ai.chat(req.message, req.history)
+        reply = await ai.chat(req.message + note, req.history, attachments)
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:  # noqa: BLE001
@@ -1281,10 +1315,11 @@ async def chat_stream_endpoint(req: ChatRequest):
         ai.check_ready()
     except ValueError as e:
         raise HTTPException(400, str(e))
+    attachments, note = _chat_attachments(req.attachments)
 
     async def event_gen():
         try:
-            async for chunk in ai.chat_stream(req.message, req.history):
+            async for chunk in ai.chat_stream(req.message + note, req.history, attachments):
                 yield "data: " + json.dumps({"delta": chunk}, ensure_ascii=False) + "\n\n"
             yield 'data: {"done": true}\n\n'
         except Exception as e:  # noqa: BLE001

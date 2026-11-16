@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 
-from . import db
+from . import db, files
 from .config import load_config, zhengfang_configured
 from .models import (
     Course, Event, Exam, apply_course_overrides, apply_exam_overrides,
@@ -517,8 +517,22 @@ async def test_connection() -> dict:
     return {"ok": True, "model": ai.get("model"), "reply": str(reply)[:100]}
 
 
-async def chat(message: str, history: list[dict] | None = None) -> str:
-    ai, base_url, messages = await _prepare(message, history)
+def _image_count(attachments: list[dict] | None) -> int:
+    return sum(1 for a in (attachments or []) if a.get("kind") == "image")
+
+
+def _attach_hint(msg: str, images: int) -> str:
+    """图片请求被拒时给一句能落地的建议，而不是把上游原始报错丢给用户。"""
+    if not images:
+        return msg
+    return (msg + f"（这条消息带了 {images} 张图片，当前模型可能不支持看图。"
+            "可以换成 qwen-vl-max / glm-4v / gpt-4o 这类多模态模型，"
+            "或把图片里的文字复制、转成文档再上传）")
+
+
+async def chat(message: str, history: list[dict] | None = None,
+               attachments: list[dict] | None = None) -> str:
+    ai, base_url, messages = await _prepare(message, history, attachments)
     headers = _request_headers(ai)
     async with httpx.AsyncClient(timeout=90, trust_env=False) as client:
         r = await client.post(
@@ -528,7 +542,9 @@ async def chat(message: str, history: list[dict] | None = None) -> str:
                   "messages": messages, "temperature": 0.4},
         )
         if r.status_code != 200:
-            raise ValueError(f"AI 接口返回 {r.status_code}: {r.text[:200]}")
+            raise ValueError(_attach_hint(
+                f"AI 接口返回 {r.status_code}: {r.text[:200]}",
+                _image_count(attachments)))
         data = r.json()
     try:
         return data["choices"][0]["message"]["content"]
@@ -570,7 +586,32 @@ async def _weather_context(cfg: dict) -> str:
         return ""
 
 
-async def _prepare(message: str, history: list[dict] | None):
+ATTACHMENT_NOTE = """
+附件说明：用户这条消息里带了上传的文件。
+- 文字类附件以【附件 N：文件名（约 X 字）】开头、【附件 N 结束】结尾，正文就是文件内容；回答要以它为准，附件里没有的信息不要编造。
+- 引用时给出位置（如「第 3 页」「工作表：成绩 第 5 行」「PPT 第 2 页」），方便用户核对。
+- 附件被截断或只读入一部分时，主动说明「只读到前面部分」。
+- 图片附件由你自己看图，不要假装读到了图上没有的文字；看不清就直说。"""
+
+
+def _user_content(blocks: list[str], images: list[dict], question: str):
+    """拼出这条用户消息的 content：纯文字用字符串，带图片时用多模态 parts。"""
+    if images:
+        parts: list[dict] = []
+        head = "\n\n".join(blocks + ([question] if question else []))
+        if head:
+            parts.append({"type": "text", "text": head})
+        for item in images:
+            parts.append({"type": "image_url",
+                          "image_url": {"url": item["data_url"]}})
+        return parts
+    if blocks:
+        return "\n\n".join(blocks) + ("\n\n" + question if question else "")
+    return question
+
+
+async def _prepare(message: str, history: list[dict] | None,
+                   attachments: list[dict] | None = None):
     check_ready()
     cfg = load_config()
     ai = cfg.get("ai", {})
@@ -589,13 +630,20 @@ async def _prepare(message: str, history: list[dict] | None):
     free_ctx = free_sections_context(cfg, history)
     if free_ctx:
         context += "\n\n" + free_ctx
+    blocks, images, dropped = files.build_blocks(attachments or [])
+    if blocks or images:
+        context += "\n" + ATTACHMENT_NOTE
+        if dropped:
+            context += "\n- 本次附件总量超出上限，后面部分没有读入，回答时要提醒用户。"
     messages = [{"role": "system", "content":
                  SYSTEM_PROMPT.format(context=context)}]
     for h in (history or [])[-10:]:
         if h.get("role") in ("user", "assistant") and h.get("content"):
-            messages.append(
-                {"role": h["role"], "content": str(h["content"])[:4000]})
-    messages.append({"role": "user", "content": message[:4000]})
+            messages.append({"role": h["role"],
+                             "content": files.strip_ids(str(h["content"]))[:4000]})
+    question = files.strip_ids(message)[:4000]
+    messages.append({"role": "user",
+                     "content": _user_content(blocks, images, question)})
     return ai, base_url, messages
 
 
@@ -624,9 +672,10 @@ def _sse_delta(line: str) -> str | None:
     return None
 
 
-async def chat_stream(message: str, history: list[dict] | None = None):
+async def chat_stream(message: str, history: list[dict] | None = None,
+                      attachments: list[dict] | None = None):
     """逐段产出模型回复，供 SSE 转发。"""
-    ai, base_url, messages = await _prepare(message, history)
+    ai, base_url, messages = await _prepare(message, history, attachments)
     timeout = httpx.Timeout(120, connect=20)
     async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
         async with client.stream(
@@ -637,7 +686,9 @@ async def chat_stream(message: str, history: list[dict] | None = None):
         ) as r:
             if r.status_code != 200:
                 body = (await r.aread()).decode("utf-8", "replace")[:200]
-                raise ValueError(f"AI 接口返回 {r.status_code}: {body}")
+                raise ValueError(_attach_hint(
+                    f"AI 接口返回 {r.status_code}: {body}",
+                    _image_count(attachments)))
             if "text/event-stream" not in r.headers.get("content-type", ""):
                 # 服务端忽略了 stream 参数，按普通 JSON 一次性返回
                 data = json.loads((await r.aread()).decode("utf-8", "replace"))

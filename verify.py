@@ -1250,6 +1250,126 @@ check("接口挑选.选中 xskb 课表接口",
 check("告警.学期参数单独提示", any("换学期" in w for w in diagnose_url(
     "https://portal.qut.edu.cn/portal/api/v2/datacenter/get/xskb?XN=2026-2027&XQ=1")))
 
+# 11.5 AI 附件：解析各类文件、注入模型的文本块、按用户隔离
+import io as _io
+import zipfile as _zipfile
+
+from app import files as _files
+from app.ai import _user_content as _mk_user_content
+
+
+def _mk_zip(entries: dict) -> bytes:
+    buf = _io.BytesIO()
+    with _zipfile.ZipFile(buf, "w") as z:
+        for name, data in entries.items():
+            z.writestr(name, data)
+    return buf.getvalue()
+
+
+def _attach_text(meta, uid=1):
+    items = _files.resolve(uid, [meta["id"]])
+    return items[0]["text"] if items else ""
+
+
+_docx = _mk_zip({"word/document.xml": (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+    "<w:body><w:p><w:r><w:t>实验报告要求</w:t></w:r></w:p>"
+    "<w:p><w:r><w:t>1. 手写 2000 字</w:t></w:r><w:r><w:tab/><w:t>截止周五</w:t></w:r></w:p>"
+    "</w:body></w:document>")})
+_pptx = _mk_zip({"ppt/slides/slide1.xml": (
+    '<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
+    'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+    "<p:cSld><p:spTree><a:p><a:r><a:t>第三章 线性表</a:t></a:r></a:p></p:spTree></p:cSld></p:sld>")})
+_xlsx = _mk_zip({
+    "xl/sharedStrings.xml": (
+        '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        "<si><t>姓名</t></si><si><t>张三</t></si></sst>"),
+    "xl/worksheets/sheet1.xml": (
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        '<sheetData><row r="1"><c r="A1" t="s"><v>0</v></c></row>'
+        '<row r="2"><c r="A2" t="s"><v>1</v></c><c r="B2"><v>88</v></c></row>'
+        "</sheetData></worksheet>"),
+})
+
+_m_txt = _files.save(1, "笔记.txt", "第一章 绪论\n第二章 方法".encode("utf-8"))
+check("附件.纯文本可读", _m_txt["kind"] == "text" and _m_txt["chars"] > 0
+      and "绪论" in _m_txt["preview"], str(_m_txt)[:180])
+check("附件.GB18030 编码自动识别",
+      "中文编码" in _files.save(1, "gbk.txt", "中文编码".encode("gb18030"))["preview"])
+check("附件.Word 正文可提取",
+      "实验报告要求" in _attach_text(_files.save(1, "要求.docx", _docx))
+      and "截止周五" in _attach_text(_files.save(1, "要求.docx", _docx)))
+check("附件.PPT 逐页文本", "线性表" in _attach_text(_files.save(1, "课件.pptx", _pptx)))
+_xlsx_meta = _files.save(1, "成绩.xlsx", _xlsx)
+check("附件.Excel 单元格（共享字符串 + 数值）",
+      "张三 | 88" in _attach_text(_xlsx_meta), _attach_text(_xlsx_meta)[:120])
+_pdf_stream = "BT /F1 12 Tf 72 720 Td (Homework due Friday 18:00) Tj ET"
+_pdf_objs = [
+    "<</Type/Catalog/Pages 2 0 R>>",
+    "<</Type/Pages/Kids[3 0 R]/Count 1>>",
+    "<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]"
+    "/Resources<</Font<</F1 4 0 R>>>>/Contents 5 0 R>>",
+    "<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>",
+    f"<</Length {len(_pdf_stream)}>>\nstream\n{_pdf_stream}\nendstream",
+]
+_pdf = bytearray(b"%PDF-1.4\n")
+_offs = []
+for _i, _body in enumerate(_pdf_objs, 1):
+    _offs.append(len(_pdf))
+    _pdf += f"{_i} 0 obj\n{_body}\nendobj\n".encode()
+_xref = len(_pdf)
+_pdf += f"xref\n0 {len(_pdf_objs) + 1}\n0000000000 65535 f \n".encode()
+for _off in _offs:
+    _pdf += f"{_off:010d} 00000 n \n".encode()
+_pdf += (f"trailer\n<</Size {len(_pdf_objs) + 1}/Root 1 0 R>>\n"
+         f"startxref\n{_xref}\n%%EOF\n").encode()
+_pdf_meta = _files.save(1, "作业.pdf", bytes(_pdf))
+check("附件.PDF 文本（pypdf）", "Homework due Friday" in _attach_text(_pdf_meta)
+      and _pdf_meta["pages"] == 1
+      and _attach_text(_pdf_meta).startswith("【第 1 页】"), str(_pdf_meta)[:160])
+_img_meta = _files.save(1, "截图.png", b"\x89PNG\r\n\x1a\n" + b"0" * 64)
+_img_item = _files.resolve(1, [_img_meta["id"]])[0]
+check("附件.图片转 data URL 交给多模态", _img_meta["kind"] == "image"
+      and _img_item["data_url"].startswith("data:image/png;base64,"), str(_img_meta)[:120])
+check("附件.正文按用户隔离", _files.resolve(2, [_m_txt["id"]]) == [], str(_m_txt["id"]))
+
+
+def _reject(name, data):
+    try:
+        _files.save(1, name, data)
+    except _files.FileError:
+        return True
+    return False
+
+
+check("附件.空文件被拒", _reject("空.txt", b""))
+check("附件.二进制文件被拒", _reject("未知.bin", b"\x00\x01\x02" * 200))
+check("附件.旧版 .doc 给出另存提示", _reject("旧.doc", b"\xd0\xcf\x11\xe0"))
+check("附件.超大文件被拒", _reject("大.txt", b"a" * (_files.MAX_UPLOAD_BYTES + 1)))
+check("附件.移除后取不到", _files.drop(1, _m_txt["id"]) is True
+      and _files.resolve(1, [_m_txt["id"]]) == [])
+
+_blocks, _images, _ = _files.build_blocks([
+    {"name": "要求.docx", "kind": "text", "text": "只写一页"},
+    {"name": "截图.png", "kind": "image", "data_url": "data:image/png;base64,AAA"}])
+check("附件.注入块带文件名与结束标记",
+      "【附件 1：要求.docx" in _blocks[0] and "【附件 1 结束】" in _blocks[0]
+      and _images and _images[0]["name"] == "截图.png", str(_blocks)[:160])
+_long_blocks, _, _gap = _files.build_blocks(
+    [{"name": "长.txt", "kind": "text", "text": "字" * (_files.MAX_TOTAL_CHARS + 5000)}])
+check("附件.超出总量时截断并标记", _gap is True and "上限" in _long_blocks[0],
+      str(len(_long_blocks[0])) if _long_blocks else "空")
+check("附件.历史消息去掉内部 id",
+      _files.strip_ids("【附件：a.pdf#0123456789ab】\n读一下") == "【附件：a.pdf】\n读一下")
+_text_content = _mk_user_content(_blocks, [], "总结一下重点")
+check("附件.纯文本文本注入 message", "只写一页" in _text_content
+      and "总结一下重点" in _text_content, str(_text_content)[:120])
+_multi = _mk_user_content(_blocks, [_images[0]], "这页讲什么")
+check("附件.带图片时用多模态 parts", isinstance(_multi, list)
+      and any(p.get("type") == "image_url" for p in _multi)
+      and any(p.get("type") == "text" for p in _multi), str(_multi)[:160])
+
 # 12. 导入管线端到端：自启临时服务当"外部接口"，跑完自动关闭。
 #     不再依赖 8300 常驻服务，单独执行 python verify.py 即可全绿。
 
@@ -1873,6 +1993,29 @@ async def http_tests(port: int):
               str(r.text)[:160])
         r = await ca.get(f"{base}/api/rooms/my-free", params={"date_s": "11/09"})
         check("空教室.空闲节次非法日期", r.status_code == 400, str(r.status_code))
+
+        # AI 附件：上传解析、鉴权、不支持格式、移除
+        up = await ca.post(f"{base}/api/chat/upload", params={"name": "课堂笔记.txt"},
+                           content="第一章 绪论\n第二章 方法".encode("utf-8"),
+                           headers={"Content-Type": "text/plain"})
+        aj = up.json() if up.status_code == 200 else {}
+        check("附件.接口上传文本成功", up.status_code == 200
+              and aj.get("kind") == "text" and aj.get("chars", 0) > 0,
+              str(up.text)[:200])
+        check("附件.接口返回预览片段", "绪论" in (aj.get("preview") or ""),
+              str(aj.get("preview"))[:120])
+        up2 = await ca.post(f"{base}/api/chat/upload", params={"name": "坏文件.zip"},
+                            content=b"PK\x03\x04binary")
+        check("附件.压缩包被拒并说明原因", up2.status_code == 400
+              and "压缩包" in up2.text, str(up2.text)[:160])
+        async with _hx.AsyncClient(timeout=30, trust_env=False) as _anon_up:
+            up3 = await _anon_up.post(f"{base}/api/chat/upload",
+                                      params={"name": "a.txt"}, content=b"hi",
+                                      headers={"Content-Type": "text/plain"})
+        check("附件.未登录上传被拒", up3.status_code == 401, str(up3.status_code))
+        rm = await ca.delete(f"{base}/api/chat/attachments/{aj.get('id')}")
+        check("附件.接口可移除", rm.status_code == 200
+              and rm.json().get("ok") is True, str(rm.text)[:120])
 
         # 对话落库：读取 → 回存（过滤非法角色）→ 截断式回存 → 清空
         h = (await ca.get(f"{base}/api/chat/history")).json()
