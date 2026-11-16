@@ -4464,8 +4464,12 @@
 
         <div class="card">
           <h2>邀请码</h2>
-          <p class="hint">新用户凭邀请码注册，一次性、7 天有效。</p>
-          <div class="form-actions">
+          <p class="hint">新用户凭邀请码注册。生成时可指定「可用次数」：填 1 就是一次性码，填 N 就是同一个码最多能被 N 个人用来注册。有效期 7 天。</p>
+          <div class="form-actions" style="align-items:center;gap:8px;flex-wrap:wrap">
+            <label class="field" style="margin:0;max-width:130px">
+              <span>可用次数</span>
+              <input id="inviteMaxUses" type="number" min="1" max="999" step="1" value="1">
+            </label>
             <button id="genInviteBtn">生成邀请码</button>
             <button id="genInviteBatchBtn">批量生成 5 个</button>
             <button id="refreshInvitesBtn">刷新列表</button>
@@ -8716,16 +8720,22 @@
           const iv = await api("/api/auth/invites");
           const now = new Date().toISOString().slice(0, 19).replace("T", " ");
           const rows = iv.invites.map((x) => {
+            const max = x.max_uses || 1;
+            const used = x.used_count || 0;
+            const left = Math.max(0, max - used);
+            const expired = x.expires_at < now;
             let tag, txt;
-            if (x.used_by) { tag = "tag-used"; txt = `已使用 · ${esc(x.used_by_name || x.used_by)}`; }
-            else if (x.expires_at < now) { tag = "tag-expired"; txt = "已过期"; }
-            else { tag = "tag-ok"; txt = "可用"; }
-            const revoke = !x.used_by ? `<button class="small danger" data-invite="${esc(x.code)}">撤销</button>` : "";
+            if (expired) { tag = "tag-expired"; txt = used ? `已过期 · 用过 ${used}/${max}` : "已过期"; }
+            else if (left <= 0) { tag = "tag-used"; txt = `已用完 ${used}/${max}`; }
+            else if (max === 1) { tag = "tag-ok"; txt = "可用 · 一次性"; }
+            else { tag = "tag-ok"; txt = `可用 · 已用 ${used}/${max}，剩 ${left} 次`; }
+            const who = (x.used_by_names && x.used_by_names.length)
+              ? ` · ${esc(x.used_by_names.join("、"))}` : "";
             return `<div class="invite-row">
               <code>${esc(x.code)}</code>
               <span class="invite-tag ${tag}">${txt}</span>
-              <span class="muted">到期 ${fmtTime(x.expires_at)}</span>
-              ${revoke}
+              <span class="muted">到期 ${fmtTime(x.expires_at)}${who}</span>
+              <button class="small danger" data-invite="${esc(x.code)}">撤销</button>
             </div>`;
           });
           $("#inviteList").innerHTML = rows.length ? rows.join("") : '<div class="empty">暂无邀请码</div>';
@@ -8864,17 +8874,28 @@
         if (e.target.id === "deleteAccountSheet") closeDeleteSheet();
       });
       $("#inviteBtn").addEventListener("click", () => switchTab("admin"));
+      function inviteMaxUses() {
+        const v = parseInt(($("#inviteMaxUses").value || "1").trim(), 10);
+        return (!v || v < 1) ? 1 : Math.min(v, 999);
+      }
+      $("#inviteMaxUses").addEventListener("change", () => {
+        $("#inviteMaxUses").value = inviteMaxUses();
+      });
       $("#genInviteBtn").addEventListener("click", async () => {
         try {
-          const r = await api("/api/auth/invites", { method: "POST" });
-          toast("新邀请码：" + r.code, 8000);
+          const maxUses = inviteMaxUses();
+          const r = await api("/api/auth/invites", {
+            method: "POST", body: JSON.stringify({ max_uses: maxUses }) });
+          toast(`新邀请码（可用 ${maxUses} 次）：${r.code}`, 8000);
           await refreshInvites();
         } catch (e) { toast(e.message, 5000, "error"); }
       });
       $("#genInviteBatchBtn").addEventListener("click", async () => {
         try {
-          const r = await api("/api/auth/invites/batch", { method: "POST" });
-          toast("已生成 " + r.codes.length + " 个邀请码", 5000);
+          const maxUses = inviteMaxUses();
+          const r = await api("/api/auth/invites/batch", {
+            method: "POST", body: JSON.stringify({ count: 5, max_uses: maxUses }) });
+          toast(`已生成 ${r.codes.length} 个邀请码，每个可用 ${maxUses} 次`, 5000);
           await refreshInvites();
         } catch (e) { toast(e.message, 5000, "error"); }
       });

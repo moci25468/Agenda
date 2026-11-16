@@ -1416,6 +1416,42 @@ async def http_tests(port: int):
             "username": "bob", "password": "BobPass123", "invite": code})
         check("注册.凭邀请码成功", rb.status_code == 200, str(rb.text)[:200])
         token_b = rb.cookies.get("qut_session")
+        # 一次性码用过即废
+        again = await ca.post(f"{base}/api/auth/register", json={
+            "username": "bob2", "password": "BobPass123", "invite": code})
+        check("邀请码.一次性码用后失效", again.status_code == 400, str(again.status_code))
+
+        # 邀请码可复用次数：max_uses=2 的码可以被两个人用
+        multi = (await ca.post(f"{base}/api/auth/invites",
+                               json={"max_uses": 2})).json()
+        mcode = multi.get("code")
+        check("邀请码.可指定复用次数", bool(mcode) and multi.get("max_uses") == 2,
+              str(multi)[:160])
+        rr = await ca.post(f"{base}/api/auth/register", json={
+            "username": "dave", "password": "DavePass123", "invite": mcode})
+        check("邀请码.多次码第 1 次可用", rr.status_code == 200, str(rr.status_code))
+        rr = await ca.post(f"{base}/api/auth/register", json={
+            "username": "erin", "password": "ErinPass123", "invite": mcode})
+        check("邀请码.多次码第 2 次可用", rr.status_code == 200, str(rr.status_code))
+        rr = await ca.post(f"{base}/api/auth/register", json={
+            "username": "frank", "password": "FrankPass123", "invite": mcode})
+        check("邀请码.次数用尽后被拒", rr.status_code == 400, str(rr.status_code))
+        invites = (await ca.get(f"{base}/api/auth/invites")).json().get("invites", [])
+        row = next((x for x in invites if x["code"] == mcode), {})
+        check("邀请码.列表显示已用/剩余次数",
+              row.get("used_count") == 2 and row.get("max_uses") == 2
+              and row.get("remaining") == 0, str(row)[:200])
+        check("邀请码.使用人可追溯",
+              set(row.get("used_by_names") or []) == {"dave", "erin"}, str(row)[:200])
+        # 清掉测试账号，避免影响后面「管理员注销转让权限」用例
+        users_now = (await ca.get(f"{base}/api/auth/users")).json().get("users", [])
+        for u in users_now:
+            if u["username"] in ("dave", "erin"):
+                await ca.delete(f"{base}/api/auth/users/{u['id']}")
+        invites = (await ca.get(f"{base}/api/auth/invites")).json().get("invites", [])
+        row = next((x for x in invites if x["code"] == mcode), {})
+        check("邀请码.注销账号后收回对应次数",
+              row.get("used_count") == 0 and row.get("remaining") == 2, str(row)[:200])
 
         async with _hx.AsyncClient(timeout=30, trust_env=False,
                                    cookies={"qut_session": token_b}) as cb:

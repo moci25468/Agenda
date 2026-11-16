@@ -100,8 +100,17 @@ def init_db():
             created_at TEXT NOT NULL,
             expires_at TEXT NOT NULL,
             used_by INTEGER,
-            used_at TEXT
+            used_at TEXT,
+            max_uses INTEGER NOT NULL DEFAULT 1,
+            used_count INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS invite_uses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
+            used_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_invite_uses_code ON invite_uses(code);
         CREATE TABLE IF NOT EXISTS user_config (
             user_id INTEGER PRIMARY KEY,
             data TEXT NOT NULL
@@ -160,6 +169,22 @@ def init_db():
         ucols = {r[1] for r in conn.execute("PRAGMA table_info(users)")}
         if ucols and "last_login_at" not in ucols:
             conn.execute("ALTER TABLE users ADD COLUMN last_login_at TEXT NOT NULL DEFAULT ''")
+        # 旧版本迁移：邀请码从「一次性」升级为「可限定复用次数」
+        icols = {r[1] for r in conn.execute("PRAGMA table_info(invites)")}
+        if icols and "max_uses" not in icols:
+            conn.execute("ALTER TABLE invites ADD COLUMN max_uses INTEGER NOT NULL DEFAULT 1")
+        if icols and "used_count" not in icols:
+            conn.execute("ALTER TABLE invites ADD COLUMN used_count INTEGER NOT NULL DEFAULT 0")
+            # 已用过的老码按 1 次计入，避免升级后被重复使用
+            conn.execute("UPDATE invites SET used_count = 1 WHERE used_by IS NOT NULL")
+        # 老码的使用记录补进 invite_uses，方便管理员看到用过的人
+        conn.execute(
+            """INSERT INTO invite_uses (code, user_id, used_at)
+               SELECT i.code, i.used_by, COALESCE(i.used_at, i.created_at)
+               FROM invites i
+               WHERE i.used_by IS NOT NULL
+                 AND NOT EXISTS (SELECT 1 FROM invite_uses u
+                                 WHERE u.code = i.code AND u.user_id = i.used_by)""")
 
 
 def now_str() -> str:
@@ -583,7 +608,14 @@ def delete_user(user_id: int):
                       "sync_log", "push_log", "user_config", "events",
                       "chat_messages", "user_memories", "reminders"):
             conn.execute(f"DELETE FROM {table} WHERE user_id = ?", (user_id,))
-        conn.execute("DELETE FROM invites WHERE used_by = ?", (user_id,))
+        # 邀请码是可复用的，注销账号只收回他这一次的占用，不能把整个码删掉
+        conn.execute(
+            """UPDATE invites SET used_count = MAX(COALESCE(used_count, 0) - 1, 0)
+               WHERE code IN (SELECT code FROM invite_uses WHERE user_id = ?)""",
+            (user_id,))
+        conn.execute("DELETE FROM invite_uses WHERE user_id = ?", (user_id,))
+        conn.execute("UPDATE invites SET used_by = NULL, used_at = NULL WHERE used_by = ?",
+                     (user_id,))
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
 
 
@@ -619,39 +651,74 @@ def delete_session(token: str):
 
 # ---------- 邀请码 ----------
 
-def create_invite(code: str, created_by: int, ttl: int):
+def create_invite(code: str, created_by: int, ttl: int, max_uses: int = 1):
+    """生成邀请码。max_uses 为这个码总共能被几个人用来注册（>=1）。"""
+    max_uses = max(1, int(max_uses or 1))
     with get_conn() as conn:
         conn.execute(
-            "INSERT INTO invites (code, created_by, created_at, expires_at) VALUES (?, ?, ?, ?)",
-            (code, created_by, now_str(), _dt(ttl)),
+            """INSERT INTO invites
+               (code, created_by, created_at, expires_at, max_uses, used_count)
+               VALUES (?, ?, ?, ?, ?, 0)""",
+            (code, created_by, now_str(), _dt(ttl), max_uses),
         )
 
 
 def list_invites() -> list[dict]:
     with get_conn() as conn:
-        return [dict(r) for r in conn.execute("SELECT * FROM invites ORDER BY created_at DESC").fetchall()]
+        rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM invites ORDER BY created_at DESC").fetchall()]
+        for r in rows:
+            r["max_uses"] = r.get("max_uses") or 1
+            r["used_count"] = r.get("used_count") or 0
+            r["remaining"] = max(0, r["max_uses"] - r["used_count"])
+        return rows
+
+
+def list_invite_uses(code: str) -> list[dict]:
+    """某个邀请码每次被使用的记录（谁、什么时候）。"""
+    with get_conn() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM invite_uses WHERE code = ? ORDER BY used_at", (code,)).fetchall()]
 
 
 def get_valid_invite(code: str) -> dict | None:
+    """码存在、未过期、且还有剩余可用次数时返回。"""
+    if not code:
+        return None
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT * FROM invites WHERE code = ? AND used_by IS NULL AND expires_at > ?",
+            """SELECT * FROM invites
+               WHERE code = ? AND expires_at > ?
+                 AND COALESCE(used_count, 0) < COALESCE(max_uses, 1)""",
             (code, now_str()),
         ).fetchone()
     return dict(row) if row else None
 
 
-def consume_invite(code: str, user_id: int):
+def consume_invite(code: str, user_id: int) -> int:
+    """核销一次。原子判断剩余次数，成功返回 1，次数用完/过期返回 0。"""
+    ts = now_str()
     with get_conn() as conn:
-        return conn.execute(
-            "UPDATE invites SET used_by = ?, used_at = ? WHERE code = ? AND used_by IS NULL",
-            (user_id, now_str(), code),
+        changed = conn.execute(
+            """UPDATE invites
+               SET used_count = COALESCE(used_count, 0) + 1,
+                   used_by = COALESCE(used_by, ?),
+                   used_at = COALESCE(used_at, ?)
+               WHERE code = ? AND expires_at > ?
+                 AND COALESCE(used_count, 0) < COALESCE(max_uses, 1)""",
+            (user_id, ts, code, ts),
         ).rowcount
+        if changed:
+            conn.execute(
+                "INSERT INTO invite_uses (code, user_id, used_at) VALUES (?, ?, ?)",
+                (code, user_id, ts))
+        return changed
 
 
 def delete_invite(code: str):
     with get_conn() as conn:
         conn.execute("DELETE FROM invites WHERE code = ?", (code,))
+        conn.execute("DELETE FROM invite_uses WHERE code = ?", (code,))
 
 
 # ---------- 管理员审计日志 ----------

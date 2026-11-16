@@ -1428,13 +1428,15 @@ async def auth_register(req: RegisterRequest, request: Request):
     first = db.count_users() == 0
     code = (req.invite or "").strip()
     if not first and not db.get_valid_invite(code):
-        raise HTTPException(400, "邀请码无效或已被使用")
+        raise HTTPException(400, "邀请码无效、已用完或已过期")
     uid = db.create_user(username, auth.hash_password(req.password),
                          (req.display_name or "").strip()[:40],
                          (req.student_id or "").strip()[:32],
                          "admin" if first else "user")
-    if not first:
-        db.consume_invite(code, uid)
+    if not first and not db.consume_invite(code, uid):
+        # 并发抢最后一个名额：回滚刚建好的账号，避免绕过次数限制
+        db.delete_user(uid)
+        raise HTTPException(400, "邀请码刚刚被用完，请换一个")
     template = global_config()
     if first:
         # 第一个账号继承现有的单用户配置与课表（快照 user_id=1 已迁移）
@@ -1527,31 +1529,57 @@ async def auth_invites():
     id2name = {u["id"]: u["username"] for u in db.list_users()}
     for inv in invites:
         inv["used_by_name"] = id2name.get(inv.get("used_by"), "")
+        inv["used_by_names"] = [id2name.get(u["user_id"], f"#{u['user_id']}")
+                                for u in db.list_invite_uses(inv["code"])]
     return {"invites": invites}
 
 
+MAX_INVITE_USES = 999
+MAX_INVITE_BATCH = 50
+
+
+class InviteCreateRequest(BaseModel):
+    max_uses: int = 1  # 一个码最多可被多少人用来注册
+    count: int = 1     # 一次生成几个（批量用）
+
+
+def _clamp_int(value, lo: int, hi: int, default: int) -> int:
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(lo, min(hi, n))
+
+
 @app.post("/api/auth/invites")
-async def auth_new_invite():
+async def auth_new_invite(req: InviteCreateRequest | None = None):
     me = _require_admin()
-    code = auth.new_invite()
-    db.create_invite(code, me["id"], auth.INVITE_TTL_SECONDS)
-    db.add_admin_log(me["id"], me["username"], "create_invite", code)
-    return {"ok": True, "code": code}
-
-
-@app.post("/api/auth/invites/batch")
-async def auth_new_invites_batch():
-    """批量生成邀请码，返回多个。"""
-    me = _require_admin()
-    count = 5
+    max_uses = _clamp_int(req.max_uses if req else 1, 1, MAX_INVITE_USES, 1)
+    count = _clamp_int(req.count if req else 1, 1, MAX_INVITE_BATCH, 1)
     codes = []
     for _ in range(count):
         code = auth.new_invite()
-        db.create_invite(code, me["id"], auth.INVITE_TTL_SECONDS)
+        db.create_invite(code, me["id"], auth.INVITE_TTL_SECONDS, max_uses)
+        codes.append(code)
+    db.add_admin_log(me["id"], me["username"], "create_invite", codes[0],
+                     f"可复用 {max_uses} 次" + (f" × {count} 个" if count > 1 else ""))
+    return {"ok": True, "code": codes[0], "codes": codes, "max_uses": max_uses}
+
+
+@app.post("/api/auth/invites/batch")
+async def auth_new_invites_batch(req: InviteCreateRequest | None = None):
+    """批量生成邀请码，返回多个。"""
+    me = _require_admin()
+    count = _clamp_int(req.count if req else 5, 1, MAX_INVITE_BATCH, 5)
+    max_uses = _clamp_int(req.max_uses if req else 1, 1, MAX_INVITE_USES, 1)
+    codes = []
+    for _ in range(count):
+        code = auth.new_invite()
+        db.create_invite(code, me["id"], auth.INVITE_TTL_SECONDS, max_uses)
         codes.append(code)
     db.add_admin_log(me["id"], me["username"], "create_invite_batch",
-                     f"{count} 个", ", ".join(codes))
-    return {"ok": True, "codes": codes}
+                     f"{count} 个 · 每个可复用 {max_uses} 次", ", ".join(codes))
+    return {"ok": True, "codes": codes, "max_uses": max_uses}
 
 
 @app.delete("/api/auth/invites/{code}")
