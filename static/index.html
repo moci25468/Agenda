@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#F7F6F2" id="themeColorMeta" />
+    <meta name="theme-color" content="#FAF7F2" id="themeColorMeta" />
     <meta name="description" content="Agenda 知序 — 青岛理工大学日程、课表、考试与校园问答。" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -12,7 +12,7 @@
     <title>Agenda · 知序</title>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/static/icons/icon-180.png" />
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%233A3833'/%3E%3Cpath d='M18 22h28M18 32h28M18 42h18' stroke='%23f7f7f4' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%236B4A38'/%3E%3Cpath d='M18 22h28M18 32h28M18 42h18' stroke='%23f7f7f4' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E" />
     <script>
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", () => {
@@ -283,91 +283,12 @@
         color: var(--accent);
         margin-top: 10px;
       }
-      .room-card .rc-list {
-        margin-top: 8px;
-      }
-      .room-card .rc-group {
-        font-size: 12px;
-        color: var(--sub);
-        margin: 8px 0 2px;
-      }
-      .room-card .rc-room {
-        display: flex;
-        justify-content: space-between;
-        align-items: baseline;
-        gap: 10px;
-        font-size: 13px;
-        padding: 3px 0;
-        border-top: 1px solid var(--line);
-      }
-      .room-card .rc-group + .rc-room {
-        border-top: none;
-      }
-      .room-card .rc-seats {
-        font-size: 12px;
-        color: var(--sub);
-        white-space: nowrap;
-      }
-      .room-card .rc-periods {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-        margin-top: 8px;
-      }
-      .room-card .rc-periods button.active {
-        border-color: var(--accent);
-        background: var(--accent-soft);
-        color: var(--accent);
-      }
 
       /* 考试 */
       .exam-group {
         font-size: 12px;
         color: var(--sub);
         margin: 20px 0 2px;
-      }
-      /* 空教室 */
-      .room-filters {
-        display: grid;
-        grid-template-columns: repeat(6, minmax(0, 1fr));
-        gap: 10px 12px;
-        align-items: end;
-        margin-bottom: 6px;
-      }
-      .room-filters .field span {
-        display: block;
-        margin-bottom: 4px;
-      }
-      .room-filters input,
-      .room-filters select {
-        width: 100%;
-      }
-      .room-query button {
-        width: 100%;
-      }
-      .room-result-bar {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 12px;
-        margin: 10px 0 2px;
-      }
-      .room-result-bar select {
-        max-width: 180px;
-      }
-      .room-row .course-name {
-        font-size: 15px;
-      }
-      @media (max-width: 720px) {
-        .room-filters {
-          grid-template-columns: 1fr 1fr;
-        }
-        .room-query {
-          grid-column: 1 / -1;
-        }
-        .room-query span {
-          display: none;
-        }
       }
       .exam-group:first-child {
         margin-top: 2px;
@@ -861,6 +782,40 @@
       }
 
       /* 课表来源 */
+      .source-primary {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 12px;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--fill);
+      }
+      .source-primary .sp-label { font-size: 12px; color: var(--sub); }
+      .source-primary .seg {
+        display: inline-flex;
+        padding: 2px;
+        gap: 2px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--card);
+      }
+      .source-primary .seg button {
+        padding: 4px 10px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--sub);
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .source-primary .seg button.active {
+        background: var(--accent);
+        color: var(--accent-ink, #fff);
+      }
+      .source-primary .hint { margin: 0; font-size: 12px; }
       .source-cards {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -2496,34 +2451,35 @@
       /* 简约焕新：统一留白、层级与交互，保留所有既有 DOM 契约 */
       /* 设计令牌（01-visual-direction §2.1）：全站唯一事实来源，组件规则只引用 var()/color-mix */
       :root {
-        /* 表面（素笺：暖纸白，去黄绿相） */
-        --bg: #F7F6F2;
+        /* 表面（奶油纸：暖白偏奶油，比纯白柔、比米黄干净） */
+        --bg: #FAF7F2;
         --card: #FFFFFF;
-        --fill: #F0EFEA;
-        --fill-strong: #E9E8E2;
-        /* 文字（墨） */
-        --text: #262622;
-        --sub: #77756D;
-        --faint: #A5A399;
-        --muted: #77756D;
+        --fill: #F3EEE7;
+        --fill-strong: #EAE3D9;
+        /* 文字（咖啡墨） */
+        --text: #241F1B;
+        --sub: #6E635B;
+        --faint: #A2968B;
+        --muted: #6E635B;
         /* 分隔 */
-        --line: #E8E7E1;
-        --line-strong: #D8D6CE;
-        /* 强调·浓墨：主按钮与选中态用墨色，不做彩色装饰 */
-        --accent: #3A3833;
-        --accent-hover: #514E46;
-        --accent-soft: #ECEAE4;
-        --accent-faint: #A8A49A;
-        /* 赭·重要（仅考试临近等极少数"印章"节点） */
-        --cinnabar: #A9563E;
-        --cinnabar-soft: #F3E9E4;
-        /* 语义色（低饱和） */
-        --ok: #5B7D64;
-        --ok-soft: #EFF1EC;
-        --warn: #96703F;
-        --warn-soft: #F2EEE3;
-        --fail: #A34F42;
-        --fail-soft: #F4E9E5;
+        --line: #E7DFD4;
+        --line-strong: #D8CDBE;
+        /* 强调·咖啡：主按钮、选中态、关键数字 */
+        --accent: #6B4A38;
+        --accent-hover: #573A2B;
+        --accent-soft: #F1E6DB;
+        --accent-faint: #B49A87;
+        --accent-ink: #FFFDF9;
+        /* 陶土·重要（考试临近、今日标记） */
+        --cinnabar: #B04A2E;
+        --cinnabar-soft: #F8E7DF;
+        /* 语义色 */
+        --ok: #4C7A59;
+        --ok-soft: #E9F1EA;
+        --warn: #9A6A21;
+        --warn-soft: #F7EEDC;
+        --fail: #A6402A;
+        --fail-soft: #F8E5DF;
         /* 形状与深度 */
         --radius-s: 5px;
         --radius: 8px;
@@ -2724,11 +2680,11 @@
         box-shadow: none;
       }
       /* 课程色板（01 §2.3）：松绿主调 + 四个大地色系邻近色 */
-      .mini-course.tone-0 { border-left-color: #80887E; background: #F1F1EA; }
-      .mini-course.tone-1 { border-left-color: #948A74; background: #F3F0E8; }
-      .mini-course.tone-2 { border-left-color: #7F8790; background: #EFEFF1; }
-      .mini-course.tone-3 { border-left-color: #928077; background: #F2EEE9; }
-      .mini-course.tone-4 { border-left-color: #86887C; background: #F0F1EC; }
+      .mini-course.tone-0 { border-left-color: #6E8A72; background: #F1F5EF; }
+      .mini-course.tone-1 { border-left-color: #B08048; background: #FBF3E6; }
+      .mini-course.tone-2 { border-left-color: #6D8398; background: #EEF2F6; }
+      .mini-course.tone-3 { border-left-color: #B0684C; background: #FAEEE8; }
+      .mini-course.tone-4 { border-left-color: #8A7B5A; background: #F6F2E7; }
       .mini-course .t, .mini-course .r { color: var(--sub); }
       .sheet-panel { border: 1px solid var(--line); border-radius: var(--radius-xl); box-shadow: var(--shadow-3); }
 
@@ -2880,7 +2836,7 @@
         color: var(--sub);
         font-size: 11px;
       }
-      .event-proposal, .memory-chip, .room-card { border-radius: var(--radius-l); }
+      .event-proposal, .memory-chip { border-radius: var(--radius-l); }
 
       /* 登录：更清晰的产品层级 */
       .auth-screen { padding: 52px 32px; }
@@ -3021,7 +2977,7 @@
       .next-class .nc-count span { color: var(--sub); font-size: 10px; }
       .next-class .nc-arrow { flex: 0 0 auto; color: var(--sub); font-size: 14px; }
 
-      /* 周课表：只在「没课」的时段提供查空教室与加日程（有课的时间不需要） */
+      /* 周课表：只在「没课」的时段提供加日程（有课的时间不需要） */
       #nav button svg { display: none; }
       .week-cell .wc-actions {
         display: flex;
@@ -3055,55 +3011,6 @@
       .wc-free:hover { border-color: var(--accent); background: var(--card); color: var(--accent); }
       .wc-free span { font-size: 9px; }
 
-      /* 空教室：座位筛选、折叠分组、座位数强调 */
-      .room-result-selects { display: flex; gap: 8px; flex-wrap: wrap; }
-      .room-result-bar { flex-wrap: wrap; }
-      .room-free { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0 2px; }
-      .rf-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-      .rf-chip {
-        padding: 4px 11px;
-        border: 1px solid var(--line);
-        border-radius: var(--radius);
-        background: var(--card);
-        color: var(--text);
-        font-size: 12px;
-        cursor: pointer;
-      }
-      .rf-chip:hover { border-color: var(--accent); color: var(--accent); }
-      .rf-chip.active { border-color: var(--accent); color: var(--accent); }
-      .rf-chip span { margin-left: 4px; color: var(--sub); font-size: 11px; }
-      .rf-none { color: var(--sub); font-size: 12px; }
-      .room-building { border-top: 1px solid var(--line); }
-      .room-building:first-child { border-top: 0; }
-      .room-building summary {
-        padding: 12px 0;
-        cursor: pointer;
-        list-style: none;
-        font-size: 13px;
-        font-weight: 600;
-      }
-      .room-building summary::-webkit-details-marker { display: none; }
-      .room-building summary::before {
-        content: "▸";
-        display: inline-block;
-        margin-right: 7px;
-        color: var(--sub);
-        font-size: 11px;
-        transition: transform 0.15s ease;
-      }
-      .room-building[open] summary::before { transform: rotate(90deg); }
-      .room-building .rb-count { color: var(--sub); font-size: 12px; font-weight: 400; }
-      .room-building .rb-list { padding-bottom: 4px; }
-      .room-row { align-items: center; gap: 12px; padding: 12px 0; }
-      .room-seats { flex: 0 0 auto; text-align: right; color: var(--sub); font-size: 11px; }
-      .room-seats b {
-        display: block;
-        color: var(--text);
-        font-size: 17px;
-        font-weight: 650;
-        line-height: 1.2;
-        font-variant-numeric: tabular-nums;
-      }
 
       /* 考试倒计时 */
       .exam-countdown { flex: 0 0 auto; align-self: center; text-align: right; }
@@ -3193,25 +3100,25 @@
         /* 深色 = 同一套色相在暗处的反演（01 §2.2）：只覆写 :root 变量与个别无法变量化的规则。
            JS 契约不变：仍由脚本 el.disabled 启停本块。 */
         :root {
-          --bg: #21211E;
-          --card: #292926;
-          --fill: #30302C;
-          --fill-strong: #373732;
-          --text: #E6E5DF;
-          --sub: #A29F96;
-          --faint: #6F6D64;
-          --muted: #A29F96;
-          --line: #3B3B36;
-          --line-strong: #4C4B44;
-          --accent: #D6D3C8;
-          --accent-hover: #E4E1D7;
-          --accent-soft: #34342F;
-          --accent-ink: #23231F;
-          --cinnabar: #C98A6F;
-          --cinnabar-soft: #38302B;
-          --ok: #9DB5A0;  --ok-soft: #2E332D;
-          --warn: #C4A476;  --warn-soft: #363025;
-          --fail: #CE8B7C;  --fail-soft: #3A2F2A;
+          --bg: #1C1A17;
+          --card: #24211D;
+          --fill: #2B2723;
+          --fill-strong: #332E29;
+          --text: #EDE8E1;
+          --sub: #A9A096;
+          --faint: #78706A;
+          --muted: #A9A096;
+          --line: #3A342E;
+          --line-strong: #4B443C;
+          --accent: #D8BCA4;
+          --accent-hover: #E8D2BE;
+          --accent-soft: #3A302A;
+          --accent-ink: #221D19;
+          --cinnabar: #D98868;
+          --cinnabar-soft: #3A2C26;
+          --ok: #9DB79F;  --ok-soft: #2C332C;
+          --warn: #CBA271;  --warn-soft: #363025;
+          --fail: #CE8B78;  --fail-soft: #3A2C28;
           /* 阴影降权：层级靠更亮的面（card > bg > fill）而非投影 */
           --shadow: none;
           --shadow-1: none;
@@ -3225,13 +3132,13 @@
         input, select, textarea { background: var(--fill); }
         /* 遮罩与中性 toast 为规范指定实色（01 §3.7/§3.9） */
         .sheet, .confirm-layer { background: rgba(0, 0, 0, 0.55); }
-        #toast { background: #35352F; }
+        #toast { background: #332E29; }
         /* 课程色板深色版（01 §2.3） */
-        .mini-course, .mini-course.tone-0 { border-left-color: #97A79B; background: #2D302B; }
-        .mini-course.tone-1 { border-left-color: #B0A184; background: #33302A; }
-        .mini-course.tone-2 { border-left-color: #93A1AE; background: #2C3033; }
-        .mini-course.tone-3 { border-left-color: #AE9084; background: #332E2A; }
-        .mini-course.tone-4 { border-left-color: #9CA184; background: #2E322B; }
+        .mini-course, .mini-course.tone-0 { border-left-color: #90A894; background: #2A302A; }
+        .mini-course.tone-1 { border-left-color: #C39A6C; background: #342E25; }
+        .mini-course.tone-2 { border-left-color: #8FA4B8; background: #282F36; }
+        .mini-course.tone-3 { border-left-color: #C0836A; background: #362C27; }
+        .mini-course.tone-4 { border-left-color: #B09A76; background: #322D24; }
     </style>
     <style>
       /* 交互层：顶部进度、骨架屏、设置分区导航、周视图工具、搜索与安装提示 */
@@ -3355,9 +3262,9 @@
       /* Toast 语义色：ID + 属性选择器，特异性高于各皮肤里的 #toast 定义。
          用固定实色而非 --ok/--fail/--warn：那组变量在深色模式下会被改成浅色高亮文字色，
          拿来做背景配白字会看不清。 */
-      #toast[data-type="success"] { background: #5F7F68; color: #fff; border-color: transparent; }
-      #toast[data-type="error"] { background: #A34F42; color: #fff; border-color: transparent; }
-      #toast[data-type="warn"] { background: #96703F; color: #fff; border-color: transparent; }
+      #toast[data-type="success"] { background: #567A60; color: #fff; border-color: transparent; }
+      #toast[data-type="error"] { background: #A44A34; color: #fff; border-color: transparent; }
+      #toast[data-type="warn"] { background: #96702F; color: #fff; border-color: transparent; }
 
       /* 应用内确认 / 输入对话框：替代原生 confirm / prompt */
       .confirm-layer {
@@ -3438,7 +3345,7 @@
         display: flex; align-items: center; justify-content: center; gap: 10px;
         flex-wrap: wrap; padding: 9px 14px;
         padding-top: calc(9px + env(safe-area-inset-top, 0px));
-        background: #A34F42; color: #fff; font-size: 12px;
+        background: #A44A34; color: #fff; font-size: 12px;
         box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
       }
       .net-banner button {
@@ -3668,7 +3575,6 @@
       }
 
       /* P2-10 空教室查询按钮：栅格末端自对齐（&nbsp; 占位已删） */
-      .room-query { align-self: end; }
 
       /* P2-4 回到本周：weekLabel 由 span 改为 button，补齐按钮重置样式 */
       .week-nav button.label {
@@ -3702,7 +3608,7 @@
         document.documentElement.dataset.theme = dark ? "dark" : "light";
         document.documentElement.style.colorScheme = dark ? "dark" : "light";
         var meta = document.getElementById("themeColorMeta");
-        if (meta) meta.content = dark ? "#21211E" : "#F7F6F2";
+        if (meta) meta.content = dark ? "#1C1A17" : "#FAF7F2";
       })();
     </script>
   </head>
@@ -3776,7 +3682,6 @@
       <nav id="nav" role="tablist" aria-label="主导航">
         <button data-tab="today" class="active" role="tab" aria-selected="true" aria-controls="tab-today"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 9.5h17M8 3v4M16 3v4M8.5 14l2.2 2.2 4.3-4.4"/></svg>今日</button>
         <button data-tab="week" role="tab" aria-selected="false" aria-controls="tab-week"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M10 4v16"/></svg>日程</button>
-        <button data-tab="rooms" role="tab" aria-selected="false" aria-controls="tab-rooms"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="3.5" width="15" height="17" rx="1.5"/><path d="M9.5 20.5v-4.5h5v4.5M8.5 7.5h1.5M14 7.5h1.5M8.5 11h1.5M14 11h1.5"/></svg>空教室</button>
         <button data-tab="ai" role="tab" aria-selected="false" aria-controls="tab-ai"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5c.7 3.8 2.7 5.8 6.5 6.5-3.8.7-5.8 2.7-6.5 6.5-.7-3.8-2.7-5.8-6.5-6.5 3.8-.7 5.8-2.7 6.5-6.5z"/><path d="M18.5 15.5c.3 1.7 1.2 2.6 2.9 2.9-1.7.3-2.6 1.2-2.9 2.9-.3-1.7-1.2-2.6-2.9-2.9 1.7-.3 2.6-1.2 2.9-2.9z"/></svg>AI 助手</button>
         <button data-tab="source" role="tab" aria-selected="false" aria-controls="tab-source"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 14.5l5-5M8.5 11.5l-2.2 2.2a3.6 3.6 0 0 0 5.1 5.1l2.1-2.2M15.5 12.5l2.2-2.2a3.6 3.6 0 0 0-5.1-5.1l-2.1 2.2"/></svg>课表来源</button>
         <button data-tab="admin" id="adminNavBtn" class="hidden" role="tab" aria-selected="false" aria-controls="tab-admin"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="3"/><path d="M3.5 19.5c.6-3 2.7-4.5 5.5-4.5s4.9 1.5 5.5 4.5M16 5.7a2.8 2.8 0 0 1 0 5.6M17 15.2c2 .5 3.2 1.9 3.6 4.3"/></svg>用户管理</button>
@@ -3877,47 +3782,6 @@
         </p>
       </section>
 
-      <!-- 空教室 -->
-      <section id="tab-rooms" class="hidden">
-        <div class="card">
-          <div class="day-head">
-            <span class="date">空教室查询</span>
-            <span class="muted" id="roomSub"></span>
-          </div>
-          <div class="room-filters">
-            <label class="field"><span>日期</span><input type="date" id="roomDate" /></label>
-            <label class="field"><span>开始节次</span><select id="roomStart"></select></label>
-            <label class="field"><span>结束节次</span><select id="roomEnd"></select></label>
-            <label class="field"><span>校区</span><select id="roomCampus"></select></label>
-            <label class="field"><span>教学楼</span><select id="roomBuilding"></select></label>
-            <div class="field room-query"><button class="primary" id="roomQueryBtn">查询</button></div>
-          </div>
-          <div class="room-free hidden" id="roomFreeRow">
-            <button type="button" class="small" id="roomFreeBtn">查我没课的时候</button>
-            <div class="rf-chips" id="roomFreeChips"></div>
-          </div>
-          <div class="room-result-bar hidden" id="roomResultBar">
-            <span class="muted" id="roomCount"></span>
-            <div class="room-result-selects">
-              <select id="roomSeats" aria-label="按座位数筛选">
-                <option value="">全部座位数</option>
-                <option value="0-40">小教室 · ≤40 座</option>
-                <option value="41-80">41–80 座</option>
-                <option value="81-150">81–150 座</option>
-                <option value="151-99999">大教室 · >150 座</option>
-              </select>
-              <select id="roomCategory" aria-label="按类别筛选"></select>
-            </div>
-          </div>
-          <div id="roomResult">
-            <div class="empty"><div class="empty-title">查自习、找空教室</div><div class="empty-sub">选择日期与节次后点击查询，数据来自正方教务，实时更新。</div></div>
-          </div>
-        </div>
-        <p class="hint">
-          需要在「课表来源」配置正方教务学号密码。教室可能被临时借用或用于考试，使用前以现场安排为准。
-        </p>
-      </section>
-
       <!-- AI -->
       <section id="tab-ai" class="hidden">
         <div class="card chat-box">
@@ -3936,11 +3800,10 @@
             </div>
           </div>
           <div class="chat-msgs" id="chatMsgs" role="log">
-            <div class="msg ai">你好，我是知序。课程、考试、空教室和个人日程都可以问我；也可以直接说「明天下午三点开会」或「记住我喜欢坐前排」。要读课件、作业要求、表格，点输入框左边的回形针传文件给我就行。</div>
+            <div class="msg ai">你好，我是知序。课程、考试和个人日程都可以问我；也可以直接说「明天下午三点开会」或「记住我喜欢坐前排」。要读课件、作业要求、表格，点输入框左边的回形针传文件给我就行。</div>
           </div>
           <div class="chips" id="chatChips" aria-label="快捷操作">
             <span class="chips-label">快捷</span>
-            <button type="button">查空教室</button>
             <button type="button" data-prefill="添加日程：">添加日程</button>
             <button type="button">明天有什么课？</button>
             <button type="button">这周哪天没课？</button>
@@ -3978,16 +3841,25 @@
         <div class="card">
           <h2>课表数据来源</h2>
           <p class="hint">
-            两套数据源各有取舍：门户只提供课表，但同步的是调课后的最新课表；正方教务提供课表、空教室和考试时间，但课表是排课数据，不包含老师临时调课后的安排。课表优先使用门户，门户没接时自动用正方。
+            两套数据源各有取舍：正方教务是排课数据的源头，带任课教师和考试安排；门户能反映老师临时调课后的课表，但没有教师字段。默认以正方为准，需要看调课时可在这里切到门户。
           </p>
+          <div class="source-primary" id="sourcePrimaryRow">
+            <span class="sp-label">课表主数据源</span>
+            <div class="seg" id="primarySeg" role="group" aria-label="课表主数据源">
+              <button type="button" data-primary="zhengfang" aria-pressed="false">正方教务</button>
+              <button type="button" data-primary="portal" aria-pressed="false">融合门户</button>
+              <button type="button" data-primary="auto" aria-pressed="false">自动</button>
+            </div>
+            <span class="hint" id="primaryState"></span>
+          </div>
           <div class="source-cards">
             <!-- 门户卡片 -->
             <div class="source-card" id="sourcePortalCard">
               <div class="source-card-head">
-                <strong>融合门户（推荐）</strong>
+                <strong>融合门户</strong>
                 <span class="badge" id="portalBadge">未配置</span>
               </div>
-              <p class="hint">扫码登录门户，自动发现并接入课表接口，无需抓包、无需填 Cookie。门户只提供课表数据，但能反映调课后的课表；考试与空教室需要另接正方教务。</p>
+              <p class="hint">扫码登录门户，自动发现并接入课表接口，无需抓包、无需填 Cookie。门户只提供课表数据，但能反映调课后的课表。</p>
               <div class="form-actions">
                 <button class="primary" id="browserLoginBtn">一键扫码登录</button>
                 <button id="browserLoginStopBtn" class="hidden">取消</button>
@@ -4014,10 +3886,10 @@
             <!-- 正方卡片 -->
             <div class="source-card" id="sourceZfCard">
               <div class="source-card-head">
-                <strong>正方教务（学号+密码）</strong>
+                <strong>正方教务（推荐 · 学号+密码）</strong>
                 <span class="badge" id="zfBadge">未配置</span>
               </div>
-              <p class="hint">填学号+密码即可，后端自动模拟登录正方，无需 Cookie。正方提供课表、空教室与考试时间；课表来自教务排课数据，不包含调课后的安排。</p>
+              <p class="hint">填学号+密码即可，后端自动模拟登录正方，无需 Cookie。正方提供课表与考试安排，带任课教师；课表是排课数据，不包含临时调课。</p>
               <div class="form-grid">
                 <label class="field full"><span>教务地址</span><input id="zfBase" placeholder="https://jxgl.qut.edu.cn/jwglxt" /></label>
                 <label class="field"><span>学号</span><input id="zfUsername" /></label>
@@ -4040,22 +3912,6 @@
               <span class="hint" id="zfSaveResult"></span>
             </div>
           </div>
-        </div>
-
-        <div class="card">
-          <h2>空教室默认设置</h2>
-          <p class="hint">
-            查空教室要选的参数太多，可以在这里设一个默认校区：「空教室」页会自动选中它，在 AI 里直接问「今天下午哪有空教室」也会默认查询这个校区。需要先配置正方教务。
-          </p>
-          <div class="form-grid">
-            <label class="field"><span>默认校区</span>
-              <select id="defaultCampusSelect"><option value="">加载中…</option></select>
-            </label>
-          </div>
-          <div class="form-actions">
-            <button id="saveDefaultCampusBtn">保存默认校区</button>
-          </div>
-          <span class="hint" id="defaultCampusState"></span>
         </div>
       </section>
 
@@ -5163,374 +5019,6 @@
       }
       $("#weekEventList").addEventListener("click", handleEventAction);
 
-      /* ---------- 空教室 ---------- */
-      let roomMeta = null;
-      let roomCache = [];
-      let roomBusy = false;
-      let roomLastQuery = null;
-      // AI 卡片跳转时指定的节次，进入空教室页后优先按它查询
-      let roomPending = null;
-      // 折叠状态：null 表示新查询未初始化，跨筛选重渲染时保留用户展开/收起
-      let roomOpenState = null;
-
-      function roomFilterKey() {
-        return "agenda.rooms." + (currentUser?.username || "0");
-      }
-      function roomReadFilters() {
-        try { return JSON.parse(localStorage.getItem(roomFilterKey()) || "{}"); }
-        catch (e) { return {}; }
-      }
-      function roomSaveFilters() {
-        try {
-          localStorage.setItem(roomFilterKey(), JSON.stringify({
-            campus: $("#roomCampus").value || "",
-            building: $("#roomBuilding").value || "",
-            seats: $("#roomSeats").value || "",
-            category: $("#roomCategory").value || "",
-          }));
-        } catch (e) {}
-      }
-
-      // 按当前时间预选节次：正在上的节 → 否则最近将开始的节 → 否则最后一节
-      function roomNowBlock(periods) {
-        const now = new Date();
-        const hm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-        const list = (periods || []).filter((p) => p.time && p.time.includes("-"));
-        let jc = null;
-        if (list.length) {
-          const cur = list.find((p) => {
-            const [s, e] = p.time.split("-");
-            return s <= hm && hm <= e;
-          });
-          const next = list.find((p) => p.time.split("-")[0] > hm);
-          jc = (cur || next || list[list.length - 1]).jc;
-        }
-        const maxJc = list.length ? Math.max(...list.map((p) => p.jc)) : 10;
-        const start = jc ? Math.floor((jc - 1) / 2) * 2 + 1 : 1;
-        return { start, end: Math.min(start + 1, Math.max(maxJc, start)) };
-      }
-
-      // 空闲区间 → 可查询的两节一档（不跨占用节次，超出教务节次表的截断）
-      function roomFreeBlocks(spans, maxJc) {
-        const blocks = [];
-        for (const s of spans || []) {
-          for (let a = s.start; a <= s.end && a <= maxJc; a += 2)
-            blocks.push({ start: a, end: Math.min(a + 1, s.end, maxJc) });
-        }
-        return blocks;
-      }
-      function roomMaxJc() {
-        const nums = [...$("#roomStart").options]
-          .map((o) => parseInt(o.value, 10)).filter(Boolean);
-        return nums.length ? Math.max(...nums) : 12;
-      }
-      // 今天选正在/即将开始的空闲块，其他日期选第一个
-      function roomPickFreeBlock(blocks, periods, isToday) {
-        if (!blocks.length) return null;
-        if (!isToday) return blocks[0];
-        const now = new Date();
-        const hm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-        const timeOf = (jc, idx) => {
-          const p = (periods || []).find((x) => x.jc === jc);
-          return p && p.time && p.time.includes("-") ? p.time.split("-")[idx] : "";
-        };
-        const cur = blocks.find((b) => {
-          const s = timeOf(b.start, 0), e = timeOf(b.end, 1);
-          return s && e && s <= hm && hm <= e;
-        });
-        const next = blocks.find((b) => timeOf(b.start, 0) > hm);
-        return cur || next || blocks[0];
-      }
-
-      let roomFreeCache = null;
-      function renderRoomFree() {
-        const row = $("#roomFreeRow");
-        const d = $("#roomDate").value || (roomMeta && roomMeta.today) || "";
-        const data = roomFreeCache;
-        if (!data || data.date !== d || data.spans === null) {
-          row.classList.add("hidden");
-          return;
-        }
-        row.classList.remove("hidden");
-        const chips = $("#roomFreeChips");
-        if (!data.spans.length) {
-          $("#roomFreeBtn").classList.add("hidden");
-          chips.innerHTML = `<span class="rf-none">这一天你都有课，换个日期试试</span>`;
-          return;
-        }
-        $("#roomFreeBtn").classList.remove("hidden");
-        const blocks = roomFreeBlocks(data.spans, roomMaxJc());
-        const periods = (roomMeta && roomMeta.periods) || [];
-        const s = parseInt($("#roomStart").value, 10);
-        const e = parseInt($("#roomEnd").value, 10);
-        chips.innerHTML = blocks.map((b) => {
-          const p = periods.find((x) => x.jc === b.start);
-          const t = p && p.time ? p.time.split("-")[0] : "";
-          const label = b.start === b.end ? `第 ${b.start} 节` : `第 ${b.start}–${b.end} 节`;
-          return `<button type="button" class="rf-chip${b.start === s && b.end === e ? " active" : ""}" data-free-start="${b.start}" data-free-end="${b.end}">${label}${t ? `<span>${esc(t)}</span>` : ""}</button>`;
-        }).join("");
-      }
-      async function refreshRoomFree() {
-        const d = $("#roomDate").value || (roomMeta && roomMeta.today) || "";
-        if (!d) return null;
-        try {
-          const data = await api("/api/rooms/my-free?date_s=" + encodeURIComponent(d));
-          if (d !== ($("#roomDate").value || (roomMeta && roomMeta.today))) return null;
-          roomFreeCache = data;
-          renderRoomFree();
-          return data;
-        } catch (e) { return null; }
-      }
-      // 今天的默认节次避开有课时段：课表已同步时优先当前/最近将开始的空闲块
-      function roomApplyFreeDefault(free) {
-        if (!free || free.spans === null || !roomMeta) return;
-        if (($("#roomDate").value || roomMeta.today) !== roomMeta.today) return;
-        const blocks = roomFreeBlocks(free.spans, roomMaxJc());
-        if (!blocks.length) return;
-        const b = roomPickFreeBlock(blocks, roomMeta.periods || [], true);
-        $("#roomStart").value = String(b.start);
-        $("#roomEnd").value = String(b.end);
-      }
-
-      function roomFillSelect(sel, options, keepValue) {
-        const prev = keepValue ? sel.value : "";
-        sel.innerHTML = options
-          .map((o) => `<option value="${esc(String(o.v))}">${esc(o.t)}</option>`)
-          .join("");
-        if (prev && options.some((o) => String(o.v) === prev)) sel.value = prev;
-      }
-
-      function roomFillMeta(keepSelections = false) {
-        const m = roomMeta;
-        roomFillSelect($("#roomCampus"),
-          m.campuses.map((c) => ({ v: c.id, t: c.name })), true);
-        $("#roomCampus").value = m.campus;
-        roomFillSelect($("#roomBuilding"),
-          [{ v: "", t: "全部教学楼" }, ...m.buildings.map((b) => ({ v: b.id, t: b.name }))],
-          keepSelections);
-        const periods = m.periods.length
-          ? m.periods
-          : Array.from({ length: 10 }, (_, i) => ({ jc: i + 1, time: "", segment: "" }));
-        const opts = periods.map((p) => ({
-          v: p.jc, t: `第 ${p.jc} 节${p.time ? " · " + p.time.split("-")[0] : ""}`,
-        }));
-        roomFillSelect($("#roomStart"), opts, keepSelections);
-        roomFillSelect($("#roomEnd"), opts, keepSelections);
-        if (!keepSelections) {
-          const block = roomNowBlock(periods);
-          $("#roomStart").value = String(block.start);
-          $("#roomEnd").value = String(block.end);
-        }
-        if (!$("#roomDate").value) $("#roomDate").value = m.today;
-        if (m.semester_start) {
-          $("#roomDate").min = m.semester_start;
-          const maxD = new Date(m.semester_start + "T00:00:00");
-          maxD.setDate(maxD.getDate() + m.max_week * 7 - 1);
-          const pad = (n) => String(n).padStart(2, "0");
-          $("#roomDate").max =
-            `${maxD.getFullYear()}-${pad(maxD.getMonth() + 1)}-${pad(maxD.getDate())}`;
-        }
-      }
-
-      let roomMetaPromise = null;
-      function loadRooms(campus = "") {
-        // 复用进行中的加载：meta 未就绪时点查询/切校区不会并发重复登录教务
-        if (!roomMetaPromise)
-          roomMetaPromise = _loadRooms(campus).finally(() => { roomMetaPromise = null; });
-        return roomMetaPromise;
-      }
-      function roomError(title, message) {
-        const needConfig = /正方|配置|登录|密码|过期/.test(message);
-        $("#roomResult").innerHTML =
-          `<div class="empty"><div class="empty-title">${esc(title)}</div><div class="empty-sub">${esc(message)}</div>
-           <button class="small" data-room-act="retry" style="margin-top:12px">重试</button>${needConfig ? ' <button class="small" data-room-act="source" style="margin-top:12px">去配置正方账号</button>' : ""}</div>`;
-      }
-      async function _loadRooms(campus = "") {
-        try {
-          // 课表来源页设置默认校区时可能已经取过 meta，这里直接复用，
-          // 避免重复登录教务，也避免页面停在未查询的占位状态
-          if (!roomMeta || campus) {
-            if (!roomMeta)
-              $("#roomResult").innerHTML =
-                `<div class="empty-sub tight">正在连接正方教务，首次约需几秒钟…</div>` +
-                skeletonRows(4);
-            roomMeta = await api("/api/rooms/meta" + (campus ? "?campus=" + encodeURIComponent(campus) : ""));
-          }
-          roomFillMeta(!!campus);
-          // 记住上次筛选：校区优先于教务默认；跳转查询时不覆盖带来的条件
-          const saved = roomReadFilters();
-          if (!campus && !roomPending && saved.campus &&
-              saved.campus !== roomMeta.campus &&
-              roomMeta.campuses.some((c) => c.id === saved.campus)) {
-            roomMeta = await api("/api/rooms/meta?campus=" + encodeURIComponent(saved.campus));
-            roomFillMeta(true);
-          }
-          if (!roomPending && saved.building &&
-              [...$("#roomBuilding").options].some((o) => o.value === saved.building))
-            $("#roomBuilding").value = saved.building;
-          if (saved.seats &&
-              [...$("#roomSeats").options].some((o) => o.value === saved.seats))
-            $("#roomSeats").value = saved.seats;
-          if (roomPending) {
-            const p = roomPending;
-            roomPending = null;
-            $("#roomDate").value = p.date;
-            $("#roomStart").value = String(p.start);
-            $("#roomEnd").value = String(p.end);
-            $("#roomBuilding").value = p.building;
-            await queryRooms();
-            refreshRoomFree();
-            return;
-          }
-          if (!roomLastQuery) {
-            roomApplyFreeDefault(await refreshRoomFree());
-            await queryRooms();
-          } else {
-            refreshRoomFree();
-          }
-        } catch (e) {
-          roomError("空教室暂不可用", e.message);
-        }
-      }
-      $("#roomResult").addEventListener("click", (e) => {
-        const btn = e.target.closest("button[data-room-act]");
-        if (!btn) return;
-        if (btn.dataset.roomAct === "source") switchTab("source");
-        else queryRooms();
-      });
-
-      function roomRow(r) {
-        const meta = [r.category, r.campus].filter(Boolean).map(esc).join(" · ");
-        return `<div class="course-row room-row">
-    <div class="course-main">
-      <div class="course-name">${esc(r.name)}${r.code && r.code !== r.name ? `<span class="event-tag">${esc(r.code)}</span>` : ""}</div>
-      ${meta ? `<div class="course-meta">${meta}</div>` : ""}
-    </div>
-    ${r.seats ? `<div class="room-seats"><b>${r.seats}</b><span>座</span></div>` : ""}
-  </div>`;
-      }
-
-      function renderRooms() {
-        const cat = $("#roomCategory").value;
-        const seatVal = $("#roomSeats").value;
-        const [lo, hi] = (seatVal || "").split("-").map(Number);
-        const rooms = roomCache.filter((r) => {
-          if (cat && r.category !== cat) return false;
-          if (seatVal && !Number.isNaN(lo)) {
-            const s = r.seats || 0;
-            if (s < lo || s > hi) return false;
-          }
-          return true;
-        });
-        $("#roomCount").textContent = cat || seatVal
-          ? `${rooms.length} 间（共 ${roomCache.length} 间）`
-          : `共 ${roomCache.length} 间`;
-        if (!rooms.length) {
-          $("#roomResult").innerHTML =
-            `<div class="empty"><div class="empty-title">没有符合条件的空教室</div><div class="empty-sub">换个节次、教学楼、座位数或校区试试。</div></div>`;
-          return;
-        }
-        const groups = new Map();
-        rooms.forEach((r) => {
-          const key = r.building || "其他";
-          if (!groups.has(key)) groups.set(key, []);
-          groups.get(key).push(r);
-        });
-        if (roomOpenState === null) {
-          // 楼少时全部展开，楼多时只展开第一栋，长列表更清爽
-          roomOpenState = new Set(
-            [...groups.keys()].slice(0, groups.size <= 2 ? groups.size : 1),
-          );
-        }
-        let html = "";
-        for (const [building, list] of groups) {
-          html += `<details class="room-building" data-building="${escAttr(building)}"${roomOpenState.has(building) ? " open" : ""}>
-      <summary>${esc(building)}<span class="rb-count"> · ${list.length} 间</span></summary>
-      <div class="rb-list">${list.map(roomRow).join("")}</div>
-    </details>`;
-        }
-        $("#roomResult").innerHTML = html;
-      }
-      $("#roomResult").addEventListener("toggle", (e) => {
-        const d = e.target;
-        if (!d.matches || !d.matches("details.room-building")) return;
-        if (!roomOpenState) roomOpenState = new Set();
-        if (d.open) roomOpenState.add(d.dataset.building);
-        else roomOpenState.delete(d.dataset.building);
-      }, true);
-
-      async function queryRooms() {
-        if (roomBusy) return;
-        // meta 未就绪（未配置/登录失败/仍在加载）：先重试加载，不再静默无响应
-        if (!roomMeta) { await loadRooms($("#roomCampus").value || ""); return; }
-        const params = new URLSearchParams({
-          date_s: $("#roomDate").value || roomMeta.today,
-          start: $("#roomStart").value || "1",
-          end: $("#roomEnd").value || "2",
-          campus: $("#roomCampus").value || "",
-          building: $("#roomBuilding").value || "",
-        });
-        roomBusy = true;
-        $("#roomQueryBtn").disabled = true;
-        $("#roomQueryBtn").textContent = "查询中…";
-        $("#roomResultBar").classList.add("hidden");
-        $("#roomResult").innerHTML =
-          `<div class="empty-sub tight">正在查询正方教务…</div>` +
-          skeletonRows(4);
-        try {
-          const data = await api("/api/rooms/free?" + params.toString());
-          roomCache = data.rooms;
-          roomLastQuery = data;
-          const cats = [...new Set(roomCache.map((r) => r.category).filter(Boolean))];
-          roomFillSelect($("#roomCategory"),
-            [{ v: "", t: "全部类别" }, ...cats.map((c) => ({ v: c, t: c }))], true);
-          const savedCat = roomReadFilters().category;
-          if (savedCat && cats.includes(savedCat)) $("#roomCategory").value = savedCat;
-          $("#roomSub").textContent =
-            `第 ${data.week} 周 ${WEEKDAY[data.day - 1]} · 第 ${data.start}–${data.end} 节`;
-          $("#roomResultBar").classList.remove("hidden");
-          roomOpenState = null;
-          renderRooms();
-          roomSaveFilters();
-          renderRoomFree();
-        } catch (e) {
-          roomError("查询失败", e.message);
-        } finally {
-          roomBusy = false;
-          $("#roomQueryBtn").disabled = false;
-          $("#roomQueryBtn").textContent = "查询";
-        }
-      }
-
-      $("#roomQueryBtn").addEventListener("click", queryRooms);
-      $("#roomDate").addEventListener("change", () => { renderRoomFree(); refreshRoomFree(); });
-      $("#roomFreeChips").addEventListener("click", (e) => {
-        const chip = e.target.closest("button[data-free-start]");
-        if (!chip) return;
-        $("#roomStart").value = chip.dataset.freeStart;
-        $("#roomEnd").value = chip.dataset.freeEnd;
-        queryRooms();
-      });
-      $("#roomFreeBtn").addEventListener("click", async () => {
-        const data = await refreshRoomFree();
-        if (!data || data.spans === null) { toast("课表还没同步，先去同步课表", 4000); return; }
-        const blocks = roomFreeBlocks(data.spans, roomMaxJc());
-        if (!blocks.length) { toast("这一天你都有课，换个日期试试", 4000); return; }
-        const isToday = ($("#roomDate").value || roomMeta.today) === roomMeta.today;
-        const b = roomPickFreeBlock(blocks, roomMeta.periods || [], isToday);
-        $("#roomStart").value = String(b.start);
-        $("#roomEnd").value = String(b.end);
-        queryRooms();
-      });
-      $("#roomCategory").addEventListener("change", () => { roomSaveFilters(); renderRooms(); });
-      $("#roomSeats").addEventListener("change", () => { roomSaveFilters(); renderRooms(); });
-      $("#roomBuilding").addEventListener("change", roomSaveFilters);
-      $("#roomCampus").addEventListener("change", (e) => loadRooms(e.target.value));
-      $("#roomStart").addEventListener("change", () => {
-        if (parseInt($("#roomEnd").value, 10) < parseInt($("#roomStart").value, 10))
-          $("#roomEnd").value = $("#roomStart").value;
-      });
-
       /* ---------- 周视图 ---------- */
       // 天气是「今明两天」的短时数据：既要能在失败后自愈，也要定期换新，
       // 不能像以前那样一次拉空就整场会话都没有天气。
@@ -5623,8 +5111,8 @@
                 a.name.localeCompare(b.name, "zh"),
             );
           const b = blocks[bi];
-          // 有课的格子只展示课程；没课的格子并列给「查空教室」和「加日程」，
-          // 都按这个大节的节次/日期，方便直接给这一周的空档安排任务
+          // 有课的格子只展示课程；没课的格子给「加日程」，
+          // 按这个大节的日期，方便直接给空档安排任务
           const content = list.length
             ? list
                 .map((c) => {
@@ -5643,7 +5131,6 @@
                 })
                 .join("")
             : `<div class="wc-actions">
-        <button type="button" class="wc-free" data-wc-rooms data-date="${iso}" data-start="${b.s}" data-end="${b.e}" title="这个时段没课，查空教室自习">查空教室<span>↗</span></button>
         <button type="button" class="wc-free wc-event" data-wc-event data-date="${iso}" data-start="${b.s}" data-end="${b.e}" title="给这个空闲时段添加一条日程">加日程<span>＋</span></button>
       </div>`;
           return `<div class="week-cell${list.length ? "" : " free"}${isToday ? " today" : ""}">${content}</div>`;
@@ -5721,46 +5208,6 @@
           parseInt(btn.dataset.end, 10),
         );
       });
-      // 没课的空格子 → 查空教室：按这个大节的节次查。
-      // 跨节课程可能让网格看起来没课、实际被占用，所以用 my-free 校验一次，
-      // 真被占用时自动改查当天最接近的空闲时段。
-      $("#weekGridScroll").addEventListener("click", async (e) => {
-        const btn = e.target.closest("button[data-wc-rooms]");
-        if (!btn || btn.disabled) return;
-        btn.disabled = true;
-        try {
-          if (!roomMeta) {
-            roomMeta = await api("/api/rooms/meta");
-            roomFillMeta(true);
-          }
-          const date = btn.dataset.date;
-          const wantStart = parseInt(btn.dataset.start, 10) || 1;
-          const wantEnd = parseInt(btn.dataset.end, 10) || wantStart;
-          const free = await api("/api/rooms/my-free?date_s=" + encodeURIComponent(date));
-          if (free.spans === null) { toast("课表还没同步，无法判断空闲节次", 4000); return; }
-          const freeBlocks = roomFreeBlocks(free.spans, roomMaxJc());
-          if (!freeBlocks.length) { toast("这一天你都有课，没有空闲时段可查", 4000); return; }
-          const exact = freeBlocks.find((x) => x.start === wantStart && x.end === wantEnd);
-          const block = exact || freeBlocks.reduce(
-            (best, x) =>
-              Math.abs(x.start - wantStart) < Math.abs(best.start - wantStart) ? x : best,
-            freeBlocks[0],
-          );
-          if (!exact)
-            toast(`第 ${wantStart}-${wantEnd} 节有课，已改查第 ${block.start}-${block.end} 节`, 3500);
-          switchTab("rooms");
-          $("#roomDate").value = date;
-          $("#roomStart").value = String(block.start);
-          $("#roomEnd").value = String(block.end);
-          await queryRooms();
-          refreshRoomFree();
-        } catch (err) {
-          toast(err.message, 4000, "error");
-        } finally {
-          btn.disabled = false;
-        }
-      });
-
       /* ---------- 编辑课表 ---------- */
       let courseData = null;
       let editingUid = "";
@@ -6281,7 +5728,7 @@
       }
       // 流式输出时先隐藏未写完的动作标记，结束后再渲染成卡片
       function stripPendingMarkers(s) {
-        return (s || "").replace(/\[(添加日程|日程已添加|记住|查空教室|推送|追问)\][\s\S]*$/, "");
+        return (s || "").replace(/\[(添加日程|日程已添加|记住|推送|追问)\][\s\S]*$/, "");
       }
       // 轻量 Markdown：标题 / 列表 / 表格 / 引用 / 分隔线 / 代码块，先整体转义再渲染
       function renderReply(raw) {
@@ -6453,7 +5900,7 @@
       }
       let chatBusy = false;
       const CHAT_WELCOME =
-        "你好，我是知序。课程、考试、空教室和个人日程都可以问我；也可以直接说「明天下午三点开会」或「记住我喜欢坐前排」。要读课件、作业要求、表格，点输入框左边的回形针传文件给我就行。";
+        "你好，我是知序。课程、考试和个人日程都可以问我；也可以直接说「明天下午三点开会」或「记住我喜欢坐前排」。要读课件、作业要求、表格，点输入框左边的回形针传文件给我就行。";
 
       // 编辑重发：从某条消息起截断历史，再按窗口重渲染
       function truncateChat(k) {
@@ -6631,14 +6078,12 @@
           return ["调整这条日程", "查看我最近的安排", "明天还有什么课？"];
         if (flags.memory)
           return ["我明天有什么安排？", "这周哪天没课？", "我最近有什么考试？"];
-        if (flags.room || /空教室|自习教室/.test(text))
-          return ["换个时间段再查", "明天下午哪里能自习？", "我下一节课在哪？"];
         if (/考试|考场|复习/.test(text))
           return ["最近的考试是哪一场？", "帮我安排考前复习", "考试当天还有什么课？"];
         if (/下周|大下周/.test(text))
           return ["再往后一周呢？", "下周哪天没课？", "下周第一节课是什么？"];
         if (/明天|明日/.test(text))
-          return ["后天呢？", "明天哪里有空教室？", "帮我安排明天的自习"];
+          return ["后天呢？", "帮我安排明天的自习", "我下一节课在哪？"];
         if (/本周|这周|课表|课程/.test(text))
           return ["这周哪天没课？", "我明天有什么课？", "下一节课在哪里？"];
         return ["我明天有什么安排？", "这周哪天没课？", "我最近有什么考试？"];
@@ -6664,25 +6109,21 @@
       // 渲染一条 AI 回复：动作卡片、正文 Markdown 与推荐追问统一组装
       function renderAiContent(bubble, acc, fromHistory = false) {
         const { text: ta, added: eventAdded } = extractEventAdded(acc);
-        const { text: t0, result: roomResult } = extractRoomResult(ta);
-        const { text: t1, proposal } = extractEventProposal(t0);
+        const { text: t1, proposal } = extractEventProposal(ta);
         const { text: t2, memory } = extractMemory(t1);
-        const { text: t3, query: roomQuery } = extractRoomQuery(t2);
-        const { text: t4, push } = extractPush(t3);
-        const { text: cleanText, followups } = extractFollowups(t4);
+        const { text: t3, push } = extractPush(t2);
+        const { text: cleanText, followups } = extractFollowups(t3);
         const bodyText = cleanText || (proposal ? "为你整理了一条日程，确认后存入："
           : eventAdded ? "已为你添加到日程："
-          : (roomQuery || roomResult) ? "为你查询了空教室："
           : push ? "正在把你的消息发到手机：" : "已为你整理好，可以继续这样问：");
         bubble.innerHTML = renderReply(bodyText);
         attachMsgActions(bubble, "ai");
         if (eventAdded) appendEventAddedCard(bubble, eventAdded);
         if (proposal) appendEventProposal(bubble, proposal, acc);
         if (memory) appendMemoryChip(bubble, memory, fromHistory);
-        if (roomQuery || roomResult) appendRoomCard(bubble, roomQuery, roomResult, acc);
         if (push) appendPushChip(bubble, push, fromHistory);
         appendFollowups(bubble, followups.length ? followups : fallbackFollowups(bodyText, {
-          proposal, memory, room: roomQuery || roomResult,
+          proposal, memory,
         }));
       }
 
@@ -6897,235 +6338,6 @@
             btn.disabled = false;
             toast(err.message, 4000, "error");
           }
-        });
-      }
-      // [查空教室] {json} 标记 → 实时查询教务并渲染结果卡片
-      function extractRoomQuery(text) {
-        const m = text.match(/\[查空教室\]\s*(\{[^\n]*\})/);
-        if (!m) return { text, query: null };
-        try {
-          const obj = JSON.parse(m[1]);
-          const start = parseInt(obj.start, 10);
-          const end = parseInt(obj.end, 10);
-          if (obj && typeof obj.date === "string"
-              && /^\d{4}-\d{2}-\d{2}$/.test(obj.date.trim())
-              && start >= 1 && end >= start && end <= 12) {
-            const str = (v) => (typeof v === "string" ? v.trim() : "");
-            return {
-              text: text.replace(m[0], "").trim(),
-              query: {
-                date: obj.date.trim(), start, end,
-                campus: str(obj.campus).slice(0, 20),
-                building: str(obj.building).slice(0, 30),
-              },
-            };
-          }
-        } catch (e) {}
-        return { text, query: null };
-      }
-      // [空教室结果] {json}：查询完成后回写进历史，刷新直接渲染、后续对话可引用
-      function extractRoomResult(text) {
-        const m = text.match(/\[空教室结果\]\s*(\{[^\n]*\})/);
-        if (!m) return { text, result: null };
-        try {
-          const obj = JSON.parse(m[1]);
-          if (obj && typeof obj === "object")
-            return { text: text.replace(m[0], "").trim(), result: obj };
-        } catch (e) {}
-        return { text: text.replace(m[0], "").trim(), result: null };
-      }
-      function roomResolveName(list, name) {
-        if (!name) return "";
-        const hit = (list || []).find((o) =>
-          o.name === name || (o.name || "").includes(name) || name.includes(o.name || ""));
-        return hit ? hit.id : "";
-      }
-      async function appendRoomCard(bubble, query, result, acc) {
-        const card = document.createElement("div");
-        card.className = "event-proposal room-card";
-        bubble.appendChild(card);
-        if (result) { renderRoomCard(card, query, result); return; }
-        const hidx = parseInt(bubble.dataset.hidx, 10);
-        const save = (res) => {
-          // 仅当这条回复仍是历史里未被截断/重试的原消息时才回写
-          if (!Number.isInteger(hidx) || chatHistory[hidx]?.role !== "assistant"
-              || chatHistory[hidx].content !== acc) return;
-          const base = acc.trimEnd();
-          let payload = JSON.stringify(res);
-          // 历史单条上限 4000 字：超长时递减各节次样本，保证结果标记不被截掉
-          const groups = res.groups || [];
-          while (base.length + payload.length + 20 > 3900) {
-            const g = [...groups].reverse().find((x) => (x.rooms || []).length);
-            if (!g) break;
-            g.rooms = g.rooms.slice(0, Math.max(0, g.rooms.length - 4));
-            payload = JSON.stringify(res);
-          }
-          chatHistory[hidx].content = base + "\n[空教室结果] " + payload;
-          persistChat();
-        };
-        card.innerHTML =
-          '<div class="ep-head">空教室查询</div><div class="ep-meta">正在查询正方教务…</div>';
-        try {
-          if (!roomMeta) roomMeta = await api("/api/rooms/meta");
-          // AI 没写校区时用「课表来源」里设的默认校区，避免查成全部校区
-          const campusId = query.campus
-            ? roomResolveName(roomMeta.campuses, query.campus)
-            : (roomMeta.default_campus || "");
-          const campusName = query.campus || roomMeta.default_campus_name || "";
-          let buildings = roomMeta.buildings;
-          if (campusId && campusId !== roomMeta.campus) {
-            const m2 = await api("/api/rooms/meta?campus=" + encodeURIComponent(campusId));
-            buildings = m2.buildings;
-          }
-          const buildingId = roomResolveName(buildings, query.building);
-          // 按大节拆开查询，卡片上可以按第几节切换查看
-          const blocks = roomPeriodBlocks(query.start, query.end);
-          const groups = [];
-          let week = null;
-          let day = null;
-          for (const b of blocks) {
-            if (blocks.length > 1) {
-              const step = card.querySelector(".ep-meta");
-              if (step) step.textContent = `正在查询第 ${b.start}–${b.end} 节…`;
-            }
-            const params = new URLSearchParams({
-              date_s: query.date, start: b.start, end: b.end,
-              campus: campusId, building: buildingId,
-            });
-            const data = await api("/api/rooms/free?" + params.toString());
-            if (week == null) { week = data.week; day = data.day; }
-            groups.push({
-              start: data.start, end: data.end, count: data.count,
-              rooms: data.rooms.slice(0, 8).map((r) => ({
-                name: r.name, code: r.code, building: r.building, seats: r.seats,
-              })),
-            });
-          }
-          const res = {
-            date: query.date, week, day,
-            start: query.start, end: query.end,
-            campus: campusName, building: query.building,
-            campusId, buildingId,
-            count: groups.reduce((n, g) => n + (g.count || 0), 0),
-            groups,
-          };
-          renderRoomCard(card, query, res);
-          save(res);
-        } catch (e) {
-          const res = {
-            error: e.message, date: query.date, start: query.start, end: query.end,
-            campus: query.campus || (roomMeta && roomMeta.default_campus_name) || "",
-            building: query.building,
-          };
-          renderRoomCard(card, query, res);
-          save(res);
-        }
-      }
-      // 把查询范围按大节拆开：第 1–4 节 → 1–2、3–4
-      function roomPeriodBlocks(start, end) {
-        const blocks = [];
-        let s = Math.max(1, start);
-        const stop = Math.max(s, end);
-        while (s <= stop) {
-          const e = Math.min(s + 1, stop);
-          blocks.push({ start: s, end: e });
-          s = e + 1;
-        }
-        return blocks;
-      }
-      function renderRoomCard(card, query, res) {
-        const q = query || res;
-        const groups = res.groups && res.groups.length
-          ? res.groups
-          : [{ start: q.start, end: q.end, count: res.count || 0, rooms: res.rooms || [] }];
-        const range = q.start ? ` · 第 ${q.start}–${q.end} 节` : "";
-        const when = `${q.date || ""}${range}`;
-        const scope = [q.campus, q.building].filter(Boolean).join(" · ");
-        const head = `<div class="ep-head">空教室查询 · ${esc(when)}${scope ? " · " + esc(scope) : ""}</div>`;
-        let pick = () => groups[0];
-        const draw = () => {
-          const sel = pick();
-          card.dataset.period = String(sel.start);
-          const chips = groups.length > 1
-            ? `<div class="rc-periods">` + groups.map((g) =>
-              `<button type="button" class="small${g === sel ? " active" : ""}" data-rc-period="${g.start}">第 ${g.start}–${g.end} 节 · ${g.count} 间</button>`).join("") + `</div>`
-            : "";
-          const rooms = sel.rooms || [];
-          const byBuilding = new Map();
-          rooms.forEach((r) => {
-            const k = r.building || "其他";
-            if (!byBuilding.has(k)) byBuilding.set(k, []);
-            byBuilding.get(k).push(r);
-          });
-          let list = "";
-          for (const [b, rs] of byBuilding) {
-            list += `<div class="rc-group">${esc(b)}</div>` + rs.map((r) =>
-              `<div class="rc-room"><span>${esc(r.name)}${r.code && r.code !== r.name ? ` <span class="event-tag">${esc(r.code)}</span>` : ""}</span><span class="rc-seats">${r.seats ? esc(r.seats) + " 座" : ""}</span></div>`).join("");
-          }
-          const title = groups.length > 1
-            ? `第 ${sel.start}–${sel.end} 节 · ${sel.count} 间空教室`
-            : `共 ${sel.count} 间空教室`;
-          card.innerHTML = head + chips +
-            `<div class="ep-title">${esc(title)}</div>` +
-            (list
-              ? `<div class="rc-list">${list}</div>`
-              : `<div class="ep-meta">${sel.count ? "结果较多，仅保留了数量统计" : "这一节没有空教室，换个节次看看"}</div>`) +
-            (rooms.length && sel.count > rooms.length
-              ? `<div class="ep-meta">仅展示前 ${rooms.length} 间</div>` : "") +
-            '<div class="ep-actions"><button class="small" data-rc="all">在空教室页查看全部</button></div>';
-        };
-        if (res.error) {
-          card.innerHTML = head +
-            `<div class="ep-meta" style="color:var(--fail)">查询失败：${esc(res.error)}</div>` +
-            (/正方/.test(res.error)
-              ? '<div class="ep-actions"><button class="small" data-rc="source">去配置正方账号</button></div>'
-              : "");
-        } else {
-          pick = () => {
-            const saved = parseInt(card.dataset.period, 10);
-            return groups.find((g) => g.start === saved)
-              || groups.find((g) => g.count > 0) || groups[0];
-          };
-          draw();
-        }
-        card.addEventListener("click", async (e) => {
-          const p = e.target.closest("button[data-rc-period]");
-          if (p) {
-            card.dataset.period = p.dataset.rcPeriod;
-            draw();
-            return;
-          }
-          const btn = e.target.closest("button[data-rc]");
-          if (!btn) return;
-          if (btn.dataset.rc === "source") { switchTab("source"); return; }
-          const sel = pick();
-          btn.disabled = true;
-          try {
-            // 先备好 meta 再切页，避免 switchTab 触发一次默认条件的自动查询
-            if (!roomMeta || (res.campusId && res.campusId !== roomMeta.campus)) {
-              roomMeta = await api("/api/rooms/meta" +
-                (res.campusId ? "?campus=" + encodeURIComponent(res.campusId) : ""));
-              roomFillMeta(true);
-            }
-            roomPending = {
-              date: res.date || roomMeta.today,
-              start: sel.start || 1,
-              end: sel.end || 2,
-              building: res.buildingId || "",
-            };
-            switchTab("rooms");
-            // 空教室页已有上次结果时不会自动加载，这里直接按当前节次查询
-            if (roomPending) {
-              const p = roomPending;
-              roomPending = null;
-              $("#roomDate").value = p.date;
-              $("#roomStart").value = String(p.start);
-              $("#roomEnd").value = String(p.end);
-              $("#roomBuilding").value = p.building;
-              await queryRooms();
-            }
-          } catch (err) { toast(err.message, 4000, "error"); }
-          finally { btn.disabled = false; }
         });
       }
       /* ---------- AI 附件：上传、待发送列表、随消息发送 ---------- */
@@ -7677,79 +6889,56 @@
           if (s.portal.url) {
             $("#curlInput").placeholder = "已配置：" + s.portal.url;
           }
-          loadDefaultCampus(s.zhengfang.configured);
+          renderPrimaryState(s);
         } catch (e) {
           toast(e.message, 4000, "error");
         }
       }
 
-      let defaultCampusLoading = false;
-      async function loadDefaultCampus(configured) {
-        const sel = $("#defaultCampusSelect");
-        const btn = $("#saveDefaultCampusBtn");
-        if (!configured) {
-          sel.innerHTML = '<option value="">先配置正方教务</option>';
-          sel.disabled = true;
-          btn.disabled = true;
-          $("#defaultCampusState").textContent =
-            "保存正方学号密码后，这里会列出可选校区。";
-          return;
-        }
-        if (defaultCampusLoading) return;
-        defaultCampusLoading = true;
-        sel.disabled = false;
-        btn.disabled = false;
-        try {
-          if (!roomMeta) roomMeta = await api("/api/rooms/meta");
-          sel.innerHTML = '<option value="">不设默认（每次手动选）</option>' +
-            roomMeta.campuses
-              .map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`)
-              .join("");
-          const cfg = await api("/api/settings");
-          const def = (cfg.rooms && cfg.rooms.default_campus) || "";
-          sel.value = [...sel.options].some((o) => o.value === def) ? def : "";
-          $("#defaultCampusState").textContent = def
-            ? "当前默认：" + (sel.selectedOptions[0] || {}).textContent
-            : "未设默认校区，空教室页会使用教务默认校区。";
-        } catch (e) {
-          sel.innerHTML = '<option value="">校区加载失败</option>';
-          $("#defaultCampusState").textContent = e.message;
-        } finally {
-          defaultCampusLoading = false;
-        }
+      // 课表主数据源：正方（教务原始排课）/ 门户（含临时调课）/ 自动（正方优先）
+      function renderPrimaryState(s) {
+        const seg = $("#primarySeg");
+        if (!seg) return;
+        const active = ["zhengfang", "portal"].includes(s.primary) ? s.primary : "auto";
+        $$("#primarySeg button").forEach((b) => {
+          const on = b.dataset.primary === active;
+          b.classList.toggle("active", on);
+          b.setAttribute("aria-pressed", on ? "true" : "false");
+        });
+        const cn = { zhengfang: "正方教务", portal: "融合门户", mock: "演示数据" };
+        const chosen = { zhengfang: "正方教务", portal: "融合门户", auto: "自动（正方优先）" }[active];
+        const resolved = cn[s.resolved] || s.resolved || "未配置";
+        const snap = cn[s.snapshot_source] || s.snapshot_source || "未同步";
+        $("#primaryState").textContent =
+          `当前选择：${chosen} · 实际生效：${resolved} · 课表快照来自：${snap}`;
       }
-      async function saveDefaultCampus() {
-        const sel = $("#defaultCampusSelect");
-        const btn = $("#saveDefaultCampusBtn");
-        const id = sel.value || "";
-        const name = id ? ((sel.selectedOptions[0] || {}).textContent || "").trim() : "";
-        btn.disabled = true;
+      let primaryBusy = false;
+      $("#primarySeg").addEventListener("click", async (e) => {
+        const btn = e.target.closest("button[data-primary]");
+        if (!btn || primaryBusy || btn.classList.contains("active")) return;
+        primaryBusy = true;
+        $$("#primarySeg button").forEach((b) => (b.disabled = true));
+        const label = btn.textContent;
         try {
-          await api("/api/settings", {
+          const r = await api("/api/provider/primary", {
             method: "POST",
-            body: JSON.stringify({
-              rooms: { default_campus: id, default_campus_name: name },
-            }),
+            body: JSON.stringify({ primary: btn.dataset.primary }),
           });
-          toast(id ? "默认校区已设为 " + name : "已取消默认校区");
-          $("#defaultCampusState").textContent = id
-            ? "当前默认：" + name
-            : "未设默认校区，空教室页会使用教务默认校区。";
-          // 让空教室页下次进入时按新默认重新取 meta，记忆的校区也让位给新默认
-          roomMeta = null;
-          roomLastQuery = null;
-          const saved = roomReadFilters();
-          if (saved.campus) {
-            saved.campus = "";
-            try { localStorage.setItem(roomFilterKey(), JSON.stringify(saved)); } catch (e) {}
-          }
-        } catch (e) {
-          toast(e.message, 4000, "error");
+          if (r.ok) toast(`已切换到${label}：${r.message || "课表已更新"}`, 4500);
+          else toast(r.message || "切换失败，请先配置该数据源", 5000, "warn");
+          await loadSources();
+          await loadStatus();
+          await loadToday();
+          await loadWeek(viewWeek ?? Math.max(status?.week || 1, 1));
+          await loadExams();
+        } catch (err) {
+          toast(err.message, 4500, "error");
         } finally {
-          btn.disabled = false;
+          primaryBusy = false;
+          $$("#primarySeg button").forEach((b) => (b.disabled = false));
         }
-      }
-      $("#saveDefaultCampusBtn").addEventListener("click", saveDefaultCampus);
+      });
+
 
       /* ---------- 用户管理 ---------- */
       const ACTION_CN = {
@@ -7870,7 +7059,7 @@
         document.documentElement.dataset.theme = dark ? "dark" : "light";
         document.documentElement.style.colorScheme = dark ? "dark" : "light";
         const meta = document.getElementById("themeColorMeta");
-        if (meta) meta.content = dark ? "#21211E" : "#F7F6F2";
+        if (meta) meta.content = dark ? "#1C1A17" : "#FAF7F2";
         document.querySelectorAll("#themeChoice button").forEach((b) =>
           b.classList.toggle("active", b.dataset.themeChoice === choice));
       }
@@ -7912,11 +7101,10 @@
           b.setAttribute("aria-selected", on ? "true" : "false");
           b.tabIndex = on ? 0 : -1;
         });
-        ["today", "week", "rooms", "ai", "source", "admin", "settings"].forEach((t) =>
+        ["today", "week", "ai", "source", "admin", "settings"].forEach((t) =>
           $("#tab-" + t).classList.toggle("hidden", t !== tab),
         );
         if (tab === "today") loadToday();
-        if (tab === "rooms" && (!roomMeta || !roomLastQuery)) loadRooms();
         if (tab === "week") {
           loadWeek(viewWeek ?? Math.max(status?.week || 1, 1));
           loadExams();
@@ -8270,10 +7458,12 @@
           out.textContent = r.message;
           out.style.color = r.ok ? "var(--ok)" : "var(--warn)";
           if (r.ok) {
-            toast("正方已保存，课表/考试已更新", 4000);
+            toast("正方已保存，课表已切换为教务数据", 4500);
             await loadSources();
             await loadStatus();
             await loadToday();
+            await loadWeek(viewWeek ?? Math.max(status?.week || 1, 1));
+            await loadExams();
           }
         } catch (e) {
           out.textContent = e.message;
@@ -8656,7 +7846,12 @@
             switchTab("source");
           } else {
             let saved = readSavedTab();
-            // 空教室已恢复为导航项（P1-2），刷新后可正常停留；非管理员不恢复「用户管理」
+            // 旧版本可能把已下线的页签（如已移除的「空教室」）存进 localStorage，
+            // 落到不存在的 tab 会让所有页面都隐藏，这里统一回落到今日页
+            if (!["today", "week", "ai", "source", "admin", "settings"].includes(saved)) {
+              saved = "today";
+              saveTab("today");
+            }
             // 非管理员不恢复「用户管理」，并清掉无效记录；today 是默认页且已加载，无需重复切换
             if (saved === "admin" && currentUser.role !== "admin") {
               saveTab("today");

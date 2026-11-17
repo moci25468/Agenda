@@ -140,22 +140,53 @@ async def apply_snapshot(cfg: dict, courses: list[Course], source: str,
     return {"ok": True, "message": summary, "changes": changes, "pushed": pushed}
 
 
+async def _fallback_bundle(cfg: dict):
+    """auto 模式下主数据源失败时，临时改用另一套已配置的数据源。
+
+    只对 primary=auto 生效：用户显式选了正方/门户时不做替换（失败应暴露给他）。
+    返回 (provider, courses, exams) 或 None。
+    """
+    from .config import portal_configured, zhengfang_configured
+
+    if (cfg.get("provider", {}).get("primary") or "auto") != "auto":
+        return None
+    used = resolve_course_source(cfg)
+    if used == "zhengfang" and portal_configured(cfg):
+        cand = get_provider(cfg, "portal")
+    elif used == "portal" and zhengfang_configured(cfg):
+        cand = get_provider(cfg, "zhengfang")
+    else:
+        return None
+    try:
+        courses, exams = await cand.fetch_bundle()
+    except Exception:  # noqa: BLE001
+        return None
+    return cand, courses, exams
+
+
 async def run_sync(push: bool = True) -> dict:
     """按当前数据源拉取一次课表并应用快照。
 
-    课表主数据源由 provider.primary 决定（门户优先、正方兜底）；考试始终优先从正方
-    拉取（门户只提供课表），门户存在时也不影响考试同步。
+    课表主数据源由 provider.primary 决定（auto = 正方优先，没配正方才用门户）；
+    考试始终优先从正方拉取（门户只提供课表），门户存在时也不影响考试同步。
+    auto 模式下主源拉取失败会自动回退到另一套来源，避免单个账号故障导致课表停更。
     """
     cfg = load_config()
+    fallback_note = ""
     try:
         provider = get_provider(cfg)
         courses, exams = await provider.fetch_bundle()
     except Exception as e:  # noqa: BLE001
-        msg = f"课表拉取失败：{e}"
-        db.add_sync_log("fail", msg)
-        # 凭证过期主动告警（按数据源每天去重），避免静默停更
-        await _alert_auth_expired(cfg, resolve_course_source(cfg), e)
-        return {"ok": False, "message": msg, "changes": {}, "pushed": []}
+        fallback = await _fallback_bundle(cfg)
+        if not fallback:
+            msg = f"课表拉取失败：{e}"
+            db.add_sync_log("fail", msg)
+            # 凭证过期主动告警（按数据源每天去重），避免静默停更
+            await _alert_auth_expired(cfg, resolve_course_source(cfg), e)
+            return {"ok": False, "message": msg, "changes": {}, "pushed": []}
+        provider, courses, exams = fallback
+        fallback_note = f"（{resolve_course_source(cfg)} 拉取失败，已临时回退到 {provider.name}：{e}）"
+        db.add_sync_log("fail", f"主数据源拉取失败：{e}；已临时回退到 {provider.name}")
 
     exam_payload = exams if provider.supports_exams else None
     exam_source = provider.name
@@ -177,6 +208,9 @@ async def run_sync(push: bool = True) -> dict:
 
     result = await apply_snapshot(cfg, courses, provider.name, push,
                                   exams=exam_payload, exam_source=exam_source)
+    if fallback_note:
+        result["message"] += fallback_note
+        result["fallback"] = True
     if exam_error:
         result["message"] += f"；考试拉取失败：{exam_error}"
     return result

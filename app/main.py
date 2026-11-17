@@ -1856,6 +1856,30 @@ async def auth_change_password(req: ChangePasswordRequest, request: Request):
 
 # ---------- 数据源状态与正方账号登录 ----------
 
+class PrimaryRequest(BaseModel):
+    primary: str
+
+
+@app.post("/api/provider/primary")
+async def set_provider_primary(req: PrimaryRequest):
+    """手动指定课表主数据源：auto（正方优先）/ zhengfang / portal，并立即按新源同步一次。"""
+    from .config import portal_configured, resolve_course_source, zhengfang_configured
+
+    if req.primary not in ("auto", "zhengfang", "portal"):
+        raise HTTPException(400, "primary 只能是 auto / zhengfang / portal")
+    cfg = load_config()
+    if req.primary == "zhengfang" and not zhengfang_configured(cfg):
+        raise HTTPException(400, "还没配置正方教务，请先填学号密码")
+    if req.primary == "portal" and not portal_configured(cfg):
+        raise HTTPException(400, "还没配置门户，请先扫码登录或导入 cURL")
+    cfg["provider"]["primary"] = req.primary
+    save_config(cfg)
+    result = await run_sync(push=False)
+    return {"ok": bool(result.get("ok")), "primary": req.primary,
+            "resolved": resolve_course_source(load_config()),
+            "message": result.get("message", "")}
+
+
 @app.get("/api/provider/sources")
 async def provider_sources():
     """返回两套数据源的配置状态，供「课表来源」页展示与操作。"""
@@ -1953,15 +1977,27 @@ async def save_zhengfang(req: ZhengfangSaveRequest):
 
     zf["year"], zf["term"] = provider.year, provider.term
     p["zhengfang"] = zf
+    # 用户刚验证过正方账号：课表主数据源直接切到正方，否则仍会按门户渲染，
+    # 导致「测试成功但课表还是门户那份」。
+    p["primary"] = "zhengfang"
     save_config(cfg)
     label = term_label(provider.year, provider.term)
     message = (f"已自动切换到教务当前学期（{label}）：" if switched else f"{label}：")
     message += f"{len(courses)} 门课程"
     message += f"，{len(exams)} 场考试" if not exam_error else "；考试接口失败"
+    # 立即把这次拉到的教务课表写进快照，页面无需再等下一次定时同步
+    try:
+        await apply_snapshot(cfg, courses, "zhengfang", False,
+                             exams=exams or None,
+                             exam_source="zhengfang" if not exam_error else None)
+    except Exception as e:  # noqa: BLE001
+        message += f"；课表已保存但写入失败：{e}"
     snap = db.get_snapshot()
-    return {"ok": True, "message": message, "course_count": len(courses),
+    return {"ok": True, "message": message + "，课表已切换为正方教务",
+            "course_count": len(courses),
             "exam_count": len(exams), "exam_error": exam_error,
             "overwritten": (snap or {}).get("source") == "portal",
+            "primary": "zhengfang",
             "year": provider.year, "term": provider.term,
             "switched": bool(switched)}
 

@@ -2,8 +2,8 @@
 
 多用户下每位用户一份完整 config（存在 user_config 表），无用户上下文时读全局模板。
 provider 同时支持「门户(portal)」与「正方教务(zhengfang)」两套独立凭证，由
-provider.primary 决定课表主数据源：auto = 门户优先，门户不在再用正方；后期接入门户
-后下次同步自动以门户整表覆盖。考试始终优先从正方拉取（门户只提供课表）。
+provider.primary 决定课表主数据源：auto = 正方优先（配了正方就用正方，没配才用门户），
+门户可显式设为 primary=portal（调课场景以门户为准）。考试始终优先从正方拉取。
 """
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ DEFAULT_CONFIG = {
     # 数据源：门户与正方并存，primary 决定课表主来源
     "provider": {
         "type": "mock",               # 展示用：portal / zhengfang / mock
-        "primary": "auto",            # auto | portal | zhengfang（课表主数据源）
+        "primary": "auto",            # auto | portal | zhengfang（auto=正方优先）
         "zhengfang": {                # 正方教务（jwglxt）
             "base": "https://jxgl.qut.edu.cn/jwglxt",
             "username": "",
@@ -226,11 +226,13 @@ def portal_configured(cfg: dict) -> bool:
 def resolve_course_source(cfg: dict) -> str:
     """按 primary 决定课表主数据源：portal / zhengfang / mock。
 
-    auto：门户优先，门户不在配置则用正方；两者都没有回退 mock。
+    auto：正方优先（正方是教务排课数据的源头，带任课教师与考试；门户的课表接口
+    不返回教师字段），只在没配正方时才用门户；两者都没有回退 mock。
+    想以门户为准（例如要看调课后的课表）时，显式把 primary 设为 portal。
     """
     p = cfg.get("provider", {})
     ptype = p.get("type") or "mock"
-    # 用户显式选择演示或通用 HTTP 时，不再被 auto 的门户优先策略抢回。
+    # 用户显式选择演示或通用 HTTP 时，不再被 auto 策略抢回。
     if ptype in ("mock", "httpjson"):
         return ptype
     primary = p.get("primary") or "auto"
@@ -240,10 +242,10 @@ def resolve_course_source(cfg: dict) -> str:
         return "zhengfang"
     if primary == "portal" and portal_ok:
         return "portal"
-    if portal_ok:
-        return "portal"
     if zf_ok:
         return "zhengfang"
+    if portal_ok:
+        return "portal"
     return ptype
 
 
