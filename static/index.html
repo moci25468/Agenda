@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#F6F4ED" id="themeColorMeta" />
+    <meta name="theme-color" content="#F7F6F2" id="themeColorMeta" />
     <meta name="description" content="Agenda 知序 — 青岛理工大学日程、课表、考试与校园问答。" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -12,7 +12,7 @@
     <title>Agenda · 知序</title>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/static/icons/icon-180.png" />
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23365b49'/%3E%3Cpath d='M18 22h28M18 32h28M18 42h18' stroke='%23f7f7f4' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%233A3833'/%3E%3Cpath d='M18 22h28M18 32h28M18 42h18' stroke='%23f7f7f4' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E" />
     <script>
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", () => {
@@ -612,8 +612,8 @@
         margin: 8px 0;
         padding: 10px 12px;
         border-radius: 8px;
-        background: #252a25;
-        color: #e8ecf3;
+        background: #2A2A27;
+        color: #E6E5DF;
         overflow-x: auto;
         white-space: pre;
       }
@@ -685,7 +685,7 @@
         margin: 8px 0;
         border-radius: 8px;
         overflow: hidden;
-        background: #252a25;
+        background: #2A2A27;
       }
       .msg.ai .md-code-head {
         display: flex;
@@ -693,7 +693,7 @@
         justify-content: space-between;
         padding: 4px 10px;
         border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-        color: #9aa4b2;
+        color: #A29F96;
         font-size: 11px;
       }
       .msg.ai .md-code-head button {
@@ -1579,9 +1579,9 @@
       .mini-course {
         margin-bottom: 6px;
         padding: 8px 8px 8px 9px;
-        border-left: 2px solid #5f7d68;
+        border-left: 2px solid #80887E;
         border-radius: 5px;
-        background: #e6eee4;
+        background: #F1F1EA;
       }
       .mini-course .t {
         color: var(--sub);
@@ -1775,7 +1775,7 @@
       }
       .msg.ai pre {
         border-radius: 7px;
-        background: #252a25;
+        background: #2A2A27;
       }
       .chips {
         gap: 7px;
@@ -2239,9 +2239,9 @@
       .mini-course.tone-3,
       .mini-course.tone-4 {
         padding: 8px 8px 8px 9px;
-        border-left: 2px solid #5f7d68;
+        border-left: 2px solid #80887E;
         border-radius: 4px;
-        background: #e6eee4;
+        background: #F1F1EA;
         box-shadow: none;
         transition: none;
       }
@@ -2442,7 +2442,7 @@
       }
       .auth-tabs button:hover {
         border-color: transparent;
-        border-bottom-color: #b8c2b8;
+        border-bottom-color: #D8D6CE;
         background: transparent;
         color: var(--text);
       }
@@ -2496,43 +2496,43 @@
       /* 简约焕新：统一留白、层级与交互，保留所有既有 DOM 契约 */
       /* 设计令牌（01-visual-direction §2.1）：全站唯一事实来源，组件规则只引用 var()/color-mix */
       :root {
-        /* 表面 */
-        --bg: #F6F4ED;
-        --card: #FDFCF7;
-        --fill: #EFEEE6;
-        --fill-strong: #E7E6DC;
-        /* 文字 */
-        --text: #22261F;
-        --sub: #6B7267;
-        --faint: #9BA294;
-        --muted: #6B7267;
+        /* 表面（素笺：暖纸白，去黄绿相） */
+        --bg: #F7F6F2;
+        --card: #FFFFFF;
+        --fill: #F0EFEA;
+        --fill-strong: #E9E8E2;
+        /* 文字（墨） */
+        --text: #262622;
+        --sub: #77756D;
+        --faint: #A5A399;
+        --muted: #77756D;
         /* 分隔 */
-        --line: #E3E2D8;
-        --line-strong: #D3D4C8;
-        /* 强调·松绿 */
-        --accent: #2E5C46;
-        --accent-hover: #254A39;
-        --accent-soft: #E6EDE5;
-        --accent-faint: #8FA99A;
-        /* 朱砂·重要（印章红）：考试临近、今日高亮、品牌印 */
-        --cinnabar: #B8442C;
-        --cinnabar-soft: #F6E7E0;
-        /* 语义色 */
-        --ok: #3A7D4C;
-        --ok-soft: #E8F0E7;
-        --warn: #98601C;
-        --warn-soft: #F5ECDB;
-        --fail: #9F2E24;
-        --fail-soft: #F6E4E0;
+        --line: #E8E7E1;
+        --line-strong: #D8D6CE;
+        /* 强调·浓墨：主按钮与选中态用墨色，不做彩色装饰 */
+        --accent: #3A3833;
+        --accent-hover: #514E46;
+        --accent-soft: #ECEAE4;
+        --accent-faint: #A8A49A;
+        /* 赭·重要（仅考试临近等极少数"印章"节点） */
+        --cinnabar: #A9563E;
+        --cinnabar-soft: #F3E9E4;
+        /* 语义色（低饱和） */
+        --ok: #5B7D64;
+        --ok-soft: #EFF1EC;
+        --warn: #96703F;
+        --warn-soft: #F2EEE3;
+        --fail: #A34F42;
+        --fail-soft: #F4E9E5;
         /* 形状与深度 */
         --radius-s: 5px;
         --radius: 8px;
         --radius-l: 12px;
         --radius-xl: 16px;
         --shadow: var(--shadow-1);
-        --shadow-1: 0 1px 2px rgba(34, 38, 31, 0.04);
-        --shadow-2: 0 8px 24px rgba(34, 38, 31, 0.08);
-        --shadow-3: 0 20px 56px rgba(24, 28, 23, 0.16);
+        --shadow-1: 0 1px 2px rgba(36, 36, 32, 0.04);
+        --shadow-2: 0 8px 24px rgba(36, 36, 32, 0.08);
+        --shadow-3: 0 20px 56px rgba(28, 28, 24, 0.16);
         /* 间距刻度（4 的倍数） */
         --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
         --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-10: 40px;
@@ -2724,11 +2724,11 @@
         box-shadow: none;
       }
       /* 课程色板（01 §2.3）：松绿主调 + 四个大地色系邻近色 */
-      .mini-course.tone-0 { border-left-color: #5F7D68; background: #E6EEE4; }
-      .mini-course.tone-1 { border-left-color: #9A7E50; background: #F1EBDF; }
-      .mini-course.tone-2 { border-left-color: #69838B; background: #E6EDEF; }
-      .mini-course.tone-3 { border-left-color: #9B715D; background: #F1E7E1; }
-      .mini-course.tone-4 { border-left-color: #7F8869; background: #ECEEE6; }
+      .mini-course.tone-0 { border-left-color: #80887E; background: #F1F1EA; }
+      .mini-course.tone-1 { border-left-color: #948A74; background: #F3F0E8; }
+      .mini-course.tone-2 { border-left-color: #7F8790; background: #EFEFF1; }
+      .mini-course.tone-3 { border-left-color: #928077; background: #F2EEE9; }
+      .mini-course.tone-4 { border-left-color: #86887C; background: #F0F1EC; }
       .mini-course .t, .mini-course .r { color: var(--sub); }
       .sheet-panel { border: 1px solid var(--line); border-radius: var(--radius-xl); box-shadow: var(--shadow-3); }
 
@@ -3193,25 +3193,25 @@
         /* 深色 = 同一套色相在暗处的反演（01 §2.2）：只覆写 :root 变量与个别无法变量化的规则。
            JS 契约不变：仍由脚本 el.disabled 启停本块。 */
         :root {
-          --bg: #1B1E19;
-          --card: #23271F;
-          --fill: #2A2E25;
-          --fill-strong: #31362B;
-          --text: #E7E9E0;
-          --sub: #9AA192;
-          --faint: #6E7568;
-          --muted: #9AA192;
-          --line: #363B31;
-          --line-strong: #474D40;
-          --accent: #8FBC9E;
-          --accent-hover: #A9CEB5;
-          --accent-soft: #2C372E;
-          --accent-ink: #17251B;
-          --cinnabar: #DF7A5E;
-          --cinnabar-soft: #3B2A24;
-          --ok: #8FC49B;  --ok-soft: #2B362B;
-          --warn: #D3A468;  --warn-soft: #38311F;
-          --fail: #E08575;  --fail-soft: #3D2A26;
+          --bg: #21211E;
+          --card: #292926;
+          --fill: #30302C;
+          --fill-strong: #373732;
+          --text: #E6E5DF;
+          --sub: #A29F96;
+          --faint: #6F6D64;
+          --muted: #A29F96;
+          --line: #3B3B36;
+          --line-strong: #4C4B44;
+          --accent: #D6D3C8;
+          --accent-hover: #E4E1D7;
+          --accent-soft: #34342F;
+          --accent-ink: #23231F;
+          --cinnabar: #C98A6F;
+          --cinnabar-soft: #38302B;
+          --ok: #9DB5A0;  --ok-soft: #2E332D;
+          --warn: #C4A476;  --warn-soft: #363025;
+          --fail: #CE8B7C;  --fail-soft: #3A2F2A;
           /* 阴影降权：层级靠更亮的面（card > bg > fill）而非投影 */
           --shadow: none;
           --shadow-1: none;
@@ -3225,13 +3225,13 @@
         input, select, textarea { background: var(--fill); }
         /* 遮罩与中性 toast 为规范指定实色（01 §3.7/§3.9） */
         .sheet, .confirm-layer { background: rgba(0, 0, 0, 0.55); }
-        #toast { background: #3C4437; }
+        #toast { background: #35352F; }
         /* 课程色板深色版（01 §2.3） */
-        .mini-course, .mini-course.tone-0 { border-left-color: #7BA98A; background: #2C3A2E; }
-        .mini-course.tone-1 { border-left-color: #C09A68; background: #3A342A; }
-        .mini-course.tone-2 { border-left-color: #8AA3BD; background: #2C343D; }
-        .mini-course.tone-3 { border-left-color: #C08A72; background: #3A2E28; }
-        .mini-course.tone-4 { border-left-color: #93A478; background: #2F3628; }
+        .mini-course, .mini-course.tone-0 { border-left-color: #97A79B; background: #2D302B; }
+        .mini-course.tone-1 { border-left-color: #B0A184; background: #33302A; }
+        .mini-course.tone-2 { border-left-color: #93A1AE; background: #2C3033; }
+        .mini-course.tone-3 { border-left-color: #AE9084; background: #332E2A; }
+        .mini-course.tone-4 { border-left-color: #9CA184; background: #2E322B; }
     </style>
     <style>
       /* 交互层：顶部进度、骨架屏、设置分区导航、周视图工具、搜索与安装提示 */
@@ -3355,9 +3355,9 @@
       /* Toast 语义色：ID + 属性选择器，特异性高于各皮肤里的 #toast 定义。
          用固定实色而非 --ok/--fail/--warn：那组变量在深色模式下会被改成浅色高亮文字色，
          拿来做背景配白字会看不清。 */
-      #toast[data-type="success"] { background: #356F45; color: #fff; border-color: transparent; }
-      #toast[data-type="error"] { background: #9F2E24; color: #fff; border-color: transparent; }
-      #toast[data-type="warn"] { background: #8F5A12; color: #fff; border-color: transparent; }
+      #toast[data-type="success"] { background: #5F7F68; color: #fff; border-color: transparent; }
+      #toast[data-type="error"] { background: #A34F42; color: #fff; border-color: transparent; }
+      #toast[data-type="warn"] { background: #96703F; color: #fff; border-color: transparent; }
 
       /* 应用内确认 / 输入对话框：替代原生 confirm / prompt */
       .confirm-layer {
@@ -3438,7 +3438,7 @@
         display: flex; align-items: center; justify-content: center; gap: 10px;
         flex-wrap: wrap; padding: 9px 14px;
         padding-top: calc(9px + env(safe-area-inset-top, 0px));
-        background: #9F2E24; color: #fff; font-size: 12px;
+        background: #A34F42; color: #fff; font-size: 12px;
         box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
       }
       .net-banner button {
@@ -3702,7 +3702,7 @@
         document.documentElement.dataset.theme = dark ? "dark" : "light";
         document.documentElement.style.colorScheme = dark ? "dark" : "light";
         var meta = document.getElementById("themeColorMeta");
-        if (meta) meta.content = dark ? "#1B1E19" : "#F6F4ED";
+        if (meta) meta.content = dark ? "#21211E" : "#F7F6F2";
       })();
     </script>
   </head>
@@ -7870,7 +7870,7 @@
         document.documentElement.dataset.theme = dark ? "dark" : "light";
         document.documentElement.style.colorScheme = dark ? "dark" : "light";
         const meta = document.getElementById("themeColorMeta");
-        if (meta) meta.content = dark ? "#1B1E19" : "#F6F4ED";
+        if (meta) meta.content = dark ? "#21211E" : "#F7F6F2";
         document.querySelectorAll("#themeChoice button").forEach((b) =>
           b.classList.toggle("active", b.dataset.themeChoice === choice));
       }
