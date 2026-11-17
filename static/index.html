@@ -3225,6 +3225,44 @@
         button.log-toggle, .log-chevron { transition: none; }
       }
 
+      /* —— 扫码登录：长网址不再撑破布局；窄屏只保留二维码 —— */
+      .login-state {
+        display: block;
+        margin-top: 8px;
+        font-size: 12px;
+        line-height: 1.6;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+      .login-result {
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        white-space: pre-line;
+      }
+      .qr-image {
+        display: block;
+        width: 216px;
+        height: 216px;
+        margin-top: 12px;
+        padding: 8px;
+        border-radius: 10px;
+        background: #fff;
+        box-shadow: var(--shadow-1);
+        object-fit: contain;
+        box-sizing: content-box;
+      }
+      @media (max-width: 720px) {
+        /* 手机上看二维码就够了：技术日志与接入地址一律不显示，避免长 URL 把页面撑宽 */
+        #browserLoginLog { display: none !important; }
+        .qr-image {
+          width: 232px;
+          height: 232px;
+          margin: 16px auto 0;
+        }
+        .login-state { font-size: 12.5px; text-align: center; margin-top: 12px; }
+        .login-result { text-align: center; }
+      }
+
       /* —— 今日刊头：深墨青英雄区撑满卡顶 —— */
       .today-card { padding: 0; overflow: hidden; border-radius: 14px; }
       .today-card .day-head {
@@ -4299,17 +4337,12 @@
                 <button class="primary" id="browserLoginBtn">一键扫码登录</button>
                 <button id="browserLoginStopBtn" class="hidden">取消</button>
               </div>
-              <span id="browserLoginState" class="muted" style="font-size: 12px; display: block; margin-top: 8px"
+              <span id="browserLoginState" class="login-state muted"
                 >登录页二维码将显示在下方，用微信扫码即可自动获取课表；无需把密码交给程序</span
               >
-              <img
-                id="qrImage"
-                class="hidden"
-                alt="登录二维码"
-                style="margin-top: 10px; border-radius: 8px; background: #fff; padding: 8px; max-width: 240px; display: block"
-              />
+              <img id="qrImage" class="qr-image hidden" alt="登录二维码" />
               <pre id="browserLoginLog" class="log-box hidden"></pre>
-              <p class="hint" id="browserLoginResult"></p>
+              <p class="hint login-result" id="browserLoginResult"></p>
               <div class="section-divider" style="margin: 12px 0"></div>
               <p class="hint">备用：从浏览器导入接口（门户课表页 → F12 Network → 右键课表请求 → Copy as cURL）</p>
               <textarea id="curlInput" rows="3" placeholder="curl 'https://portal.qut.edu.cn/...' -H 'cookie: ...' ..."></textarea>
@@ -7941,12 +7974,39 @@
       const LOGIN_STATE_CN = {
         idle: "",
         starting: "正在启动浏览器",
-        waiting_login: "请用微信扫描上方二维码",
+        waiting_login: "请用微信扫描二维码登录",
         analyzing: "正在分析接口",
         done: "完成",
         error: "出错",
         cancelled: "已取消",
       };
+      // 窄屏（手机）只讲人话：二维码 + 一句状态，不展示接口地址等技术细节
+      const NARROW_STATE_CN = {
+        starting: "正在准备登录二维码…",
+        waiting_login: "请用微信扫描下方二维码登录",
+        analyzing: "已扫码，正在读取课表…",
+        done: "已接入课表",
+        cancelled: "已取消",
+      };
+      function isNarrowScreen() {
+        return window.matchMedia("(max-width: 720px)").matches;
+      }
+      // 去掉文本里的 http(s) 链接，并清理因此残留的空括号 / 重复标点
+      function stripUrls(text) {
+        return String(text || "")
+          .replace(/https?:\/\/[^\s，。；、）)】]+/g, "")
+          .replace(/[（(]\s*[)）]/g, "")
+          .replace(/\s{2,}/g, " ")
+          .replace(/^[\s，、；:：·-]+|[\s，、；:：·-]+$/g, "")
+          .trim();
+      }
+      // 手机上的失败文案：去掉技术前缀与英文堆栈，只留一句能看懂的
+      function narrowError(msg) {
+        const t = stripUrls(msg).replace(/^[^：:]{0,12}登录失败[：:]\s*/, "").trim();
+        if (/timeout|timed out|exceeded|time out/i.test(t))
+          return "登录超时，请重新扫码";
+        return t ? `登录失败：${t}` : "登录失败，请重试";
+      }
       function stopBrowserLoginPolling() {
         if (browserLoginTimer) {
           clearInterval(browserLoginTimer);
@@ -7960,16 +8020,30 @@
         $("#browserLoginBtn").disabled = running;
         $("#browserLoginStopBtn").classList.toggle("hidden", !running);
         const label = LOGIN_STATE_CN[s.status] || s.status;
-        $("#browserLoginState").textContent = s.message
-          ? `${label} — ${s.message}`
-          : label;
+        const narrow = isNarrowScreen();
+        let stateText;
+        if (narrow) {
+          stateText =
+            s.status === "error"
+              ? narrowError(s.message)
+              : NARROW_STATE_CN[s.status] ||
+                stripUrls(s.message) ||
+                label;
+        } else {
+          stateText =
+            s.message && s.message !== label
+              ? `${label} — ${s.message}`
+              : label;
+        }
+        $("#browserLoginState").textContent = stateText;
         const logEl = $("#browserLoginLog");
         if (s.log && s.log.length) {
           logEl.classList.remove("hidden");
           logEl.textContent = s.log.join("\n");
         }
         const qrEl = $("#qrImage");
-        if (s.qr_image) {
+        // 只有在等待扫码/识别阶段才显示二维码，登录结束（成功/失败/取消）就收起，避免遗留一张失效的码
+        if (s.qr_image && running) {
           qrEl.src = "data:image/png;base64," + s.qr_image;
           qrEl.classList.remove("hidden");
         } else {
@@ -7978,11 +8052,22 @@
         }
         let extra = "";
         if (s.status === "done" && s.result) {
-          extra = s.result.ok
-            ? `已写入数据源：${s.result.url}（${s.result.method}）\n数组路径：${s.result.list_path || "(根数组)"}\n${s.result.message}`
-            : s.result.message || "";
-          if (s.result.warnings && s.result.warnings.length)
-            extra += "\n" + s.result.warnings.join("\n");
+          if (s.result.ok) {
+            extra = narrow
+              ? `已接入课表接口（${s.result.method || "GET"}）` +
+                (s.result.message ? `\n${stripUrls(s.result.message)}` : "")
+              : `已写入数据源：${s.result.url}（${s.result.method}）\n数组路径：${s.result.list_path || "(根数组)"}\n${s.result.message}`;
+            if (s.result.warnings && s.result.warnings.length)
+              extra +=
+                "\n" +
+                s.result.warnings
+                  .map((w) => (narrow ? stripUrls(w) : w))
+                  .join("\n");
+          } else {
+            extra = narrow
+              ? `登录未完成：${stripUrls(s.result.message || "")}`
+              : s.result.message || "";
+          }
         }
         $("#browserLoginResult").textContent = extra;
         return running;
