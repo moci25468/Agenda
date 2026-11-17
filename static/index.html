@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#FAF7F2" id="themeColorMeta" />
+    <meta name="theme-color" content="#F4F6F8" id="themeColorMeta" />
     <meta name="description" content="Agenda 知序 — 青岛理工大学日程、课表、考试与校园问答。" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -12,7 +12,7 @@
     <title>Agenda · 知序</title>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/static/icons/icon-180.png" />
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%236B4A38'/%3E%3Cpath d='M18 22h28M18 32h28M18 42h18' stroke='%23f7f7f4' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%231E2A36'/%3E%3Cpath d='M18 22h28M18 32h28M18 42h18' stroke='%23f4f6f8' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E" />
     <script>
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", () => {
@@ -533,7 +533,7 @@
         margin: 8px 0;
         padding: 10px 12px;
         border-radius: 8px;
-        background: #2A2A27;
+        background: #20262E;
         color: #E6E5DF;
         overflow-x: auto;
         white-space: pre;
@@ -606,7 +606,7 @@
         margin: 8px 0;
         border-radius: 8px;
         overflow: hidden;
-        background: #2A2A27;
+        background: #20262E;
       }
       .msg.ai .md-code-head {
         display: flex;
@@ -614,7 +614,7 @@
         justify-content: space-between;
         padding: 4px 10px;
         border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-        color: #A29F96;
+        color: #8C96A2;
         font-size: 11px;
       }
       .msg.ai .md-code-head button {
@@ -1131,10 +1131,10 @@
         border: 1px solid var(--accent);
         border-radius: 7px;
         color: var(--accent);
-        font: 500 23px/1 Georgia, "Times New Roman", serif;
+        font: 500 23px/1 var(--font-text);
       }
       h1 {
-        font: 500 29px/1.1 Georgia, "Times New Roman", serif;
+        font: 500 29px/1.1 var(--font-num);
         letter-spacing: -0.035em;
       }
       .brand-cn {
@@ -1357,7 +1357,7 @@
       .auth-foot {
         margin-top: 24px;
         color: var(--sub);
-        font: 10px/1.5 Georgia, "Times New Roman", serif;
+        font: 10px/1.5 var(--font-text);
         letter-spacing: 0.13em;
         text-align: center;
         text-transform: uppercase;
@@ -1534,9 +1534,9 @@
       .mini-course {
         margin-bottom: 6px;
         padding: 8px 8px 8px 9px;
-        border-left: 2px solid #80887E;
+        border-left: 2px solid #7E8C92;
         border-radius: 5px;
-        background: #F1F1EA;
+        background: #EBEEF0;
       }
       .mini-course .t {
         color: var(--sub);
@@ -1730,7 +1730,7 @@
       }
       .msg.ai pre {
         border-radius: 7px;
-        background: #2A2A27;
+        background: #20262E;
       }
       .chips {
         gap: 7px;
@@ -1814,7 +1814,7 @@
         font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       }
       .sheet {
-        background: rgba(24, 28, 23, 0.38);
+        background: rgba(15, 20, 26, 0.42);
       }
       .sheet-panel {
         padding: 24px;
@@ -2194,9 +2194,9 @@
       .mini-course.tone-3,
       .mini-course.tone-4 {
         padding: 8px 8px 8px 9px;
-        border-left: 2px solid #80887E;
+        border-left: 2px solid #7E8C92;
         border-radius: 4px;
-        background: #F1F1EA;
+        background: #EBEEF0;
         box-shadow: none;
         transition: none;
       }
@@ -2397,7 +2397,7 @@
       }
       .auth-tabs button:hover {
         border-color: transparent;
-        border-bottom-color: #D8D6CE;
+        border-bottom-color: #D5DAE0;
         background: transparent;
         color: var(--text);
       }
@@ -2451,51 +2451,60 @@
       /* 简约焕新：统一留白、层级与交互，保留所有既有 DOM 契约 */
       /* 设计令牌（01-visual-direction §2.1）：全站唯一事实来源，组件规则只引用 var()/color-mix */
       :root {
-        /* 表面（奶油纸：暖白偏奶油，比纯白柔、比米黄干净） */
-        --bg: #FAF7F2;
+        /* 表面（冷感极简：冷灰底，纯白卡浮于其上） */
+        --bg: #F4F6F8;
         --card: #FFFFFF;
-        --fill: #F3EEE7;
-        --fill-strong: #EAE3D9;
-        /* 文字（咖啡墨） */
-        --text: #241F1B;
-        --sub: #6E635B;
-        --faint: #A2968B;
-        --muted: #6E635B;
-        /* 分隔 */
-        --line: #E7DFD4;
-        --line-strong: #D8CDBE;
-        /* 强调·咖啡：主按钮、选中态、关键数字 */
-        --accent: #6B4A38;
-        --accent-hover: #573A2B;
-        --accent-soft: #F1E6DB;
-        --accent-faint: #B49A87;
-        --accent-ink: #FFFDF9;
-        /* 陶土·重要（考试临近、今日标记） */
-        --cinnabar: #B04A2E;
-        --cinnabar-soft: #F8E7DF;
-        /* 语义色 */
-        --ok: #4C7A59;
-        --ok-soft: #E9F1EA;
-        --warn: #9A6A21;
-        --warn-soft: #F7EEDC;
-        --fail: #A6402A;
-        --fail-soft: #F8E5DF;
-        /* 形状与深度 */
+        --fill: #EDF0F3;
+        --fill-strong: #E3E7EC;
+        /* 文字（冷墨） */
+        --text: #1F242B;
+        --sub: #66707C;
+        --faint: #98A2AE;
+        --muted: #66707C;
+        /* 分隔（更细更淡的 1px 冷灰线） */
+        --line: #E4E8ED;
+        --line-strong: #D3D9E0;
+        /* 强调·墨青（全站唯一强调色）：主按钮、选中态、关键数字 */
+        --accent: #35617A;
+        --accent-hover: #2C5268;
+        --accent-soft: #EAF0F4;
+        --accent-faint: #8AA6B8;
+        --accent-ink: #F2F7FA;
+        /* 点睛（保留语义位，冷感版与主强调同色相收敛） */
+        --cinnabar: #35617A;
+        --cinnabar-soft: #EAF0F4;
+        /* 冷点缀（刊头内弱强调，冰蓝灰） */
+        --gilt: #7FA0B8;
+        /* 刊头（今日英雄区：深墨青冷调） */
+        --hero: #1E2A36;
+        --hero-2: #161F2A;
+        --hero-text: #EFF3F7;
+        --hero-sub: #8CA0B2;
+        --hero-gilt: #82A8C6;
+        /* 语义色（冷化处理：绿保功能、琥珀降暖、砖红转冷红） */
+        --ok: #3F7D5F;
+        --ok-soft: #E6F0EA;
+        --warn: #93712F;
+        --warn-soft: #F3EEDC;
+        --fail: #A6493B;
+        --fail-soft: #F6E9E6;
+        /* 形状与深度（圆角统一、阴影更柔更浅偏冷） */
         --radius-s: 5px;
         --radius: 8px;
         --radius-l: 12px;
         --radius-xl: 16px;
         --shadow: var(--shadow-1);
-        --shadow-1: 0 1px 2px rgba(36, 36, 32, 0.04);
-        --shadow-2: 0 8px 24px rgba(36, 36, 32, 0.08);
-        --shadow-3: 0 20px 56px rgba(28, 28, 24, 0.16);
+        --shadow-1: 0 1px 2px rgba(23, 28, 35, 0.05);
+        --shadow-2: 0 8px 24px rgba(23, 28, 35, 0.08);
+        --shadow-3: 0 20px 56px rgba(18, 23, 30, 0.18);
         /* 间距刻度（4 的倍数） */
         --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
         --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-10: 40px;
-        /* 字体：中文正文 PingFang SC；Georgia 衬线只用于时刻数字 */
-        --font-text: -apple-system, BlinkMacSystemFont, "PingFang SC",
+        /* 字体：全站统一冷调无衬线；数字用同一套字体 + tabular-nums 对齐 */
+        --font-text: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
           "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
-        --font-num: Georgia, "Times New Roman", "Songti SC", serif;
+        --font-num: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC",
+          "Helvetica Neue", sans-serif;
         --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       }
       html { scroll-behavior: smooth; }
@@ -2680,18 +2689,18 @@
         box-shadow: none;
       }
       /* 课程色板（01 §2.3）：松绿主调 + 四个大地色系邻近色 */
-      .mini-course.tone-0 { border-left-color: #6E8A72; background: #F1F5EF; }
-      .mini-course.tone-1 { border-left-color: #B08048; background: #FBF3E6; }
-      .mini-course.tone-2 { border-left-color: #6D8398; background: #EEF2F6; }
-      .mini-course.tone-3 { border-left-color: #B0684C; background: #FAEEE8; }
-      .mini-course.tone-4 { border-left-color: #8A7B5A; background: #F6F2E7; }
+      .mini-course.tone-0 { border-left-color: #4E7B74; background: #DEEAE7; }
+      .mini-course.tone-1 { border-left-color: #5E7490; background: #E2E8F1; }
+      .mini-course.tone-2 { border-left-color: #66689A; background: #E6E7F2; }
+      .mini-course.tone-3 { border-left-color: #7D6E80; background: #ECE8EF; }
+      .mini-course.tone-4 { border-left-color: #6B826F; background: #E4EDE5; }
       .mini-course .t, .mini-course .r { color: var(--sub); }
       .sheet-panel { border: 1px solid var(--line); border-radius: var(--radius-xl); box-shadow: var(--shadow-3); }
 
       /* 桌面增强（≥901px）：从已清理的死皮肤移植的有效规则 */
       .exam-date .dow { margin-top: 4px; }
       @media (min-width: 901px) {
-        .week-grid { min-width: 1000px; }
+        .week-grid { min-width: 0; }
         .today-card { padding: 31px 32px; }
         .today-card .day-head .date { font-size: 34px; }
         #todayCount { margin-top: 13px; padding-top: 9px; border-top: 1px solid var(--line); font-size: 11px; }
@@ -3017,7 +3026,7 @@
       .exam-countdown b {
         display: block;
         color: var(--accent);
-        font: 650 28px/1 Georgia, "Times New Roman", serif;
+        font: 650 28px/1 var(--font-num);
         letter-spacing: -0.03em;
         font-variant-numeric: tabular-nums;
       }
@@ -3093,37 +3102,275 @@
         font-weight: 600;
       }
 
+      /* ==================== 冷感极简（2026-11 改版） ====================
+         Apple/Notion 式干净冷调：冷灰中性底、单一墨青强调、无衬线数字、
+         更淡的 1px 分隔线。只覆盖视觉，不动 DOM 契约；旧规则仍在上方，此处层叠胜出。 */
+
+      /* —— 顶栏品牌：冷调无衬线刊名 —— */
+      header h1 { font-family: var(--font-num); font-weight: 600; font-size: 26px; letter-spacing: -0.01em; }
+      header h1 .brand-cn {
+        margin-left: 6px; font-family: var(--font-text); font-size: 12px;
+        color: var(--sub); letter-spacing: 0.34em; vertical-align: 3px;
+      }
+      .header-sub { font-size: 11px; letter-spacing: 0.14em; color: var(--faint); }
+
+      /* —— 主导航（桌面）：细线文字 tab，选中压一道墨青 —— */
+      nav {
+        gap: 2px; margin-bottom: 26px; padding: 0 2px;
+        border: 0; border-bottom: 1px solid var(--line); border-radius: 0;
+        background: transparent; box-shadow: none;
+        backdrop-filter: none; -webkit-backdrop-filter: none;
+      }
+      nav button {
+        position: relative; min-height: 44px; padding: 10px 16px 13px;
+        border-radius: 0; color: var(--sub); font-size: 13.5px; letter-spacing: 0.02em;
+      }
+      nav button:hover { background: transparent; color: var(--text); }
+      nav button.active { background: transparent; box-shadow: none; color: var(--text); font-weight: 650; }
+      nav button.active::after {
+        content: ""; position: absolute; left: 16px; right: 16px; bottom: -1px;
+        height: 2px; background: var(--accent); border-radius: 1px;
+      }
+
+      /* —— 卡片：纯白 + 淡线，标题去装饰只靠字重层级 —— */
+      .card, .today-card { border-color: var(--line); box-shadow: var(--shadow-1); }
+      .card h2 { border-left: 0; padding-left: 0; font-size: 17px; font-weight: 650; letter-spacing: -0.01em; }
+      .section-kicker { color: var(--accent); letter-spacing: 0.18em; }
+
+      /* —— 今日刊头：深墨青英雄区撑满卡顶 —— */
+      .today-card { padding: 0; overflow: hidden; border-radius: 14px; }
+      .today-card .day-head {
+        margin: 0; padding: 30px 32px 26px; border-bottom: 0;
+        background: linear-gradient(172deg, var(--hero) 0%, var(--hero-2) 100%);
+      }
+      .today-card .section-kicker { color: var(--hero-gilt); letter-spacing: 0.26em; }
+      .today-card .day-head .date {
+        font-family: var(--font-num); font-weight: 600; font-size: 40px;
+        color: var(--hero-text); letter-spacing: -0.01em; line-height: 1.15;
+        font-variant-numeric: tabular-nums;
+      }
+      .today-card .day-meta .muted { color: var(--hero-gilt); letter-spacing: 0.08em; }
+      .today-card #todayCount { color: var(--hero-sub); }
+      .today-card > #todayList { padding: 6px 32px 30px; }
+      .today-card > .empty { margin: 6px 32px 30px; }
+
+      /* —— 下一节课：纸面通栏 + 墨青书脊 —— */
+      .next-class {
+        margin: 0; padding: 15px 32px; border: 0; border-radius: 0;
+        border-top: 1px solid var(--line); border-left: 0;
+        border-bottom: 1px solid var(--line);
+        background: var(--card); box-shadow: inset 3px 0 0 var(--accent);
+      }
+      .next-class:hover { background: var(--card); border-color: var(--line); }
+      .next-class .nc-kicker { color: var(--accent); }
+      .next-class .nc-count b { color: var(--accent); font-family: var(--font-num); font-weight: 650; }
+
+      /* —— 今日课程行：冷调等宽数字时刻 —— */
+      .course-time .range { font-family: var(--font-num); font-size: 16px; font-weight: 650; letter-spacing: 0.01em; font-variant-numeric: tabular-nums; }
+      .course-row { border-top-color: var(--line); }
+      .course-row:hover .course-name { color: var(--accent); }
+
+      /* —— 明日卡：无衬线日期 —— */
+      .tomorrow-card .day-head .date { font-family: var(--font-num); font-weight: 600; font-size: 30px; font-variant-numeric: tabular-nums; }
+
+      /* —— 按钮：墨青主按钮 —— */
+      button.primary {
+        border-radius: 8px; background: var(--accent); color: var(--accent-ink);
+        letter-spacing: 0.04em;
+      }
+      button.primary:hover { background: var(--accent-hover); }
+      button.small { border-radius: 7px; }
+
+      /* —— 徽章：冷灰方角 —— */
+      .badge { border-radius: 4px; letter-spacing: 0.08em; }
+
+      /* —— 考试倒计时：墨青无衬线 —— */
+      .exam-countdown b { color: var(--accent); font-weight: 650; }
+      .exam-countdown.urgent b { color: var(--fail); }
+
+      /* —— 周课表：冷感低饱和色板（青灰/钢蓝/靛灰/冷紫灰/灰绿） —— */
+      .mini-course.tone-0 { border-left-color: #4E7B74; background: #DEEAE7; }
+      .mini-course.tone-1 { border-left-color: #5E7490; background: #E2E8F1; }
+      .mini-course.tone-2 { border-left-color: #66689A; background: #E6E7F2; }
+      .mini-course.tone-3 { border-left-color: #7D6E80; background: #ECE8EF; }
+      .mini-course.tone-4 { border-left-color: #6B826F; background: #E4EDE5; }
+      .week-grid { box-shadow: none; }
+
+      /* —— 表单：冷灰底输入框 —— */
+      input, textarea, select { background: var(--fill); border-color: var(--line-strong); border-radius: 8px; }
+      input:focus, textarea:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
+
+      /* —— 登录页：整页深墨青，表单浮成一纸 —— */
+      .auth-screen { background: linear-gradient(168deg, var(--hero) 0%, var(--hero-2) 100%); }
+      .auth-eyebrow { color: var(--hero-gilt); letter-spacing: 0.3em; }
+      .auth-title { color: var(--hero-text); font-family: var(--font-num); font-weight: 600; }
+      .auth-title span { color: var(--hero-gilt); font-family: var(--font-text); letter-spacing: 0.3em; }
+      .auth-intro-sub { color: var(--hero-sub); }
+      .auth-features dt { color: var(--hero-gilt); }
+      .auth-features dd { color: var(--hero-sub); }
+      .auth-card {
+        background: var(--card); border: 0; border-radius: 14px;
+        box-shadow: 0 24px 64px rgba(8, 13, 20, 0.42);
+      }
+
+      /* —— 移动端 —— */
+      @media (max-width: 720px) {
+        .today-card .day-head { padding: 22px 20px 18px; }
+        .today-card .day-head .date { font-size: 30px; }
+        .today-card > #todayList { padding: 4px 20px 22px; }
+        .next-class { padding: 13px 20px; }
+        #nav {
+          border-top: 1px solid var(--line-strong);
+          background: color-mix(in srgb, var(--bg) 88%, transparent);
+          backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+          box-shadow: none;
+        }
+        #nav button.active {
+          background: transparent; color: var(--accent);
+          box-shadow: inset 0 2px 0 var(--accent); border-radius: 0;
+        }
+      }
+
       /* 深色模式样式独立成表，由脚本按用户选择启停（跟随系统 / 浅色 / 深色） */
       :root { color-scheme: light dark; }
+      /* —— v2.1 微调：视觉回归后收紧 —— */
+      .wrap { max-width: 1000px; }
+      .statusbar { color: var(--faint); font-size: 10.5px; letter-spacing: 0.05em; }
+      .statusbar span:not(:last-child)::after { margin: 0 9px; opacity: 0.55; }
+
+      /* 刊头：日期收行距，右侧信息压低 */
+      .today-card .day-head .date { line-height: 1.06; letter-spacing: -0.004em; }
+      .today-card .day-meta .muted { font-size: 11.5px; }
+      .today-card #todayCount { font-size: 11px; letter-spacing: 0.04em; }
+
+      /* 下一节课：去箭头、数字降调、禁止换行 */
+      .next-class .nc-arrow { display: none; }
+      .next-class .nc-count { white-space: nowrap; }
+      .next-class .nc-count b { font-size: 22px; }
+      .next-class .nc-count span { letter-spacing: 0.04em; }
+
+      /* 今日课程行：收紧节奏 */
+      .course-row { gap: 22px; padding: 18px 0; }
+      .course-time .sections { color: var(--faint); }
+
+      /* 周课表：冷感低饱和色，五类课一眼可分 */
+      .mini-course.tone-0 { border-left-color: #4E7B74; background: #DEEAE7; }
+      .mini-course.tone-1 { border-left-color: #5E7490; background: #E2E8F1; }
+      .mini-course.tone-2 { border-left-color: #66689A; background: #E6E7F2; }
+      .mini-course.tone-3 { border-left-color: #7D6E80; background: #ECE8EF; }
+      .mini-course.tone-4 { border-left-color: #6B826F; background: #E4EDE5; }
+      .mini-course .n { color: var(--text); font-weight: 650; letter-spacing: 0; }
+      .mini-course .r { color: color-mix(in srgb, var(--text) 62%, transparent); }
+
+      /* 今日列：墨青淡染，与彩色课块拉开 */
+      .week-cell.today { background: color-mix(in srgb, var(--accent) 5%, var(--card)); }
+      .week-head-cell.today { background: color-mix(in srgb, var(--accent) 9%, var(--card)); }
+      .week-head-cell.today .dow, .week-head-cell.today .dnum { color: var(--accent); }
+      .week-head-cell .dow { font-size: 12px; letter-spacing: 0.06em; }
+      .week-head-cell .dnum { font-family: var(--font-num); font-size: 12px; }
+
+      /* 表格：线更淡、行更紧、节次列等宽数字 */
+      .week-grid { background: color-mix(in srgb, var(--line) 55%, var(--card)); border-radius: 10px; }
+      .week-cell { min-height: 92px; padding: 6px; }
+      .week-period { background: color-mix(in srgb, var(--fill) 72%, var(--card)); }
+      .week-period .p { font-size: 10.5px; font-weight: 650; letter-spacing: 0.04em; }
+      .week-period .t { font-family: var(--font-num); font-size: 10.5px; }
+
+      /* 空格子「加日程」：默认几乎隐形，悬停才亮 */
+      .week-cell .wc-free {
+        opacity: 0.3;
+        border-color: color-mix(in srgb, var(--line) 65%, transparent);
+        font-size: 10px;
+      }
+      .week-cell:hover .wc-free, .wc-free:hover { opacity: 1; }
+
+      /* —— v2.2 修正：宽度溢出 / 状态条换行 / 课块浓度 / 表头比例 —— */
+      .wrap { max-width: 1040px; }
+      .week-grid { overflow: visible; min-width: 0; }
+      .week-grid-scroll { overflow-x: auto; padding-bottom: 2px; }
+      .statusbar {
+        white-space: nowrap; overflow-x: auto; scrollbar-width: none;
+        font-size: 10.5px; color: var(--faint);
+      }
+      .statusbar::-webkit-scrollbar { display: none; }
+
+      .mini-course.tone-0 { border-left-color: #4E7B74; background: #DEEAE7; }
+      .mini-course.tone-1 { border-left-color: #5E7490; background: #E2E8F1; }
+      .mini-course.tone-2 { border-left-color: #66689A; background: #E6E7F2; }
+      .mini-course.tone-3 { border-left-color: #7D6E80; background: #ECE8EF; }
+      .mini-course.tone-4 { border-left-color: #6B826F; background: #E4EDE5; }
+
+      .week-head-cell { padding: 11px 6px 12px; }
+      .week-head-cell .dow { font-size: 11px; font-weight: 650; letter-spacing: 0.1em; }
+      .week-head-cell .dnum { margin-top: 3px; font-family: var(--font-num); font-size: 13px; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
+
+      /* —— v2.3：刊头星期降调 / 状态条单行 / 行内细节 —— */
+      .statusbar { flex-wrap: nowrap; gap: 0; }
+      .today-card .day-head .date .dow {
+        margin-left: 8px; font-family: var(--font-text); font-size: 17px; font-weight: 500;
+        letter-spacing: 0.18em; color: var(--hero-gilt); vertical-align: 7px;
+      }
+      .tomorrow-card .day-head .date .dow {
+        margin-left: 6px; font-family: var(--font-text); font-size: 13px; font-weight: 500;
+        letter-spacing: 0.16em; color: var(--accent); vertical-align: 4px;
+      }
+      .course-time .sections { margin-top: 1px; }
+      .mini-course .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: 0.01em; }
+      .mini-course .n {
+        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+        overflow: hidden; line-height: 1.3;
+      }
+
+      /* —— v2.4：窄屏课程行改为上下结构，时间不再折行 —— */
+      .course-time .range { white-space: nowrap; }
+      @media (max-width: 520px) {
+        .course-row { display: block; gap: 0; padding: 16px 0; }
+        .course-time { display: flex; align-items: baseline; gap: 10px; flex-basis: auto; margin-bottom: 7px; }
+        .course-time .range { font-size: 15px; }
+        .course-time .sections { margin-top: 0; }
+      }
+      @media (max-width: 480px) {
+        .today-card .day-head .date { font-size: 28px; }
+        .today-card .day-head .date .dow { font-size: 14px; vertical-align: 4px; letter-spacing: 0.14em; }
+        .next-class { padding: 12px 20px; }
+        nav button { font-size: 12.5px; padding: 10px 11px 12px; }
+      }
+
     </style>
     <style id="darkThemeCss">
         /* 深色 = 同一套色相在暗处的反演（01 §2.2）：只覆写 :root 变量与个别无法变量化的规则。
            JS 契约不变：仍由脚本 el.disabled 启停本块。 */
         :root {
-          --bg: #1C1A17;
-          --card: #24211D;
-          --fill: #2B2723;
-          --fill-strong: #332E29;
-          --text: #EDE8E1;
-          --sub: #A9A096;
-          --faint: #78706A;
-          --muted: #A9A096;
-          --line: #3A342E;
-          --line-strong: #4B443C;
-          --accent: #D8BCA4;
-          --accent-hover: #E8D2BE;
-          --accent-soft: #3A302A;
-          --accent-ink: #221D19;
-          --cinnabar: #D98868;
-          --cinnabar-soft: #3A2C26;
-          --ok: #9DB79F;  --ok-soft: #2C332C;
-          --warn: #CBA271;  --warn-soft: #363025;
-          --fail: #CE8B78;  --fail-soft: #3A2C28;
-          /* 阴影降权：层级靠更亮的面（card > bg > fill）而非投影 */
-          --shadow: none;
+          /* 冷感极简·深色：同一套墨青色相在暗处的反演 */
+          --bg: #14181E;
+          --card: #1C2229;
+          --fill: #232A32;
+          --fill-strong: #2B333D;
+          --text: #E4E8ED;
+          --sub: #93A0AD;
+          --faint: #5F6B78;
+          --muted: #93A0AD;
+          --line: #2A323B;
+          --line-strong: #39434E;
+          --accent: #7FA8C9;
+          --accent-hover: #93B9D8;
+          --accent-soft: #21303D;
+          --accent-faint: #55708A;
+          --accent-ink: #0F1B24;
+          --cinnabar: #7FA8C9;
+          --cinnabar-soft: #21303D;
+          --gilt: #7FA8C9;
+          --hero: #1D2936;
+          --hero-2: #141D28;
+          --hero-text: #E7ECF1;
+          --hero-sub: #8396A8;
+          --hero-gilt: #82A8C6;
+          --ok: #7FB89B;  --ok-soft: #1E2C26;
+          --warn: #C0A265;  --warn-soft: #2C281D;
+          --fail: #C98272;  --fail-soft: #32231F;
           --shadow-1: none;
-          --shadow-2: 0 8px 26px rgba(0, 0, 0, 0.28);
-          --shadow-3: 0 20px 60px rgba(0, 0, 0, 0.42);
+          --shadow-2: 0 8px 26px rgba(0, 0, 0, 0.30);
+          --shadow-3: 0 20px 60px rgba(0, 0, 0, 0.46);
         }
         ::selection { background: color-mix(in srgb, var(--accent) 30%, var(--bg)); color: var(--text); }
         /* 深色 primary：底 --accent，文字 --accent-ink（对比 9.2:1） */
@@ -3132,13 +3379,13 @@
         input, select, textarea { background: var(--fill); }
         /* 遮罩与中性 toast 为规范指定实色（01 §3.7/§3.9） */
         .sheet, .confirm-layer { background: rgba(0, 0, 0, 0.55); }
-        #toast { background: #332E29; }
-        /* 课程色板深色版（01 §2.3） */
-        .mini-course, .mini-course.tone-0 { border-left-color: #90A894; background: #2A302A; }
-        .mini-course.tone-1 { border-left-color: #C39A6C; background: #342E25; }
-        .mini-course.tone-2 { border-left-color: #8FA4B8; background: #282F36; }
-        .mini-course.tone-3 { border-left-color: #C0836A; background: #362C27; }
-        .mini-course.tone-4 { border-left-color: #B09A76; background: #322D24; }
+        #toast { background: #242B33; }
+        /* 课程色板深色版（冷感低饱和反演） */
+        .mini-course, .mini-course.tone-0 { border-left-color: #6E9E97; background: #21302D; }
+        .mini-course.tone-1 { border-left-color: #7E93B4; background: #242C37; }
+        .mini-course.tone-2 { border-left-color: #8A8FB8; background: #272935; }
+        .mini-course.tone-3 { border-left-color: #9A8FA6; background: #2B2830; }
+        .mini-course.tone-4 { border-left-color: #84A093; background: #222C28; }
     </style>
     <style>
       /* 交互层：顶部进度、骨架屏、设置分区导航、周视图工具、搜索与安装提示 */
@@ -3262,15 +3509,15 @@
       /* Toast 语义色：ID + 属性选择器，特异性高于各皮肤里的 #toast 定义。
          用固定实色而非 --ok/--fail/--warn：那组变量在深色模式下会被改成浅色高亮文字色，
          拿来做背景配白字会看不清。 */
-      #toast[data-type="success"] { background: #567A60; color: #fff; border-color: transparent; }
-      #toast[data-type="error"] { background: #A44A34; color: #fff; border-color: transparent; }
-      #toast[data-type="warn"] { background: #96702F; color: #fff; border-color: transparent; }
+      #toast[data-type="success"] { background: #4A7D6A; color: #fff; border-color: transparent; }
+      #toast[data-type="error"] { background: #A6483E; color: #fff; border-color: transparent; }
+      #toast[data-type="warn"] { background: #93712F; color: #fff; border-color: transparent; }
 
       /* 应用内确认 / 输入对话框：替代原生 confirm / prompt */
       .confirm-layer {
         position: fixed; inset: 0; z-index: 120;
         display: flex; align-items: center; justify-content: center;
-        padding: 20px; background: rgba(24, 28, 23, 0.38);
+        padding: 20px; background: rgba(15, 20, 26, 0.42);
         backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
       }
       .confirm-box {
@@ -3345,7 +3592,7 @@
         display: flex; align-items: center; justify-content: center; gap: 10px;
         flex-wrap: wrap; padding: 9px 14px;
         padding-top: calc(9px + env(safe-area-inset-top, 0px));
-        background: #A44A34; color: #fff; font-size: 12px;
+        background: #A6483E; color: #fff; font-size: 12px;
         box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
       }
       .net-banner button {
@@ -3607,7 +3854,7 @@
         document.documentElement.dataset.theme = dark ? "dark" : "light";
         document.documentElement.style.colorScheme = dark ? "dark" : "light";
         var meta = document.getElementById("themeColorMeta");
-        if (meta) meta.content = dark ? "#1C1A17" : "#FAF7F2";
+        if (meta) meta.content = dark ? "#14181E" : "#F4F6F8";
       })();
     </script>
   </head>
@@ -4804,8 +5051,8 @@
         weekData = await api("/api/timetable");
         if (viewWeek === null) viewWeek = Math.max(weekData.current_week, 1);
         const d = new Date(weekData.today + "T00:00:00");
-        $("#todayDate").textContent =
-          `${d.getMonth() + 1} 月 ${d.getDate()} 日 ${WEEKDAY[d.getDay() === 0 ? 6 : d.getDay() - 1]}`;
+        $("#todayDate").innerHTML =
+          `${d.getMonth() + 1} 月 ${d.getDate()} 日 <span class="dow">${WEEKDAY[d.getDay() === 0 ? 6 : d.getDay() - 1]}</span>`;
         $("#todayWeek").textContent =
           weekData.current_week > 0
             ? `第 ${weekData.current_week} 教学周`
@@ -4857,8 +5104,8 @@
           ...tmExams.map((e) => ({ sort: e.start || "00:00", html: agendaExamRow(e) })),
           ...tmCourses.map((c) => ({ sort: c.start_time || "99:99", html: courseRow(c) })),
         ].sort((a, b) => a.sort.localeCompare(b.sort));
-        $("#tomorrowDate").textContent =
-          `${d.getMonth() + 1} 月 ${d.getDate()} 日 ${dow}`;
+        $("#tomorrowDate").innerHTML =
+          `${d.getMonth() + 1} 月 ${d.getDate()} 日 <span class="dow">${dow}</span>`;
         $("#tomorrowList").innerHTML = items.length
           ? items.map((x) => x.html).join("")
           : `<div class="empty-sub center">明天暂时没有课程和日程，点击下方按钮提前安排。</div>`;
@@ -7058,7 +7305,7 @@
         document.documentElement.dataset.theme = dark ? "dark" : "light";
         document.documentElement.style.colorScheme = dark ? "dark" : "light";
         const meta = document.getElementById("themeColorMeta");
-        if (meta) meta.content = dark ? "#1C1A17" : "#FAF7F2";
+        if (meta) meta.content = dark ? "#14181E" : "#F4F6F8";
         document.querySelectorAll("#themeChoice button").forEach((b) =>
           b.classList.toggle("active", b.dataset.themeChoice === choice));
       }
