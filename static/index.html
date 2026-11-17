@@ -12,7 +12,7 @@
     <title>Agenda · 知序</title>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/static/icons/icon-180.png" />
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%231E2A36'/%3E%3Cpath d='M18 22h28M18 32h28M18 42h18' stroke='%23f4f6f8' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%232A4358'/%3E%3Cstop offset='1' stop-color='%2318242F'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='url(%23g)'/%3E%3Cpath d='M18 25h28M18 34h28M18 43h14' stroke='%23F5F8FB' stroke-width='4.4' stroke-linecap='round'/%3E%3Ccircle cx='45' cy='43' r='4.2' fill='%237FA8C9'/%3E%3C/svg%3E" />
     <script>
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", () => {
@@ -3263,6 +3263,54 @@
         .login-result { text-align: center; }
       }
 
+      /* —— 品牌标记（页头 / 登录页） —— */
+      .brand-lockup {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .brand-mark {
+        display: inline-flex;
+        flex: 0 0 auto;
+        width: 40px;
+        height: 40px;
+        border-radius: 11px;
+        box-shadow: 0 2px 10px rgba(20, 30, 42, 0.16);
+      }
+      .brand-mark svg {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+      .auth-brand {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 16px;
+      }
+      .auth-brand .brand-mark {
+        width: 52px;
+        height: 52px;
+        border-radius: 14px;
+        box-shadow: 0 6px 22px rgba(0, 0, 0, 0.35);
+      }
+      html[data-theme="dark"] .brand-mark {
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+      }
+      @media (max-width: 720px) {
+        /* 手机上登录页是居中排版，品牌标记也跟着居中 */
+        .auth-brand { align-items: center; }
+        .auth-brand .brand-mark { width: 46px; height: 46px; border-radius: 13px; }
+      }
+      @media (max-width: 480px) {
+        .brand-mark {
+          width: 34px;
+          height: 34px;
+          border-radius: 10px;
+        }
+        .brand-lockup { gap: 10px; }
+      }
+
       /* —— 今日刊头：深墨青英雄区撑满卡顶 —— */
       .today-card { padding: 0; overflow: hidden; border-radius: 14px; }
       .today-card .day-head {
@@ -4103,6 +4151,20 @@
         <section class="auth-intro" aria-label="产品介绍">
           <div class="auth-eyebrow">QUT CAMPUS ASSISTANT</div>
           <div class="auth-brand">
+            <span class="brand-mark" aria-hidden="true">
+              <svg viewBox="0 0 40 40" focusable="false">
+                <defs>
+                  <linearGradient id="brandInkAuth" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0" stop-color="#3A5570" />
+                    <stop offset="1" stop-color="#22303D" />
+                  </linearGradient>
+                </defs>
+                <rect x="0.5" y="0.5" width="39" height="39" rx="11" fill="url(#brandInkAuth)" />
+                <rect x="1.2" y="1.2" width="37.6" height="37.6" rx="10.4" fill="none" stroke="rgba(255,255,255,.22)" />
+                <path d="M11.4 15.6h17.2M11.4 21.4h17.2M11.4 27.2h8.6" stroke="#F5F8FB" stroke-width="2.4" stroke-linecap="round" />
+                <circle cx="28.2" cy="27.2" r="2.5" fill="#8FBBDF" />
+              </svg>
+            </span>
             <h1 class="auth-title">Agenda <span>知序</span></h1>
           </div>
           <p class="auth-intro-sub">所谓成长，就是经过不断的聚散离合，找到不太会伤害到彼此的距离～</p>
@@ -4138,6 +4200,20 @@
     <div class="wrap hidden" id="app">
       <header>
         <div class="brand-lockup">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 40 40" focusable="false">
+              <defs>
+                <linearGradient id="brandInk" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stop-color="#2A4358" />
+                  <stop offset="1" stop-color="#18242F" />
+                </linearGradient>
+              </defs>
+              <rect x="0.5" y="0.5" width="39" height="39" rx="11" fill="url(#brandInk)" />
+              <rect x="1.2" y="1.2" width="37.6" height="37.6" rx="10.4" fill="none" stroke="rgba(255,255,255,.14)" />
+              <path d="M11.4 15.6h17.2M11.4 21.4h17.2M11.4 27.2h8.6" stroke="#F5F8FB" stroke-width="2.4" stroke-linecap="round" />
+              <circle cx="28.2" cy="27.2" r="2.5" fill="#7FA8C9" />
+            </svg>
+          </span>
           <div>
             <h1>Agenda <span class="brand-cn">知序</span></h1>
             <div class="header-sub" id="headerSub">青岛理工大学</div>

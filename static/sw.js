@@ -1,6 +1,6 @@
 /* Agenda 知序 Service Worker：只为「添加到主屏幕 / 独立窗口」提供安装能力。
    不抢占当前页（不 clients.claim）、不拦截导航与接口，静态资源网络优先、离线回落缓存。 */
-const CACHE = "agenda-static-v1";
+const CACHE = "agenda-static-v2";
 const SHELL = ["/static/icons/icon-192.png", "/static/icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {
