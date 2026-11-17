@@ -3142,6 +3142,89 @@
       .card h2 { border-left: 0; padding-left: 0; font-size: 17px; font-weight: 650; letter-spacing: -0.01em; }
       .section-kicker { color: var(--accent); letter-spacing: 0.18em; }
 
+      /* —— 审计日志：折叠区（默认只露最近几条，可展开） —— */
+      .log-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 14px;
+      }
+      .log-head h2 {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        margin-bottom: 0;
+      }
+      .log-count {
+        color: var(--faint);
+        font-size: 12px;
+        font-weight: 500;
+        letter-spacing: 0;
+        font-variant-numeric: tabular-nums;
+      }
+      button.log-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        flex: 0 0 auto;
+        min-height: 32px;
+        padding: 5px 10px 5px 12px;
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        background: var(--card);
+        color: var(--sub);
+        font-size: 12px;
+        transition: color 0.16s ease, background 0.16s ease, border-color 0.16s ease, transform 0.12s ease;
+      }
+      button.log-toggle:hover { color: var(--text); background: var(--fill); }
+      button.log-toggle:active { transform: scale(0.97); }
+      .log-chevron {
+        width: 14px;
+        height: 14px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        transition: transform 0.2s ease;
+      }
+      button.log-toggle[aria-expanded="true"] .log-chevron { transform: rotate(180deg); }
+
+      .log-collapse {
+        position: relative;
+        transition: max-height 0.24s ease-out;
+      }
+      .log-collapse.collapsed {
+        max-height: 208px;
+        overflow: hidden;
+      }
+      .log-collapse.more.collapsed::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 60px;
+        background: linear-gradient(to bottom, transparent, var(--card) 88%);
+        pointer-events: none;
+      }
+      .log-collapse.expanded {
+        max-height: 62vh;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        scrollbar-width: thin;
+      }
+      @media (max-width: 720px) {
+        .log-head { gap: 8px; }
+        .log-collapse.collapsed { max-height: 172px; }
+        .log-collapse.expanded { max-height: 56vh; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .log-collapse { transition: none; }
+        button.log-toggle, .log-chevron { transition: none; }
+      }
+
       /* —— 今日刊头：深墨青英雄区撑满卡顶 —— */
       .today-card { padding: 0; overflow: hidden; border-radius: 14px; }
       .today-card .day-head {
@@ -4318,9 +4401,17 @@
         </div>
 
         <div class="card">
-          <h2>审计日志</h2>
-          <p class="hint">管理员的关键操作记录（停用/删除/改角色/重置密码/编辑信息/邀请码）。</p>
-          <div id="adminLogList"></div>
+          <div class="log-head">
+            <h2>审计日志<span class="log-count" id="adminLogCount"></span></h2>
+            <button type="button" class="small log-toggle hidden" id="adminLogToggle" aria-expanded="false" aria-controls="adminLogCollapse">
+              <span id="adminLogToggleText">展开全部</span>
+              <svg class="log-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+          </div>
+          <p class="hint">管理员的关键操作记录（停用/删除/改角色/重置密码/编辑信息/邀请码）。默认只显示最近几条，可展开查看完整记录。</p>
+          <div class="log-collapse collapsed" id="adminLogCollapse">
+            <div id="adminLogList"></div>
+          </div>
         </div>
       </section>
 
@@ -7681,7 +7772,46 @@
           $("#adminLogList").innerHTML = rows.length
             ? rows.join("")
             : '<div class="empty">暂无操作记录</div>';
+          // 折叠区：更新条数，并按实际高度决定是否显示「展开全部」
+          const cnt = $("#adminLogCount");
+          if (cnt) cnt.textContent = rows.length ? `${rows.length} 条` : "";
+          setAdminLogExpanded(false);
+          const box = $("#adminLogCollapse");
+          const toggle = $("#adminLogToggle");
+          if (box && toggle) {
+            requestAnimationFrame(() => {
+              const list = $("#adminLogList");
+              const over = !!list && list.scrollHeight > box.clientHeight + 2;
+              box.classList.toggle("more", over);
+              toggle.classList.toggle("hidden", !over);
+            });
+          }
         } catch (e) { toast(e.message, 4000, "error"); }
+      }
+      /* 审计日志折叠/展开 */
+      function setAdminLogExpanded(on) {
+        const box = $("#adminLogCollapse");
+        if (!box) return;
+        box.classList.toggle("expanded", !!on);
+        box.classList.toggle("collapsed", !on);
+        const toggle = $("#adminLogToggle");
+        if (toggle) toggle.setAttribute("aria-expanded", on ? "true" : "false");
+        const label = $("#adminLogToggleText");
+        if (label) label.textContent = on ? "收起" : "展开全部";
+        if (!on) box.scrollTop = 0;
+      }
+      const adminLogToggleEl = $("#adminLogToggle");
+      if (adminLogToggleEl) {
+        adminLogToggleEl.addEventListener("click", () => {
+          const box = $("#adminLogCollapse");
+          const willExpand = !(box && box.classList.contains("expanded"));
+          setAdminLogExpanded(willExpand);
+          if (willExpand && box) {
+            // 展开后若列表比视口高，温和滚到可见位置（仅当顶部已划出视口）
+            const top = box.getBoundingClientRect().top;
+            if (top < 0) box.scrollIntoView({ block: "start", behavior: "smooth" });
+          }
+        });
       }
 
       /* ---------- 外观主题（跟随系统 / 浅色 / 深色） ---------- */
