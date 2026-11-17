@@ -3649,6 +3649,80 @@
         input:not([type="checkbox"]):not([type="radio"]),
         select, textarea { font-size: 16px !important; }
       }
+      /* 查空教室：课表空格内联弹层（桌面=靠近格子的浮层，移动端=底部上拉面板）。
+         全部走冷感令牌，深色模式随 --card/--line/--accent 自动反演。 */
+      .room-pop {
+        position: fixed; inset: 0; z-index: 118;
+        background: rgba(15, 20, 26, 0.42);
+        backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+      }
+      .room-pop-panel {
+        position: fixed; top: 90px; right: 16px;
+        width: 340px; max-width: calc(100vw - 16px);
+        max-height: min(430px, calc(100vh - 24px));
+        display: flex; flex-direction: column;
+        border: 1px solid var(--line); border-radius: var(--radius-l);
+        background: var(--card); color: var(--text);
+        box-shadow: var(--shadow-3);
+        animation: room-pop-in 0.16s ease-out;
+      }
+      @keyframes room-pop-in {
+        from { opacity: 0; transform: translateY(8px) scale(0.98); }
+      }
+      .room-pop-head {
+        display: flex; align-items: center; gap: 8px;
+        padding: 12px 14px; border-bottom: 1px solid var(--line);
+      }
+      .room-pop-title { flex: 1; min-width: 0; font-size: 13px; font-weight: 650; }
+      .room-pop-x {
+        flex: 0 0 auto; width: 28px; height: 28px; min-height: 0; padding: 0;
+        border-radius: 50%; border-color: transparent;
+        background: transparent; color: var(--sub); font-size: 15px; line-height: 1;
+      }
+      .room-pop-x:hover { opacity: 1; color: var(--text); background: var(--fill); }
+      .room-pop-filters { display: flex; gap: 8px; padding: 10px 14px 0; }
+      .room-pop-filters select,
+      .room-pop-filters input {
+        min-width: 0; min-height: 34px; padding: 5px 8px;
+        font-size: 12px; border-radius: var(--radius-s);
+      }
+      #rpCampus { flex: 1 1 34%; }
+      #rpBuilding { flex: 1 1 40%; }
+      #rpSeats { flex: 0 0 86px; }
+      .room-pop-bar {
+        display: flex; align-items: center; gap: 10px;
+        padding: 10px 14px; border-bottom: 1px solid var(--line);
+      }
+      #roomPopCount { flex: 1; min-width: 0; font-size: 11px; color: var(--sub); }
+      #rpQueryBtn { min-height: 30px; padding: 3px 14px; font-size: 12px; }
+      .room-pop-list { flex: 1; overflow-y: auto; padding: 4px 14px 12px; overscroll-behavior: contain; }
+      .rp-room {
+        display: flex; align-items: center; gap: 10px;
+        padding: 9px 0; border-bottom: 1px solid var(--line);
+      }
+      .rp-room:last-child { border-bottom: 0; }
+      .rp-room-main { flex: 1; min-width: 0; }
+      .rp-room-name { font-size: 13px; font-weight: 600; }
+      .rp-room-meta { margin-top: 2px; font-size: 11px; color: var(--sub); }
+      .rp-room-seats { flex: 0 0 auto; font-family: var(--font-num); color: var(--sub); }
+      .rp-room-seats b { font-size: 15px; color: var(--accent); font-weight: 650; }
+      .rp-room-seats span { font-size: 10px; margin-left: 2px; }
+      .rp-msg { padding: 26px 10px; text-align: center; }
+      .rp-msg-t { font-size: 13px; font-weight: 600; }
+      .rp-msg-s { margin-top: 5px; font-size: 11px; color: var(--sub); line-height: 1.6; }
+      @media (max-width: 720px) {
+        .room-pop-panel {
+          left: 0 !important; right: 0 !important; top: auto !important; bottom: 0;
+          width: 100%; max-width: none; max-height: 72vh;
+          border-radius: var(--radius-l) var(--radius-l) 0 0; border-bottom: 0;
+          padding-bottom: env(safe-area-inset-bottom, 0px);
+          animation: room-pop-up 0.18s ease-out;
+        }
+      }
+      @keyframes room-pop-up {
+        from { opacity: 0.6; transform: translateY(24px); }
+      }
+
       html {
         -webkit-text-size-adjust: 100%;
         text-size-adjust: 100%;
@@ -4754,6 +4828,25 @@
       </div>
     </div>
 
+    <div id="roomPop" class="room-pop hidden" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="roomPopTitle">
+      <div class="room-pop-panel" id="roomPopPanel">
+        <div class="room-pop-head">
+          <span class="room-pop-title" id="roomPopTitle">查空教室</span>
+          <button type="button" class="room-pop-x" id="roomPopClose" aria-label="关闭">✕</button>
+        </div>
+        <div class="room-pop-filters">
+          <select id="rpCampus" aria-label="校区"></select>
+          <select id="rpBuilding" aria-label="教学楼"></select>
+          <input id="rpSeats" type="number" min="0" step="10" inputmode="numeric" placeholder="最少座位" aria-label="最少座位数" />
+        </div>
+        <div class="room-pop-bar">
+          <span id="roomPopCount"></span>
+          <button type="button" class="primary" id="rpQueryBtn">查询</button>
+        </div>
+        <div class="room-pop-list" id="roomPopList"></div>
+      </div>
+    </div>
+
     <script>
       const $ = (s) => document.querySelector(s);
       const $$ = (s) => document.querySelectorAll(s);
@@ -5357,8 +5450,8 @@
                 a.name.localeCompare(b.name, "zh"),
             );
           const b = blocks[bi];
-          // 有课的格子只展示课程；没课的格子给「加日程」，
-          // 按这个大节的日期，方便直接给空档安排任务
+          // 有课的格子只展示课程；没课的格子并列给「查空教室」和「加日程」，
+          // 都按这个大节的节次/日期，方便直接给这一周的空档安排任务
           const content = list.length
             ? list
                 .map((c) => {
@@ -5377,6 +5470,7 @@
                 })
                 .join("")
             : `<div class="wc-actions">
+        <button type="button" class="wc-free" data-wc-rooms data-date="${iso}" data-start="${b.s}" data-end="${b.e}" title="这个时段没课，查空教室自习">查空教室<span>⌕</span></button>
         <button type="button" class="wc-free wc-event" data-wc-event data-date="${iso}" data-start="${b.s}" data-end="${b.e}" title="给这个空闲时段添加一条日程">加日程<span>＋</span></button>
       </div>`;
           return `<div class="week-cell${list.length ? "" : " free"}${isToday ? " today" : ""}">${content}</div>`;
@@ -5454,6 +5548,276 @@
           parseInt(btn.dataset.end, 10),
         );
       });
+
+      /* ---------- 查空教室（课表内联弹层） ---------- */
+      // 空闲区间 → 可查询的两节一档（不跨占用节次，超出教务节次表的截断）。
+      // 纯函数，与 v1.5.1 实现一致。
+      function roomFreeBlocks(spans, maxJc) {
+        const blocks = [];
+        for (const s of spans || []) {
+          for (let a = s.start; a <= s.end && a <= maxJc; a += 2)
+            blocks.push({ start: a, end: Math.min(a + 1, s.end, maxJc) });
+        }
+        return blocks;
+      }
+      // 教务节次表的最大节次（v1.5.1 读 #roomStart 下拉；独立页下线后改从 meta.periods 取）
+      function roomMaxJc() {
+        const nums = ((roomMeta && roomMeta.periods) || [])
+          .map((p) => parseInt(p.jc, 10))
+          .filter(Boolean);
+        return nums.length ? Math.max(...nums) : 12;
+      }
+
+      let roomMeta = null;     // /api/rooms/meta 缓存（校区/教学楼/节次表）
+      let roomPopState = null; // 弹层当前查询状态 {date,start,end,campus,building,rooms}
+      let roomPopBusy = false;
+      let roomPopOpen = false;
+
+      function openRoomPop(anchor) {
+        const layer = $("#roomPop");
+        layer.classList.remove("hidden");
+        layer.setAttribute("aria-hidden", "false");
+        roomPopOpen = true;
+        const panel = $("#roomPopPanel");
+        if (window.matchMedia("(max-width: 720px)").matches) {
+          // 移动端底部面板：由 CSS 定位，清掉桌面浮层的内联坐标
+          panel.style.left = "";
+          panel.style.top = "";
+          panel.style.right = "";
+        } else if (anchor && typeof anchor.getBoundingClientRect === "function") {
+          positionRoomPop(anchor);
+        }
+      }
+      // 桌面浮层：优先落在格子右侧，贴边时翻到左侧，再不行居中
+      function positionRoomPop(anchor) {
+        const panel = $("#roomPopPanel");
+        const r = anchor.getBoundingClientRect();
+        const pw = 340;
+        const ph = Math.min(430, window.innerHeight - 24);
+        let left = r.right + 10;
+        if (left + pw > window.innerWidth - 8) left = r.left - pw - 10;
+        if (left < 8) left = Math.max(8, (window.innerWidth - pw) / 2);
+        let top = r.top;
+        if (top + ph > window.innerHeight - 8) top = window.innerHeight - ph - 8;
+        if (top < 8) top = 8;
+        panel.style.left = left + "px";
+        panel.style.top = top + "px";
+        panel.style.right = "auto";
+      }
+      function closeRoomPop() {
+        const layer = $("#roomPop");
+        if (layer.classList.contains("hidden")) return;
+        layer.classList.add("hidden");
+        layer.setAttribute("aria-hidden", "true");
+        roomPopOpen = false;
+      }
+      function roomPopTitle() {
+        const st = roomPopState;
+        if (!st) return;
+        const d = new Date(st.date + "T00:00:00");
+        const label =
+          st.start === st.end ? `第 ${st.start} 节` : `第 ${st.start}–${st.end} 节`;
+        $("#roomPopTitle").textContent =
+          `${d.getMonth() + 1}月${d.getDate()}日 ${WEEKDAY[(d.getDay() + 6) % 7]} · ${label}`;
+      }
+      function roomPopMessage(title, sub) {
+        $("#roomPopCount").textContent = "";
+        $("#roomPopList").innerHTML =
+          `<div class="rp-msg"><div class="rp-msg-t">${esc(title)}</div>` +
+          (sub ? `<div class="rp-msg-s">${esc(sub)}</div>` : "") + `</div>`;
+      }
+      // 弹层筛选控件：用 meta 数据填充校区/教学楼下拉
+      function roomPopFillFilters() {
+        const m = roomMeta;
+        if (!m) return;
+        const campusSel = $("#rpCampus");
+        campusSel.innerHTML = m.campuses
+          .map((c) => `<option value="${escAttr(c.id)}">${esc(c.name)}</option>`)
+          .join("");
+        campusSel.value =
+          m.campus || (m.campuses.length ? m.campuses[0].id : "");
+        const bSel = $("#rpBuilding");
+        bSel.innerHTML =
+          [`<option value="">全部教学楼</option>`]
+            .concat(
+              (m.buildings || []).map(
+                (b) => `<option value="${escAttr(b.id)}">${esc(b.name)}</option>`,
+              ),
+            )
+            .join("");
+        bSel.value = "";
+      }
+      async function roomPopQuery() {
+        const st = roomPopState;
+        if (!st || !roomMeta || roomPopBusy) return;
+        roomPopBusy = true;
+        const btn = $("#rpQueryBtn");
+        btn.disabled = true;
+        btn.textContent = "查询中…";
+        $("#roomPopCount").textContent = "";
+        $("#roomPopList").innerHTML = skeletonRows(3);
+        try {
+          const params = new URLSearchParams({
+            date_s: st.date,
+            start: String(st.start),
+            end: String(st.end),
+            campus: st.campus || "",
+            building: st.building || "",
+          });
+          const data = await api("/api/rooms/free?" + params.toString());
+          st.rooms = data.rooms || [];
+          roomPopRender();
+        } catch (e) {
+          roomPopMessage("查询失败", e.message || "请稍后重试");
+        } finally {
+          roomPopBusy = false;
+          btn.disabled = false;
+          btn.textContent = "查询";
+        }
+      }
+      // 结果按座位数降序（同学找自习室基本按容量挑），最少座位为客户端过滤
+      function roomPopRender() {
+        const st = roomPopState;
+        if (!st) return;
+        const minSeats = parseInt($("#rpSeats").value, 10) || 0;
+        const total = (st.rooms || []).length;
+        const rooms = (st.rooms || [])
+          .filter((r) => !minSeats || (r.seats || 0) >= minSeats)
+          .slice()
+          .sort(
+            (a, b) =>
+              (b.seats || 0) - (a.seats || 0) ||
+              String(a.name).localeCompare(String(b.name), "zh"),
+          );
+        $("#roomPopCount").textContent = minSeats
+          ? `${rooms.length} 间（共 ${total} 间）`
+          : `共 ${total} 间空教室`;
+        if (!rooms.length) {
+          // 空态保留计数（如「0 间（共 2 间）」），比纯提示更能说明是筛选所致
+          $("#roomPopList").innerHTML =
+            `<div class="rp-msg"><div class="rp-msg-t">没有符合条件的空教室</div>` +
+            `<div class="rp-msg-s">换个节次、教学楼、座位数或校区试试。</div></div>`;
+          return;
+        }
+        $("#roomPopList").innerHTML = rooms
+          .map((r) => {
+            const meta = [r.building, r.category || r.campus]
+              .filter(Boolean)
+              .map(esc)
+              .join(" · ");
+            return `<div class="rp-room">
+      <div class="rp-room-main">
+        <div class="rp-room-name">${esc(r.name)}</div>
+        ${meta ? `<div class="rp-room-meta">${meta}</div>` : ""}
+      </div>
+      ${r.seats ? `<div class="rp-room-seats"><b>${r.seats}</b><span>座</span></div>` : ""}
+    </div>`;
+          })
+          .join("");
+      }
+
+      // 没课的空格子 → 查空教室：先按原逻辑校验空闲（meta + my-free），
+      // 跨节课程可能让网格看起来没课、实际被占用，所以用 my-free 校验一次，
+      // 真被占用时自动改查当天最接近的空闲时段并 toast 提示；
+      // 结果直接在内联弹层里展示，不再跳转独立页（该页已下线）。
+      $("#weekGridScroll").addEventListener("click", async (e) => {
+        const btn = e.target.closest("button[data-wc-rooms]");
+        if (!btn || btn.disabled) return;
+        btn.disabled = true;
+        try {
+          const wantStart = parseInt(btn.dataset.start, 10) || 1;
+          const wantEnd = parseInt(btn.dataset.end, 10) || wantStart;
+          roomPopState = {
+            date: btn.dataset.date,
+            start: wantStart,
+            end: wantEnd,
+            campus: "",
+            building: "",
+            rooms: null,
+          };
+          openRoomPop(btn.closest(".week-cell") || btn);
+          roomPopTitle();
+          $("#roomPopCount").textContent = "";
+          $("#roomPopList").innerHTML = skeletonRows(3);
+          if (!roomMeta) roomMeta = await api("/api/rooms/meta");
+          roomPopFillFilters();
+          roomPopState.campus = $("#rpCampus").value;
+          const free = await api(
+            "/api/rooms/my-free?date_s=" + encodeURIComponent(roomPopState.date),
+          );
+          if (free.spans === null) {
+            roomPopMessage("课表还没同步", "先去「课表来源」同步课表，再来查空教室。");
+            return;
+          }
+          const freeBlocks = roomFreeBlocks(free.spans, roomMaxJc());
+          if (!freeBlocks.length) {
+            roomPopMessage("这一天都有课", "课表显示当天没有空闲时段，换个日期试试。");
+            return;
+          }
+          const exact = freeBlocks.find(
+            (x) => x.start === wantStart && x.end === wantEnd,
+          );
+          const block =
+            exact ||
+            freeBlocks.reduce(
+              (best, x) =>
+                Math.abs(x.start - wantStart) < Math.abs(best.start - wantStart)
+                  ? x
+                  : best,
+              freeBlocks[0],
+            );
+          if (!exact)
+            toast(
+              `第 ${wantStart}–${wantEnd} 节有课，已改查第 ${block.start}–${block.end} 节`,
+              3500,
+            );
+          roomPopState.start = block.start;
+          roomPopState.end = block.end;
+          roomPopTitle();
+          await roomPopQuery();
+        } catch (err) {
+          roomPopMessage("查询失败", err.message || "请稍后重试");
+          toast(err.message, 4000, "error");
+        } finally {
+          btn.disabled = false;
+        }
+      });
+      // 弹层交互：关闭按钮 / 点遮罩 / Esc；改筛选后点「查询」重新查
+      $("#roomPopClose").addEventListener("click", closeRoomPop);
+      $("#roomPop").addEventListener("click", (e) => {
+        if (e.target === e.currentTarget) closeRoomPop();
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && roomPopOpen) closeRoomPop();
+      });
+      $("#rpQueryBtn").addEventListener("click", () => {
+        if (!roomPopState || !roomMeta) return;
+        roomPopState.campus = $("#rpCampus").value;
+        roomPopState.building = $("#rpBuilding").value;
+        roomPopQuery();
+      });
+      // 换校区要重新取 meta（教学楼列表是跟着校区走的）
+      $("#rpCampus").addEventListener("change", async (e) => {
+        if (!roomPopOpen) return;
+        const campus = e.target.value;
+        if (roomPopState) roomPopState.campus = campus;
+        const bSel = $("#rpBuilding");
+        bSel.disabled = true;
+        try {
+          roomMeta = await api(
+            "/api/rooms/meta?campus=" + encodeURIComponent(campus),
+          );
+          roomPopFillFilters();
+        } catch (err) {
+          toast(err.message, 4000, "error");
+        } finally {
+          bSel.disabled = false;
+        }
+      });
+      $("#rpBuilding").addEventListener("change", (e) => {
+        if (roomPopState) roomPopState.building = e.target.value;
+      });
+
       /* ---------- 编辑课表 ---------- */
       let courseData = null;
       let editingUid = "";
