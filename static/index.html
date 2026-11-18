@@ -4698,6 +4698,16 @@
       /* 登录页宽屏布局（≥1000px）：品牌与登录卡两列居中，无竖线 */
       @media (min-width: 1000px) {
         .auth-screen { padding: 0; }
+        /* 水印改为「贴视口底」的固定定位：任何窗口高度下整行 "Agenda" 都完整落在视口内，
+           不再被 .auth-screen 的内容高度（矮窗时会被左栏撑高）拖到折叠线以下 */
+        .auth-screen::before {
+          position: fixed;
+          /* 留白必须大于「降部伸出量」：Instrument Serif 的 g/j 墨迹在内容框下再伸出约 0.0705em，
+             字号被 26vh 夹住时约 1.83vh，故底部留白取 3vh（≥ 1.83vh + 呼吸位），字脚不再被视口底边切掉 */
+          bottom: clamp(16px, 3vh, 40px);
+          /* 宽度 + 高度双约束：窄窗按 20vw、矮窗按 26vh 收敛，保证整行字高不被视口底边裁切 */
+          font-size: clamp(110px, min(20vw, 26vh), 300px);
+        }
         .auth-layout {
           max-width: none;
           width: 100%;
@@ -4706,6 +4716,14 @@
           grid-template-columns: 1fr 1fr;
           gap: 0;
           margin: 0;
+          /* 上移量：取「4.5vh」与「当前视口剩余空间的一半」的较小值。
+             左栏自然内容高 747.67px，装不下时（vh 矮于约 763px）剩余空间为 0 ⇒ 位移自然归零，
+             既不会把品牌区顶出视口顶部，也不会因为加高容器而多出滚动。
+             位移用 transform 而非 padding：不占布局高度，故 1024×768 / 1366×768 这类
+             「原本刚好装满」的尺寸不会新增滚动。水印是父级 .auth-screen 的伪元素，
+             不在这个 transform 的包含块链上，fixed 定位不受影响。 */
+          --auth-shift: min(4.5vh, max(0px, calc((100vh - 763px) / 2)));
+          transform: translateY(calc(-1 * var(--auth-shift)));
         }
         .auth-intro {
           min-height: 100vh;
