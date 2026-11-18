@@ -4129,29 +4129,37 @@
         border: 1px solid var(--line);
         border-radius: 18px;
         background: var(--card);
-        box-shadow: var(--shadow-1);
+        box-shadow: none;
       }
-      .card { padding: 28px; }
+      .card { padding: 32px; }
       .card + .card { margin-top: 20px; }
-      .card h2 { margin-bottom: 16px; font-size: 20px; }
+      .card h2 { margin-bottom: 16px; font-size: 24px; }
+      .card .subhead {
+        margin: 26px 0 14px;
+        padding-top: 22px;
+        border-top: 1px solid var(--line);
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
       .section-kicker, .auth-eyebrow {
         color: var(--sub);
         font-weight: 600;
         letter-spacing: 0.02em;
       }
+      .auth-eyebrow { display: none; }
       .brand-mark { border-radius: 12px; box-shadow: none; }
-      .brand-mark svg rect:first-of-type { fill: var(--accent); }
-      .brand-mark svg circle { fill: #ffffff; }
-      header h1 { font-size: 28px; letter-spacing: -0.02em; }
+      header h1 { font-size: 34px; letter-spacing: -0.02em; }
       header h1 .brand-cn { color: var(--sub); letter-spacing: 0.02em; }
-      .header-sub { font-size: 12px; letter-spacing: 0; }
+      .header-sub { font-size: 13px; letter-spacing: 0; }
       .statusbar {
-        padding: 10px 14px;
-        border-color: var(--line);
-        border-radius: 14px;
-        background: var(--card);
+        padding: 14px 0;
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        border-radius: 0;
+        background: transparent;
         color: var(--sub);
-        font-size: 11px;
+        font-size: 12px;
         letter-spacing: 0;
       }
 
@@ -4176,20 +4184,27 @@
         background: var(--fill);
         color: var(--text);
       }
-      button.primary, #syncBtn, .chips button, .reply-followup,
-      .theme-choice button.active, .settings-nav button.active,
-      .auth-tabs button.primary {
+      button.primary, #syncBtn, .auth-tabs button.primary {
         border-color: var(--accent);
         background: var(--accent);
         color: #ffffff;
         box-shadow: none;
       }
-      button.primary:hover, #syncBtn:hover, .chips button:hover,
-      .reply-followup:hover, .theme-choice button.active:hover,
-      .settings-nav button.active:hover, .auth-tabs button.primary:hover {
+      button.primary:hover, #syncBtn:hover, .auth-tabs button.primary:hover {
         border-color: var(--accent-hover);
         background: var(--accent-hover);
         color: #ffffff;
+      }
+      /* 次要操作：Apple 官网式蓝色描边，而不是一片实心蓝胶囊 */
+      .chips button, .reply-followup {
+        border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+        background: transparent;
+        color: var(--accent);
+      }
+      .chips button:hover, .reply-followup:hover {
+        border-color: var(--accent);
+        background: var(--accent-soft);
+        color: var(--accent);
       }
       button:focus-visible, a:focus-visible {
         outline: 3px solid color-mix(in srgb, var(--accent) 35%, transparent);
@@ -4214,117 +4229,134 @@
         box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
       }
 
-      /* 桌面吸顶导航与设置快捷栏 */
+      /* Apple 分段控件：浅灰轨道、普通文字、深色选中胶囊 */
       nav {
         top: 12px;
-        gap: 4px;
-        margin-bottom: 28px;
+        gap: 2px;
+        margin: 0 auto 36px;
+        max-width: 960px;
         padding: 5px;
-        border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+        border: 0;
         border-radius: 999px;
-        background: color-mix(in srgb, var(--bg) 78%, transparent);
+        background: color-mix(in srgb, var(--fill-strong) 88%, transparent);
         box-shadow: none;
         backdrop-filter: saturate(180%) blur(20px);
         -webkit-backdrop-filter: saturate(180%) blur(20px);
       }
       nav button {
-        min-height: 38px;
-        padding: 8px 17px;
+        min-height: 40px;
+        padding: 8px 20px;
         border: 0;
         border-radius: 999px;
-        color: var(--sub);
-        font-size: 13px;
-        font-weight: 500;
+        background: transparent;
+        color: var(--text);
+        font-size: 14px;
+        font-weight: 400;
       }
-      nav button:hover { background: var(--fill-strong); color: var(--text); }
-      nav button.active {
+      nav button:hover {
+        border-color: transparent;
+        background: color-mix(in srgb, var(--text) 7%, transparent);
+        color: var(--text);
+      }
+      nav button.active, nav button.active:hover {
         border: 0;
-        background: var(--accent);
-        color: #ffffff;
+        background: var(--text);
+        color: var(--bg);
         font-weight: 600;
         box-shadow: none;
       }
+      nav button.active svg { stroke: currentColor; }
       nav button.active::after { content: none; }
       .settings-nav {
-        border-color: color-mix(in srgb, var(--line) 80%, transparent);
+        padding: 4px;
+        border: 0;
         border-radius: 999px;
-        background: color-mix(in srgb, var(--card) 78%, transparent);
+        background: color-mix(in srgb, var(--fill-strong) 88%, transparent);
         box-shadow: none;
         backdrop-filter: saturate(180%) blur(20px);
         -webkit-backdrop-filter: saturate(180%) blur(20px);
       }
-      .settings-nav button { border-radius: 999px; }
-      .settings-nav button.active { color: #ffffff; }
+      .settings-nav button {
+        border: 0;
+        border-radius: 999px;
+        background: transparent;
+        color: var(--text);
+        font-weight: 400;
+      }
+      .settings-nav button.active {
+        background: var(--text);
+        color: var(--bg);
+        font-weight: 600;
+      }
       #tab-settings > .form-actions {
         background: color-mix(in srgb, var(--bg) 78%, transparent);
         backdrop-filter: saturate(180%) blur(20px);
         -webkit-backdrop-filter: saturate(180%) blur(20px);
       }
 
-      /* 今日：明亮大标题与大数字，不再使用深色渐变刊头 */
+      /* 今日：Apple 式编辑型首屏，大标题、强留白、细分隔 */
       .today-card { padding: 0; overflow: hidden; border-radius: 20px; }
       .today-card .day-head {
-        padding: 32px;
+        padding: 44px 44px 34px;
         border-bottom: 1px solid var(--line);
         background: var(--card);
       }
       .today-card .section-kicker { color: var(--sub); letter-spacing: 0.02em; }
       .today-card .day-head .date {
         color: var(--text);
-        font-size: 44px;
+        font-size: 58px;
         font-weight: 600;
         letter-spacing: -0.02em;
-        line-height: 1.2;
+        line-height: 1.15;
       }
       .today-card .day-head .date .dow {
         color: var(--sub);
-        font-size: 17px;
-        font-weight: 500;
+        font-size: 19px;
+        font-weight: 400;
         letter-spacing: 0;
       }
       .today-card .day-meta .muted, .today-card #todayCount { color: var(--sub); }
-      .today-card > #todayList { padding: 8px 32px 30px; }
-      .today-card > .empty { margin: 8px 32px 30px; }
-      .tomorrow-card .day-head .date { font-size: 32px; font-weight: 600; letter-spacing: -0.02em; }
+      .today-card > #todayList { padding: 8px 44px 40px; }
+      .today-card > .empty { margin: 8px 44px 40px; }
+      .tomorrow-card .day-head { padding: 32px 44px 26px; }
+      .tomorrow-card .day-head .date { font-size: 36px; font-weight: 600; letter-spacing: -0.02em; }
       .next-class {
-        margin: 0 20px 20px;
-        padding: 16px 20px;
-        border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line));
-        border-radius: 18px;
-        background: var(--accent-soft);
+        width: calc(100% - 64px);
+        margin: 0 32px 28px;
+        padding: 18px 24px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: var(--fill);
         box-shadow: none;
       }
-      .next-class:hover { border-color: var(--accent); background: var(--accent-soft); }
-      .next-class .nc-kicker, .next-class .nc-count b { color: var(--accent); }
+      .next-class:hover { border-color: var(--accent); background: var(--fill); }
+      .next-class .nc-kicker { color: var(--sub); }
+      .next-class .nc-count b { color: var(--accent); }
       .next-class .nc-count b, .exam-countdown b, .rp-room-seats b {
         font-family: var(--font-num);
         font-variant-numeric: tabular-nums;
         letter-spacing: -0.02em;
       }
       .course-time .range { font-weight: 600; letter-spacing: -0.01em; }
-      .course-row { padding: 20px 0; }
+      .course-row { padding: 24px 0; }
 
-      /* 周课表：同一 Apple 蓝的明度层次，不再引入第二强调色 */
-      .week-grid { overflow: hidden; box-shadow: var(--shadow-1); }
+      /* 周课表：中性底色 + 一条蓝色提示线，避免整页蓝色块 */
+      .week-grid { overflow: hidden; box-shadow: none; }
       .mini-course, .mini-course.tone-0, .mini-course.tone-1,
       .mini-course.tone-2, .mini-course.tone-3, .mini-course.tone-4 {
-        border-left-color: var(--accent);
-        border-radius: 10px;
+        border-left: 3px solid var(--accent);
+        border-radius: 8px;
+        background: var(--fill);
         color: var(--text);
         box-shadow: none;
       }
-      .mini-course.tone-0 { background: rgba(0, 113, 227, 0.08); }
-      .mini-course.tone-1 { background: rgba(0, 113, 227, 0.11); }
-      .mini-course.tone-2 { background: rgba(0, 113, 227, 0.14); }
-      .mini-course.tone-3 { background: rgba(0, 113, 227, 0.17); }
-      .mini-course.tone-4 { background: rgba(0, 113, 227, 0.20); }
       .mini-course .n { color: var(--text); font-weight: 600; }
       .mini-course .t, .mini-course .r { color: var(--sub); }
       .week-cell .wc-free, .chat-more { border-radius: 999px; }
       .day-card-head { background: var(--fill); }
-      .day-card.today .day-card-head { background: var(--accent-soft); }
+      .day-card.today .day-card-head { background: var(--fill-strong); }
 
-      /* AI、登录与悬浮层 */
+      /* AI、登录、分段控件与悬浮层 */
       .chat-box { border-radius: 20px; }
       .chat-input input, .chat-input button { border-radius: 999px; }
       .msg.user {
@@ -4333,7 +4365,21 @@
         color: #ffffff;
         box-shadow: none;
       }
+      /* AI 回复恢复气泡：左对齐浅灰气泡，与用户蓝色气泡形成对话层次 */
+      .msg.ai {
+        max-width: min(78%, 600px);
+        width: fit-content;
+        align-self: flex-start;
+        margin-bottom: 20px;
+        padding: 12px 16px;
+        border: 1px solid var(--line);
+        border-radius: 18px 18px 18px 5px;
+        background: var(--fill);
+        box-shadow: none;
+        white-space: normal;
+      }
       .msg.ai::before { color: var(--sub); letter-spacing: 0.02em; }
+      .msg.ai:last-child { border-bottom-color: var(--line); }
       .chat-file, .msg .msg-file, .log-box {
         border-color: var(--line);
         border-radius: 12px;
@@ -4341,18 +4387,37 @@
       }
       .msg .msg-file { background: color-mix(in srgb, var(--card) 72%, transparent); }
       .auth-screen { background: var(--bg); }
-      .auth-title { color: var(--text); font-size: 58px; }
+      .auth-title { color: var(--text); font-size: 62px; line-height: 1.1; }
       .auth-title span {
-        border-color: var(--line);
-        background: var(--card);
+        border: 0;
+        background: transparent;
         color: var(--sub);
         letter-spacing: 0;
       }
       .auth-intro-sub, .auth-features dd { color: var(--sub); }
       .auth-features dt { color: var(--text); }
-      .auth-card { border: 1px solid var(--line); box-shadow: var(--shadow-1); }
-      .auth-tabs { border-radius: 999px; background: var(--fill); }
-      .auth-tabs button { border-radius: 999px; }
+      .auth-card { border: 1px solid var(--line); box-shadow: none; }
+      .auth-tabs, .theme-choice {
+        padding: 5px;
+        border: 0;
+        border-radius: 999px;
+        background: var(--fill-strong);
+      }
+      .auth-tabs button, .theme-choice button {
+        border: 0;
+        border-radius: 999px;
+        background: transparent;
+        color: var(--text);
+        font-weight: 400;
+      }
+      .auth-tabs button:hover, .theme-choice button:hover { background: transparent; color: var(--text); }
+      .auth-tabs button.primary, .auth-tabs button.primary:hover,
+      .theme-choice button.active, .theme-choice button.active:hover {
+        border: 0;
+        background: var(--text);
+        color: var(--bg);
+        font-weight: 600;
+      }
       .week-menu, .sheet-panel, .confirm-box, .room-pop-panel {
         border-color: color-mix(in srgb, var(--line) 85%, transparent);
         background: color-mix(in srgb, var(--card) 92%, transparent);
@@ -4367,37 +4432,94 @@
       .net-banner { background: var(--fail); box-shadow: none; }
 
       @media (max-width: 720px) {
-        .card { padding: 22px; border-radius: 18px; }
-        .today-card { padding: 0; border-radius: 20px; }
-        .today-card .day-head { padding: 24px 22px 20px; }
-        .today-card .day-head .date { font-size: 34px; }
-        .today-card .day-head .date .dow { font-size: 14px; }
-        .today-card > #todayList { padding: 6px 22px 24px; }
-        .today-card > .empty { margin: 6px 22px 24px; }
-        .next-class { margin: 0 14px 14px; padding: 14px 16px; }
+        /* 手机端整体紧凑化：收紧留白与字号，避免松垮 */
+        header { gap: 8px; padding-bottom: 14px; }
+        header h1 { font-size: 23px; }
+        header h1 .brand-cn { font-size: 15px; }
+        .brand-mark { width: 32px; height: 32px; border-radius: 10px; }
+        .header-sub { display: none; }
+        .header-right { gap: 6px; }
+        .header-right .badge, #userBox { display: none; }
+        .header-right button.small { min-height: 30px; padding: 5px 10px; font-size: 11px; }
+        #syncBtn { min-height: 30px; padding: 5px 11px; font-size: 11px; }
+        .card { padding: 18px; border-radius: 16px; }
+        .card + .card { margin-top: 14px; }
+        .card h2 { font-size: 20px; margin-bottom: 12px; }
+        .today-card { padding: 0; border-radius: 16px; }
+        .today-card .day-head { padding: 22px 18px 18px; }
+        .today-card .day-head .date { font-size: 32px; }
+        .today-card .day-head .date .dow { font-size: 13px; }
+        .today-card > #todayList { padding: 4px 18px 20px; }
+        .today-card > .empty { margin: 4px 18px 20px; }
+        .tomorrow-card .day-head { padding: 20px 18px 16px; }
+        .next-class { width: calc(100% - 28px); margin: 0 14px 14px; padding: 12px 15px; }
         #nav {
-          border: 0;
-          border-top: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
-          border-radius: 0;
-          background: color-mix(in srgb, var(--bg) 78%, transparent);
-          box-shadow: none;
+          left: 12px;
+          right: 12px;
+          bottom: calc(12px + env(safe-area-inset-bottom));
+          margin: 0;
+          gap: 2px;
+          padding: 6px;
+          border: 1px solid var(--line);
+          border-radius: 20px;
+          background: color-mix(in srgb, var(--card) 88%, transparent);
+          box-shadow: 0 2px 12px color-mix(in srgb, var(--text) 6%, transparent);
           backdrop-filter: saturate(180%) blur(20px);
           -webkit-backdrop-filter: saturate(180%) blur(20px);
         }
         #nav button, #nav button.active {
+          border: 0;
           border-radius: 999px;
           box-shadow: none;
         }
-        #nav button.active { background: var(--accent); color: #ffffff; }
-        .settings-nav { border-radius: 18px; }
-        .auth-title { font-size: 42px; }
-        .auth-card { border-radius: 20px; box-shadow: var(--shadow-1); }
+        #nav button.active { background: var(--text); color: var(--bg); }
+        /* 设置分区吸顶条：磨砂悬浮分段控件，滚动时与内容拉开层次 */
+        .settings-nav {
+          margin: 0 0 12px;
+          padding: 4px;
+          border: 1px solid var(--line);
+          border-radius: 16px;
+          background: color-mix(in srgb, var(--card) 86%, transparent);
+          box-shadow: 0 2px 10px color-mix(in srgb, var(--text) 6%, transparent);
+          backdrop-filter: saturate(180%) blur(20px);
+          -webkit-backdrop-filter: saturate(180%) blur(20px);
+        }
+        .settings-nav button { padding: 7px 6px; font-size: 12px; border-radius: 999px; }
+        .auth-title { font-size: 44px; }
+        .auth-card { border-radius: 20px; box-shadow: none; }
+        #statusbar {
+          flex-wrap: wrap;
+          overflow: visible;
+          white-space: normal;
+          gap: 3px 10px;
+          padding: 9px 0;
+          font-size: 10.5px;
+          line-height: 1.4;
+        }
+        #statusbar span { white-space: nowrap; }
+        /* 手机端只留核心状态，隐藏冗长的下次同步/推送/AI 三项 */
+        #statusbar span:nth-last-child(-n+3) { display: none; }
+        #statusbar span:not(:last-of-type)::after { margin: 0 5px; }
+        #app { padding-bottom: calc(104px + env(safe-area-inset-bottom)); }
+        .tomorrow-card .day-head { flex-wrap: wrap; gap: 12px; }
+        .tomorrow-card .day-head .date {
+          font-size: 27px;
+          white-space: nowrap;
+        }
+        .tomorrow-card .day-head .date .dow {
+          color: var(--sub);
+          font-size: 13px;
+        }
+        #addTomorrowEventBtn {
+          flex: 0 0 auto;
+          white-space: nowrap;
+        }
       }
       @media (max-width: 480px) {
-        .card { padding: 20px; }
+        .card { padding: 16px; }
         .today-card { padding: 0; }
-        .today-card .day-head .date { font-size: 32px; }
-        nav button { font-size: 12px; }
+        .today-card .day-head .date { font-size: 30px; }
+        nav button { font-size: 11px; padding: 7px 12px; }
       }
     </style>
     <script>
@@ -4919,10 +5041,7 @@
           <p class="hint">
             每天到点推送一次明天的安排（需先开启 Bark 或群机器人）。内容可自由组合，全部关闭则不推送。
           </p>
-        </div>
-
-        <div class="card" id="settingsWeather">
-          <h2>天气与复习提醒</h2>
+          <div class="subhead">天气与复习提醒</div>
           <div class="check">
             <input type="checkbox" id="weatherEnabled" /><span
               >上课提醒里附上当堂天气</span
