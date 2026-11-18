@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -24,6 +25,7 @@ from .config import (
     DEFAULT_CONFIG, MASK, global_config, load_config, masked_config, save_config,
 )
 from .user_context import current_user_id, get_current_user, set_current_user
+from .netguard import UnsafeURLError, assert_safe_outbound_url
 from .models import (
     Course, Event, Exam, apply_course_overrides, apply_exam_overrides,
     course_uid, current_week, exam_uid, parse_weeks,
@@ -42,6 +44,10 @@ from .version import get_version, get_full_version
 from . import ical
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+
+# 注册串行化：避免「count_users()==0 判定首个管理员」在并发下产生两个 admin，
+# 也避免「先查重再插入」的竞态（单进程足够；多 worker 由 UNIQUE 约束兜底）。
+_REGISTER_LOCK = asyncio.Lock()
 
 
 async def _warm_weather():
@@ -1024,7 +1030,158 @@ async def ingest(req: IngestRequest):
 
 @app.get("/api/logs")
 async def logs(limit: int = 50):
-    return db.get_logs(limit)
+    # 负数会让 SQLite 的 LIMIT -1 变成「不限」，必须夹紧
+    return db.get_logs(max(1, min(limit, 500)))
+
+
+_HHMM_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+_YMD_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _req_int(v, name, lo, hi):
+    if isinstance(v, bool):
+        raise HTTPException(400, f"{name} 必须是整数")
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        raise HTTPException(400, f"{name} 必须是整数")
+    if n < lo or n > hi:
+        raise HTTPException(400, f"{name} 需在 {lo}–{hi} 之间")
+    return n
+
+
+def _req_float(v, name, lo, hi):
+    if isinstance(v, bool):
+        raise HTTPException(400, f"{name} 必须是数字")
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        raise HTTPException(400, f"{name} 必须是数字")
+    if n < lo or n > hi:
+        raise HTTPException(400, f"{name} 需在 {lo}–{hi} 之间")
+    return n
+
+
+def _req_bool(v, name):
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)) and v in (0, 1):
+        return bool(v)
+    if isinstance(v, str) and v.strip().lower() in (
+        "true", "1", "yes", "on", "false", "0", "no", "off"):
+        return v.strip().lower() in ("true", "1", "yes", "on")
+    raise HTTPException(400, f"{name} 必须是布尔值")
+
+
+def _req_str(v, name, max_len=4000):
+    if not isinstance(v, str):
+        raise HTTPException(400, f"{name} 必须是字符串")
+    if len(v) > max_len:
+        raise HTTPException(400, f"{name} 过长（上限 {max_len}）")
+    return v
+
+
+def _req_hhmm(v, name):
+    s = _req_str(v, name, 5)
+    if not _HHMM_RE.match(s):
+        raise HTTPException(400, f"{name} 需为 HH:MM 格式")
+    return s
+
+
+def _validate_settings(cfg: dict) -> dict:
+    """收敛 /api/settings 入参类型，避免字符串塞进数值字段后在下游 500。
+
+    只校验请求里实际出现的键（保存是合并语义），返回深拷贝。
+    """
+    if not isinstance(cfg, dict):
+        raise HTTPException(400, "配置必须是 JSON 对象")
+    out = json.loads(json.dumps(cfg))
+
+    if "total_weeks" in out:
+        out["total_weeks"] = _req_int(out["total_weeks"], "total_weeks", 1, 60)
+    if "sync_time" in out:
+        out["sync_time"] = _req_hhmm(out["sync_time"], "sync_time")
+    if out.get("semester_start"):
+        if not _YMD_RE.match(_req_str(out["semester_start"], "semester_start", 10)):
+            raise HTTPException(400, "semester_start 需为 YYYY-MM-DD 格式")
+    for key in ("push_next_day", "alert_on_fail"):
+        if key in out:
+            out[key] = _req_bool(out[key], key)
+
+    push = out.get("push")
+    if isinstance(push, dict):
+        for key in ("bark_enabled", "wecom_enabled", "reminder_enabled",
+                    "exam_review_enabled", "daily_courses", "daily_events", "daily_weather"):
+            if key in push:
+                push[key] = _req_bool(push[key], f"push.{key}")
+        if "reminder_advance" in push:
+            push["reminder_advance"] = _req_int(
+                push["reminder_advance"], "push.reminder_advance", 0, 180)
+        if "exam_review_days" in push:
+            push["exam_review_days"] = _req_int(
+                push["exam_review_days"], "push.exam_review_days", 0, 90)
+        if "daily_time" in push:
+            push["daily_time"] = _req_hhmm(push["daily_time"], "push.daily_time")
+        if push.get("bark_server") and push["bark_server"] != MASK:
+            bs = _req_str(push["bark_server"], "push.bark_server", 500)
+            try:
+                assert_safe_outbound_url(bs)
+            except UnsafeURLError as e:
+                raise HTTPException(400, f"Bark 服务器地址不安全：{e}")
+
+    weather_cfg = out.get("weather")
+    if isinstance(weather_cfg, dict):
+        if "enabled" in weather_cfg:
+            weather_cfg["enabled"] = _req_bool(weather_cfg["enabled"], "weather.enabled")
+        if "lat" in weather_cfg:
+            weather_cfg["lat"] = _req_float(weather_cfg["lat"], "weather.lat", -90, 90)
+        if "lon" in weather_cfg:
+            weather_cfg["lon"] = _req_float(weather_cfg["lon"], "weather.lon", -180, 180)
+
+    for key in ("section_times", "section_ends"):
+        sec = out.get(key)
+        if isinstance(sec, dict):
+            clean = {}
+            for k, v in sec.items():
+                if v in (None, ""):
+                    continue
+                clean[str(k)] = _req_hhmm(str(v), f"{key}.{k}")
+            out[key] = clean
+        elif sec not in (None, {}):
+            raise HTTPException(400, f"{key} 必须是「节次→时间」的对象")
+
+    prov = out.get("provider")
+    if isinstance(prov, dict):
+        if "primary" in prov and prov["primary"] not in ("auto", "portal", "zhengfang"):
+            raise HTTPException(400, "provider.primary 只能是 auto/portal/zhengfang")
+        portal = prov.get("portal")
+        if isinstance(portal, dict):
+            if "method" in portal:
+                m = str(portal["method"]).upper()
+                if m not in ("GET", "POST"):
+                    raise HTTPException(400, "provider.portal.method 只能是 GET/POST")
+                portal["method"] = m
+            url = portal.get("url")
+            if url and url != MASK:
+                try:
+                    assert_safe_outbound_url(str(url))
+                except UnsafeURLError as e:
+                    raise HTTPException(400, f"课表接口地址不安全：{e}")
+
+    ai_cfg = out.get("ai")
+    if isinstance(ai_cfg, dict):
+        if "enabled" in ai_cfg:
+            ai_cfg["enabled"] = _req_bool(ai_cfg["enabled"], "ai.enabled")
+        if ai_cfg.get("base_url") and ai_cfg["base_url"] != MASK:
+            bu = _req_str(ai_cfg["base_url"], "ai.base_url", 500)
+            parts = urlsplit(bu)
+            if parts.scheme not in ("http", "https") or not parts.netloc:
+                raise HTTPException(400, "ai.base_url 需为 http(s):// 地址")
+            try:
+                assert_safe_outbound_url(bu)
+            except UnsafeURLError as e:
+                raise HTTPException(400, f"AI 接口地址不安全：{e}")
+    return out
 
 
 @app.get("/api/settings")
@@ -1034,6 +1191,7 @@ async def get_settings():
 
 @app.post("/api/settings")
 async def post_settings(cfg: dict):
+    cfg = _validate_settings(cfg)
     hook = str(((cfg or {}).get("push") or {}).get("wecom_webhook") or "")
     if hook and hook != MASK:
         bad = wecom_input_error(hook)
@@ -1229,7 +1387,7 @@ class PushSendRequest(BaseModel):
 
 @app.get("/api/push/log")
 async def push_log(limit: int = 10):
-    return {"logs": db.list_push_logs(limit)}
+    return {"logs": db.list_push_logs(max(1, min(limit, 200)))}
 
 
 @app.post("/api/push/test")
@@ -1279,7 +1437,8 @@ async def chat_upload(request: Request, name: str = ""):
     if len(data) > limit:
         raise HTTPException(413, f"文件太大，单个文件上限 {limit // 1048576} MB")
     try:
-        return files.save(db._uid(), name or request.headers.get("x-filename") or "", data)
+        return await run_in_threadpool(
+            files.save, db._uid(), name or request.headers.get("x-filename") or "", data)
     except files.FileError as e:
         raise HTTPException(400, str(e))
 
@@ -1468,16 +1627,22 @@ async def auth_register(req: RegisterRequest, request: Request):
     if err:
         raise HTTPException(400, err)
     username = req.username.strip()
-    if db.get_user_by_username(username):
-        raise HTTPException(400, "用户名已存在")
-    first = db.count_users() == 0
-    code = _normalize_invite_code(req.invite)
-    if not first and not db.get_valid_invite(code):
-        raise HTTPException(400, "邀请码无效、已用完或已过期")
-    uid = db.create_user(username, auth.hash_password(req.password),
-                         (req.display_name or "").strip()[:40],
-                         (req.student_id or "").strip()[:32],
-                         "admin" if first else "user")
+    async with _REGISTER_LOCK:
+        if db.get_user_by_username(username):
+            raise HTTPException(400, "用户名已存在")
+        first = db.count_users() == 0
+        code = _normalize_invite_code(req.invite)
+        if not first and not db.get_valid_invite(code):
+            raise HTTPException(400, "邀请码无效、已用完或已过期")
+        hashed = await run_in_threadpool(auth.hash_password, req.password)
+        try:
+            uid = db.create_user(username, hashed,
+                                 (req.display_name or "").strip()[:40],
+                                 (req.student_id or "").strip()[:32],
+                                 "admin" if first else "user")
+        except sqlite3.IntegrityError:
+            # 并发注册同一用户名：靠 UNIQUE 约束兜底，回 400 而不是 500
+            raise HTTPException(400, "用户名已存在")
     if not first and not db.consume_invite(code, uid):
         # 并发抢最后一个名额：回滚刚建好的账号，避免绕过次数限制
         db.delete_user(uid)
@@ -1505,7 +1670,10 @@ async def auth_login(req: LoginRequest, request: Request):
     if not auth.check_rate_limit(key):
         raise HTTPException(429, "尝试过于频繁，请一分钟后再试")
     user = db.get_user_by_username((req.username or "").strip())
-    if not user or not user["is_active"] or not auth.verify_password(req.password, user["password_hash"]):
+    pw_ok = False
+    if user:
+        pw_ok = await run_in_threadpool(auth.verify_password, req.password, user["password_hash"])
+    if not user or not user["is_active"] or not pw_ok:
         raise HTTPException(400, "用户名或密码错误")
     auth.clear_rate_limit(key)
     db.set_last_login(user["id"])
@@ -1538,7 +1706,7 @@ async def auth_delete_account(req: DeleteAccountRequest, request: Request):
         raise HTTPException(401, "请先登录")
     if (req.username or "").strip() != me["username"]:
         raise HTTPException(400, "用户名与当前账号不一致")
-    if not auth.verify_password(req.password or "", me["password_hash"]):
+    if not await run_in_threadpool(auth.verify_password, req.password or "", me["password_hash"]):
         raise HTTPException(400, "密码错误")
     promoted = ""
     if me["role"] == "admin":
@@ -1698,6 +1866,8 @@ async def auth_set_role(user_id: int, req: AdminUserAction):
 @app.post("/api/auth/users/{user_id}/active")
 async def auth_set_active(user_id: int, req: AdminUserAction):
     me = _require_admin()
+    if req.active is None:
+        raise HTTPException(400, "缺少 active 参数")
     if user_id == me["id"] and req.active is False:
         raise HTTPException(400, "不能停用自己")
     target = db.get_user_by_id(user_id)
@@ -1777,7 +1947,7 @@ async def auth_reset_password(user_id: int, req: ResetPasswordRequest):
     err = auth.validate_credentials(target["username"], req.new_password)
     if err:
         raise HTTPException(400, err)
-    db.set_user_password(user_id, auth.hash_password(req.new_password))
+    db.set_user_password(user_id, await run_in_threadpool(auth.hash_password, req.new_password))
     db.delete_user_sessions(user_id)  # 旧会话失效，强制重新登录
     db.add_admin_log(me["id"], me["username"], "reset_password", target["username"])
     return {"ok": True, "user_id": user_id}
@@ -1835,7 +2005,7 @@ async def users_source_status():
 @app.get("/api/auth/admin-log")
 async def admin_log(limit: int = 100):
     _require_admin()
-    return {"logs": db.list_admin_log(min(limit, 500))}
+    return {"logs": db.list_admin_log(max(1, min(limit, 500)))}
 
 
 class ChangePasswordRequest(BaseModel):
@@ -1850,12 +2020,12 @@ async def auth_change_password(req: ChangePasswordRequest, request: Request):
     me = db.get_user_by_id(uid or 0)
     if not me:
         raise HTTPException(401, "请先登录")
-    if not auth.verify_password(req.old_password, me["password_hash"]):
+    if not await run_in_threadpool(auth.verify_password, req.old_password, me["password_hash"]):
         raise HTTPException(400, "原密码错误")
     err = auth.validate_credentials(me["username"], req.new_password)
     if err:
         raise HTTPException(400, err)
-    db.set_user_password(uid, auth.hash_password(req.new_password))
+    db.set_user_password(uid, await run_in_threadpool(auth.hash_password, req.new_password))
     # 仅让其他设备 / 会话失效，当前浏览器不掉线
     cur = _cookie_token(request.headers.get("cookie", ""))
     db.delete_user_sessions(uid, except_token=cur)

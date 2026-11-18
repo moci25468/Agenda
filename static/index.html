@@ -2453,7 +2453,7 @@
       /* 简约焕新：统一留白、层级与交互，保留所有既有 DOM 契约 */
       /* 设计令牌（01-visual-direction §2.1）：全站唯一事实来源，组件规则只引用 var()/color-mix */
       :root {
-        /* Apple light（stylekit apple）：苹果灰画布 + 白卡 + 系统蓝唯一强调色，大量留白 + 轻阴影 */
+        /* Apple light（stylekit apple）：苹果灰画布 + 白卡 + 松绿唯一强调色，大量留白 + 轻阴影 */
         --bg: #f5f5f7;
         --card: #ffffff;
         --fill: #f5f5f7;
@@ -2464,20 +2464,20 @@
         --muted: #86868b;
         --line: #d2d2d7;
         --line-strong: #c7c7cc;
-        --accent: #0071e3;
-        --accent-hover: #0077ed;
-        --accent-soft: rgba(0, 113, 227, 0.10);
-        --accent-faint: #66b0ff;
+        --accent: #1d7a5c;
+        --accent-hover: #17624a;
+        --accent-soft: rgba(29, 122, 92, 0.10);
+        --accent-faint: #5aa88a;
         --accent-ink: #ffffff;
-        --detection: #0071e3;
-        --cinnabar: #0071e3;
-        --cinnabar-soft: rgba(0, 113, 227, 0.10);
-        --gilt: #0071e3;
+        --detection: #1d7a5c;
+        --cinnabar: #1d7a5c;
+        --cinnabar-soft: rgba(29, 122, 92, 0.10);
+        --gilt: #1d7a5c;
         --hero: #ffffff;
         --hero-2: #f5f5f7;
         --hero-text: #1d1d1f;
         --hero-sub: #86868b;
-        --hero-gilt: #0071e3;
+        --hero-gilt: #1d7a5c;
         /* Apple 语义色：绿/红只表达状态，小面积 */
         --ok: #34c759;
         --ok-soft: rgba(52, 199, 89, 0.12);
@@ -3311,7 +3311,7 @@
         .brand-lockup { gap: 10px; }
       }
 
-      /* —— 今日刊头：白卡顶栏 + 系统蓝点缀 —— */
+      /* —— 今日刊头：白卡顶栏 + 松绿点缀 —— */
       .today-card { padding: 0; overflow: hidden; border-radius: 14px; }
       .today-card .day-head {
         margin: 0; padding: 30px 32px 26px; border-bottom: 0;
@@ -3328,7 +3328,7 @@
       .today-card > #todayList { padding: 6px 32px 30px; }
       .today-card > .empty { margin: 6px 32px 30px; }
 
-      /* —— 下一节课：白卡通栏 + 系统蓝书脊 —— */
+      /* —— 下一节课：白卡通栏 + 松绿书脊 —— */
       .next-class {
         margin: 0; padding: 15px 32px; border: 0; border-radius: 0;
         border-top: 1px solid var(--line); border-left: 0;
@@ -3515,7 +3515,7 @@
         /* 深色 = 同一套色相在暗处的反演（01 §2.2）：只覆写 :root 变量与个别无法变量化的规则。
            JS 契约不变：仍由脚本 el.disabled 启停本块。 */
         :root {
-          /* macOS 毛玻璃（stylekit macos-vibrancy）：三层深灰 + 系统蓝，桌面应用密度。
+          /* macOS 毛玻璃（stylekit macos-vibrancy）：三层深灰 + 松绿，桌面应用密度。
              层级靠明度差而非描边；分隔线一律 1px 白色 8%~12%。 */
           --bg: #1c1c1e;            /* deepest：窗口底与侧边栏基色 */
           --card: #2c2c2e;          /* mid：内容区与卡片 */
@@ -3527,20 +3527,20 @@
           --muted: rgba(255, 255, 255, 0.62);
           --line: rgba(255, 255, 255, 0.10);
           --line-strong: rgba(255, 255, 255, 0.16);
-          --accent: #0a84ff;        /* system blue：唯一强调色 */
-          --accent-hover: #2a96ff;
-          --accent-soft: rgba(10, 132, 255, 0.18);
-          --accent-faint: #5aaaff;
-          --accent-ink: #ffffff;
-          --detection: #0a84ff;
-          --cinnabar: #0a84ff;
-          --cinnabar-soft: rgba(10, 132, 255, 0.18);
-          --gilt: #0a84ff;
+          --accent: #34c79a;        /* 松绿：唯一强调色（深底提亮一档） */
+          --accent-hover: #4ad3a8;
+          --accent-soft: rgba(52, 199, 154, 0.18);
+          --accent-faint: #7fdfc0;
+          --accent-ink: #0a1f19;
+          --detection: #34c79a;
+          --cinnabar: #34c79a;
+          --cinnabar-soft: rgba(52, 199, 154, 0.18);
+          --gilt: #34c79a;
           --hero: #2c2c2e;
           --hero-2: #262628;
           --hero-text: rgba(255, 255, 255, 0.92);
           --hero-sub: rgba(255, 255, 255, 0.62);
-          --hero-gilt: #0a84ff;
+          --hero-gilt: #34c79a;
           --ok: #30d158;   --ok-soft: rgba(48, 209, 88, 0.16);
           --warn: #ff9f0a; --warn-soft: rgba(255, 159, 10, 0.16);
           --fail: #ff453a; --fail-soft: rgba(255, 69, 58, 0.16);
@@ -3549,7 +3549,7 @@
           --shadow-3: 0 20px 48px rgba(0, 0, 0, 0.5);
         }
         ::selection { background: color-mix(in srgb, var(--accent) 30%, var(--bg)); color: var(--text); }
-        /* 深色 primary：底 --accent，文字 --accent-ink（系统蓝白字） */
+        /* 深色 primary：底 --accent，文字 --accent-ink（松绿底深字） */
         button.primary, #syncBtn, .msg.user { color: var(--accent-ink); }
         /* 输入框用 --fill 以区隔卡片底 */
         input, select, textarea { background: var(--fill); }
@@ -4838,8 +4838,8 @@
           box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
         }
         /* iOS 设置风格：每项一个专属色，冷→暖铺开，与靛蓝主色同族不打架 */
-        /* iOS 设置图标：外观走系统蓝（唯一彩色场），其余收进墨色同族 */
-        .ios-row-ic.ic-appearance { background: linear-gradient(160deg, #2a96ff 0%, #0071e3 100%); }
+        /* iOS 设置图标：外观走松绿（唯一彩色场），其余收进墨色同族 */
+        .ios-row-ic.ic-appearance { background: linear-gradient(160deg, #2f9a78 0%, #1d7a5c 100%); }
         .ios-row-ic.ic-account    { background: linear-gradient(160deg, #3a3a3c 0%, #1d1d1f 100%); }
         .ios-row-ic.ic-sync       { background: linear-gradient(160deg, #4a5a52 0%, #2c3a34 100%); }
         .ios-row-ic.ic-push       { background: linear-gradient(160deg, #5c5446 0%, #3a352a 100%); }
@@ -4957,7 +4957,7 @@
       }
 
       /* ==================== macOS 毛玻璃（stylekit macos-vibrancy）深色质感 ====================
-         仅在深色主题生效：三层深灰靠明度分层，禁用位移/缩放，改用系统蓝 18% 选中态
+         仅在深色主题生效：三层深灰靠明度分层，禁用位移/缩放，改用松绿 18% 选中态
          与 1px 白色细分隔线。浅色主题仍走上面的 Apple light，两套互不干扰。 */
       html[data-theme="dark"] .card { transition: background-color 0.2s ease, border-color 0.2s ease; }
       html[data-theme="dark"] .card:hover { transform: none; }
@@ -4973,12 +4973,12 @@
         backdrop-filter: blur(40px);
         -webkit-backdrop-filter: blur(40px);
       }
-      /* 深色：选中态用系统蓝 18% 底 + 圆角，hover 用白色 8%（macOS 列表行） */
+      /* 深色：选中态用松绿 18% 底 + 圆角，hover 用白色 8%（macOS 列表行） */
       html[data-theme="dark"] nav button.active,
       html[data-theme="dark"] nav button.active:hover,
       html[data-theme="dark"] .settings-nav button.active,
       html[data-theme="dark"] .settings-nav button.active:hover {
-        background: rgba(10, 132, 255, 0.18) !important;
+        background: rgba(52, 199, 154, 0.18) !important;
         color: var(--text) !important;
         box-shadow: none !important;
       }
@@ -4987,7 +4987,7 @@
         background: rgba(255, 255, 255, 0.08);
         color: var(--text);
       }
-      /* 深色：强调色统一为系统蓝（覆盖残留的电光蓝类名） */
+      /* 深色：强调色统一为松绿（覆盖残留的电光蓝类名） */
       html[data-theme="dark"] .section-kicker { color: var(--accent); }
       html[data-theme="dark"] .card h2 { color: var(--text); }
 
@@ -4998,6 +4998,209 @@
         font-family: var(--font-serif);
         font-weight: 400;
       }
+
+      /* ==================== 日程页（周课表）Apple light 化 ====================
+         收掉历史皮肤残留的表格风：五色课块/1px 线框/4px 圆角/淡今日高亮，
+         统一到松绿 + 中性灰阶 + 24px 圆角 + 轻阴影；深色随 macos-vibrancy 反演。
+         仅覆盖视觉，不动 DOM/交互（renderWeek 仍按 tone-N 类名渲染，这里重定义色板）。 */
+
+      /* 1. 周导航：翻周为主、跳转/更多为次；标题统一无衬线 650 */
+      .week-nav { gap: 10px; }
+      .week-nav .label {
+        font-family: var(--font-text);
+        font-size: 20px;
+        font-weight: 650;
+        letter-spacing: -0.01em;
+      }
+      .week-tools { gap: 8px; }
+
+      /* 2. 网格：整块白卡 + 淡缝分隔（gap 透出极淡细缝，不用直角线框）；圆角 24px */
+      .week-grid {
+        gap: 1px;
+        background: var(--line);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-l);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+        overflow: hidden;
+      }
+      .week-grid > div { background: var(--card); }
+      .week-head-cell { background: var(--card); }
+      .week-period { background: var(--fill); }
+      .week-cell { border: 0; }
+
+      /* 3. 今日列：松绿明确高亮（表头绿底白字 + 整列淡绿），去掉内部 border-left 直角线 */
+      .week-head-cell.today {
+        background: var(--accent);
+      }
+      .week-head-cell.today .dow,
+      .week-head-cell.today .dnum { color: #ffffff; }
+      .week-cell.today { background: color-mix(in srgb, var(--accent) 7%, var(--card)); }
+
+      /* 4. 课程块：松绿明度阶梯，圆角统一 8px（与网格 24px 拉开层级，不突兀），去边框 */
+      .mini-course,
+      .mini-course.tone-0,
+      .mini-course.tone-1,
+      .mini-course.tone-2,
+      .mini-course.tone-3,
+      .mini-course.tone-4 {
+        border-left: 0;
+        border-radius: 8px;
+        padding: 9px 10px;
+        margin-bottom: 6px;
+        background: color-mix(in srgb, var(--accent) 9%, var(--card));
+        box-shadow: none;
+      }
+      .mini-course.tone-1 { background: color-mix(in srgb, var(--accent) 5%, var(--card)); }
+      .mini-course.tone-2 { background: color-mix(in srgb, var(--accent) 13%, var(--card)); }
+      .mini-course.tone-3 { background: color-mix(in srgb, var(--accent) 16%, var(--card)); }
+      .mini-course.tone-4 { background: color-mix(in srgb, var(--accent) 7%, var(--card)); }
+      .mini-course .n { font-size: 13px; font-weight: 650; color: var(--text); }
+      .mini-course .t { font-size: 11px; color: var(--sub); }
+      .mini-course .r { font-size: 12px; color: var(--sub); }
+      .mini-course .w { font-size: 11px; color: var(--sub); }
+
+      /* 5. 本周日程/考试安排卡片标题：统一无衬线，与今日页一致 */
+      #tab-week .day-head .date {
+        font-family: var(--font-text);
+        font-size: 22px;
+        font-weight: 650;
+        letter-spacing: -0.01em;
+      }
+
+      /* 6. 移动端竖列表：今日卡松绿高亮，非今日卡中性表头；内部行线改淡，课块同款 8px 圆角 */
+      .day-card { border-radius: var(--radius-l); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04); }
+      .day-card.today { border-color: var(--accent); }
+      .day-card-head { background: var(--card); border-bottom: 0; }
+      .day-card.today .day-card-head {
+        background: var(--accent);
+      }
+      .day-card.today .day-card-head .day-name,
+      .day-card.today .day-card-head .day-date,
+      .day-card.today .day-card-head .day-today { color: #ffffff; }
+      .day-slot { border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent); }
+      .day-slot:last-child { border-bottom: 0; }
+      .day-slot .mini-course { border-radius: 8px; }
+
+      /* 7. 深色：今日列/课块在 macos-vibrancy 深灰底上，用松绿 + 深灰反演；缝隙分隔 */
+      html[data-theme="dark"] .week-grid {
+        background: rgba(255, 255, 255, 0.10);
+        border-color: rgba(255, 255, 255, 0.10);
+        box-shadow: 0 20px 48px rgba(0, 0, 0, 0.5);
+      }
+      html[data-theme="dark"] .week-grid > div { background: #2c2c2e; }
+      html[data-theme="dark"] .week-head-cell { background: #2c2c2e; }
+      html[data-theme="dark"] .week-period { background: #262628; }
+      html[data-theme="dark"] .week-cell { border: 0; }
+      html[data-theme="dark"] .week-head-cell.today { background: var(--accent); }
+      html[data-theme="dark"] .week-cell.today { background: rgba(52, 199, 154, 0.14); }
+      html[data-theme="dark"] .mini-course,
+      html[data-theme="dark"] .mini-course.tone-0,
+      html[data-theme="dark"] .mini-course.tone-1,
+      html[data-theme="dark"] .mini-course.tone-2,
+      html[data-theme="dark"] .mini-course.tone-3,
+      html[data-theme="dark"] .mini-course.tone-4 {
+        background: rgba(52, 199, 154, 0.16);
+      }
+      html[data-theme="dark"] .mini-course.tone-1 { background: rgba(52, 199, 154, 0.10); }
+      html[data-theme="dark"] .mini-course.tone-2 { background: rgba(52, 199, 154, 0.22); }
+      html[data-theme="dark"] .mini-course.tone-3 { background: rgba(52, 199, 154, 0.28); }
+      html[data-theme="dark"] .mini-course.tone-4 { background: rgba(52, 199, 154, 0.13); }
+      html[data-theme="dark"] .day-card { background: #2c2c2e; border-color: rgba(255, 255, 255, 0.10); }
+      html[data-theme="dark"] .day-card-head { background: #2c2c2e; }
+      html[data-theme="dark"] .day-card.today .day-card-head { background: var(--accent); }
+
+      /* ==================== 下一节课直达条：进度圆环 + 时间轴 ====================
+         收掉历史皮肤的「直角书脊 + 朴素大数字倒计时」，改为 Apple 风：
+         左侧课程文字 + 底部时间轴进度条，右侧环形倒计时。浅色松绿、深色随 macOS 反演。 */
+
+      .next-class {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        width: calc(100% - 64px);
+        margin: 0 32px 28px;
+        padding: 18px 24px;
+        border: 1px solid var(--line);
+        border-left: 1px solid var(--line);
+        border-radius: var(--radius-l);
+        background: var(--fill);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+        text-align: left;
+      }
+      .next-class:hover { border-color: var(--accent); background: var(--fill); }
+      .next-class .nc-main { flex: 1; min-width: 0; }
+      .next-class .nc-kicker { color: var(--accent); font-size: 10px; font-weight: 650; letter-spacing: 0.1em; }
+      .next-class .nc-name {
+        margin-top: 3px; color: var(--text); font-size: 16px; font-weight: 650;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      .next-class .nc-meta { margin-top: 2px; color: var(--sub); font-size: 12px; }
+
+      /* 时间轴进度：淡轨道 + 松绿进度段 + 当前位置圆点 */
+      .next-class .nc-track {
+        position: relative; height: 6px; margin-top: 13px;
+        background: color-mix(in srgb, var(--line) 70%, transparent);
+        border-radius: 3px;
+      }
+      .next-class .nc-track-fill {
+        position: absolute; left: 0; top: 0; height: 100%;
+        background: var(--accent); border-radius: 3px;
+      }
+      .next-class .nc-track-dot {
+        position: absolute; top: 50%; transform: translate(-50%, -50%);
+        width: 12px; height: 12px; border-radius: 50%;
+        background: var(--accent); border: 2px solid var(--card);
+      }
+      .next-class .nc-track-times {
+        display: flex; justify-content: space-between; margin-top: 6px;
+        font-size: 11px; color: var(--sub);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* 环形倒计时 */
+      .next-class .nc-ring {
+        position: relative; flex: 0 0 auto;
+        width: 76px; height: 76px;
+      }
+      .next-class .nc-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+      .next-class .nc-ring-bg {
+        fill: none; stroke: color-mix(in srgb, var(--line) 70%, transparent); stroke-width: 6;
+      }
+      .next-class .nc-ring-fg {
+        fill: none; stroke: var(--accent); stroke-width: 6;
+        stroke-linecap: round;
+        transition: stroke-dashoffset 0.5s ease;
+      }
+      .next-class .nc-ring-center {
+        position: absolute; inset: 0; display: flex;
+        flex-direction: column; align-items: center; justify-content: center;
+        text-align: center;
+      }
+      .next-class .nc-ring-center b {
+        color: var(--accent); font-size: 20px; font-weight: 650;
+        line-height: 1; font-variant-numeric: tabular-nums;
+      }
+      .next-class .nc-ring-center span { margin-top: 3px; color: var(--sub); font-size: 9px; white-space: nowrap; }
+
+      /* 移动端：圆环缩小，时间轴保留 */
+      @media (max-width: 720px) {
+        .next-class { width: calc(100% - 28px); margin: 0 14px 14px; padding: 14px 16px; gap: 14px; }
+        .next-class .nc-ring { width: 64px; height: 64px; }
+        .next-class .nc-ring-center b { font-size: 17px; }
+      }
+
+      /* 深色：macOS 深灰底 + 松绿反演 */
+      html[data-theme="dark"] .next-class {
+        background: #2c2c2e;
+        border-color: rgba(255, 255, 255, 0.10);
+        box-shadow: 0 20px 48px rgba(0, 0, 0, 0.5);
+      }
+      html[data-theme="dark"] .next-class:hover { border-color: rgba(52, 199, 154, 0.5); }
+      html[data-theme="dark"] .next-class .nc-track {
+        background: rgba(255, 255, 255, 0.12);
+      }
+      html[data-theme="dark"] .next-class .nc-ring-bg { stroke: rgba(255, 255, 255, 0.14); }
+      html[data-theme="dark"] .next-class .nc-track-dot { border-color: #2c2c2e; }
     </style>
     <script>
       // 主题在页面渲染前尽早应用，避免浅色闪一下再变深色；设置页随后同步按钮状态
@@ -5042,7 +5245,7 @@
                 <rect class="bm-base" x="0.5" y="0.5" width="39" height="39" rx="11" />
                 <rect x="1.2" y="1.2" width="37.6" height="37.6" rx="10.4" fill="none" stroke="rgba(250,250,248,.22)" />
                 <path d="M11.4 15.6h17.2M11.4 21.4h17.2M11.4 27.2h8.6" stroke="#fafaf8" stroke-width="2.4" stroke-linecap="round" />
-                <circle cx="28.2" cy="27.2" r="2.5" fill="#0071e3" />
+                <circle cx="28.2" cy="27.2" r="2.5" fill="#1d7a5c" />
               </svg>
             </span>
             <h1 class="auth-title">Agenda <span>知序</span></h1>
@@ -5093,7 +5296,7 @@
               <rect class="bm-base" x="0.5" y="0.5" width="39" height="39" rx="11" />
               <rect x="1.2" y="1.2" width="37.6" height="37.6" rx="10.4" fill="none" stroke="rgba(250,250,248,.16)" />
               <path d="M11.4 15.6h17.2M11.4 21.4h17.2M11.4 27.2h8.6" stroke="#fafaf8" stroke-width="2.4" stroke-linecap="round" />
-              <circle cx="28.2" cy="27.2" r="2.5" fill="#0071e3" />
+              <circle cx="28.2" cy="27.2" r="2.5" fill="#1d7a5c" />
             </svg>
           </span>
           <div>
@@ -6320,13 +6523,32 @@
         } else {
           const left = Math.max(0, (current ? toMin(pick.end_time) : toMin(pick.start_time)) - nowMin);
           const meta = [pick.room || "教室待定", pick.campus || ""].filter(Boolean).join(" · ");
+          // 进度：正在上课 = 已过时长 / 总时长；尚未开始 = 0
+          let progress = 0;
+          if (current) {
+            const total = toMin(pick.end_time) - toMin(pick.start_time);
+            const elapsed = nowMin - toMin(pick.start_time);
+            progress = total > 0 ? Math.min(100, Math.max(0, Math.round((elapsed / total) * 100))) : 0;
+          }
+          const CIRC = 188.5; // 2πr，r=30
+          const dash = (CIRC * (100 - progress) / 100).toFixed(1);
           bar.innerHTML = `<div class="nc-main">
         <div class="nc-kicker">${current ? `正在上课 · 第 ${pick.start}–${pick.end} 节` : "下一节课"}</div>
         <div class="nc-name">${esc(pick.name)}</div>
         <div class="nc-meta">${esc(pick.start_time)}–${esc(pick.end_time)}${meta ? " · " + esc(meta) : ""}</div>
+        <div class="nc-track">
+          <div class="nc-track-fill" style="width:${progress}%"></div>
+          <div class="nc-track-dot" style="left:${progress}%"></div>
+        </div>
+        <div class="nc-track-times"><span>${esc(pick.start_time)}</span><span>${esc(pick.end_time)}</span></div>
       </div>
-      <div class="nc-count"><b>${left}</b><span>分钟${current ? "后下课" : "后上课"}</span></div>
-      <div class="nc-arrow">›</div>`;
+      <div class="nc-ring" title="课程进度 ${progress}%">
+        <svg viewBox="0 0 72 72" aria-hidden="true">
+          <circle class="nc-ring-bg" cx="36" cy="36" r="30"></circle>
+          <circle class="nc-ring-fg" cx="36" cy="36" r="30" stroke-dasharray="${CIRC}" stroke-dashoffset="${dash}"></circle>
+        </svg>
+        <div class="nc-ring-center"><b>${left}</b><span>分钟${current ? "后下课" : "后上课"}</span></div>
+      </div>`;
         }
         bar.classList.remove("hidden");
       }
@@ -6572,16 +6794,18 @@
           for (let i = 0; i < WEATHER_RETRY_DELAYS.length; i++) {
             if (WEATHER_RETRY_DELAYS[i])
               await new Promise((r) => setTimeout(r, WEATHER_RETRY_DELAYS[i]));
+            let ok = false;
             try {
               weatherData = (await api("/api/weather")) || { hours: {} };
+              ok = true;
             } catch (e) {
-              // 别把 null 之外的失败状态固定下来，下一轮还要重试
+              // 失败不写时间戳，下一轮（含页面切回）还能自愈重试
               weatherData = weatherData || { hours: {} };
             }
-            weatherFetchedAt = Date.now();
-            if (weatherHasHours(weatherData)) break;
+            if (!ok) continue;
+            if (weatherHasHours(weatherData)) { weatherFetchedAt = Date.now(); break; }
             // 管理员主动在设置里关掉了天气，不必重试
-            if (weatherData && weatherData.enabled === false) break;
+            if (weatherData && weatherData.enabled === false) { weatherFetchedAt = Date.now(); break; }
           }
         } finally {
           weatherLoading = false;
@@ -7161,7 +7385,8 @@
         $("#courseTeacher").value = c.teacher || "";
         $("#courseNote").value = c.note || "";
         $("#saveCourseBtn").textContent = "保存修改";
-        $(".sheet-panel").scrollTop = 0;
+        const _cp = $("#courseName").closest(".sheet-panel");
+        if (_cp) _cp.scrollTop = 0;
         $("#courseName").focus();
       }
 
@@ -7318,7 +7543,8 @@
         $("#examSeat").value = x.seat || "";
         $("#examNote").value = x.note || "";
         $("#saveExamAdjustBtn").textContent = "保存修改";
-        $(".sheet-panel").scrollTop = 0;
+        const _ep = $("#examName").closest(".sheet-panel");
+        if (_ep) _ep.scrollTop = 0;
         $("#examName").focus();
       }
 
@@ -8323,14 +8549,15 @@
           return box.scrollHeight - box.scrollTop - box.clientHeight < 80;
         };
         let rafId = 0;
+        // 节流：整段 Markdown 每帧重建是 O(n²)，120ms 一次足够顺滑且大幅省 CPU
         const scheduleRender = () => {
           if (rafId) return;
-          rafId = requestAnimationFrame(() => {
+          rafId = setTimeout(() => {
             rafId = 0;
             const pinned = nearBottom();
             bubble.innerHTML = renderReply(stripPendingMarkers(acc));
             if (pinned) $("#chatMsgs").scrollTop = $("#chatMsgs").scrollHeight;
-          });
+          }, 120);
         };
         try {
           const resp = await fetch("/api/chat/stream", {
@@ -8398,7 +8625,7 @@
           }
         } finally {
           // 取消待执行的流式帧，避免它在最终卡片渲染之后覆盖掉卡片
-          if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+          if (rafId) { clearTimeout(rafId); rafId = 0; }
           bubble.classList.remove("streaming", "thinking");
           chatBusy = false;
           $("#chatSend").disabled = false;
@@ -8717,7 +8944,9 @@
           $("#zfTerm").value = (s.zhengfang.term || "3");
           // 门户表单回填 cURL 占位信息
           if (s.portal.url) {
-            $("#curlInput").placeholder = "已配置：" + s.portal.url;
+            $("#curlInput").placeholder = (s.portal.url === "********")
+              ? "已配置课表接口（地址已隐藏，粘贴新 cURL 可覆盖）"
+              : "已配置：" + s.portal.url;
           }
           renderPrimaryState(s);
         } catch (e) {
@@ -8999,6 +9228,11 @@
       function saveTab(tab) {
         try { localStorage.setItem(TAB_KEY, tab); } catch (e) {}
       }
+      // 页面加载失败时给出可见提示，避免切页后永远停在骨架屏（原来是无 catch 的裸调用）
+      const safeLoad = (p) => Promise.resolve(p).catch((e) => {
+        console.error(e);
+        if (typeof toast === "function") toast("加载失败：" + ((e && e.message) || "网络异常"));
+      });
       function switchTab(tab) {
         saveTab(tab);
         // 移动端底部导航切页后回到顶部，避免停在上一页的滚动位置
@@ -9012,22 +9246,22 @@
         ["today", "week", "ai", "source", "admin", "settings"].forEach((t) =>
           $("#tab-" + t).classList.toggle("hidden", t !== tab),
         );
-        if (tab === "today") loadToday();
+        if (tab === "today") safeLoad(loadToday());
         if (tab === "week") {
-          loadWeek(viewWeek ?? Math.max(status?.week || 1, 1));
-          loadExams();
+          safeLoad(loadWeek(viewWeek ?? Math.max(status?.week || 1, 1)));
+          safeLoad(loadExams());
         }
-        if (tab === "source") loadSources();
+        if (tab === "source") safeLoad(loadSources());
         if (tab === "admin") {
-          loadAdminStats();
-          loadAdminUsers();
-          loadAdminSources();
-          loadAdminLog();
-          refreshInvites();
+          safeLoad(loadAdminStats());
+          safeLoad(loadAdminUsers());
+          safeLoad(loadAdminSources());
+          safeLoad(loadAdminLog());
+          safeLoad(refreshInvites());
         }
         if (tab === "settings") {
-          loadSettings();
-          loadPushLog();
+          safeLoad(loadSettings());
+          safeLoad(loadPushLog());
           // macOS(PC)：默认落在"外观"分区；iOS(手机)：回到设置首页列表
           if (typeof showSettingsHome === "function") {
             if (isPhoneLayout()) showSettingsHome();
@@ -9268,6 +9502,8 @@
       });
       $("#nextClassBar").addEventListener("click", () => switchTab("week"));
       setInterval(() => {
+        // 页面不可见时不做无意义的重建（移动端长期驻留后台的省电优化）
+        if (document.hidden) return;
         if (weekData && !$("#tab-today").classList.contains("hidden")) renderNextClass();
       }, 30000);
       $("#chatSend").addEventListener("click", () => sendChat());
@@ -9862,7 +10098,7 @@
         if (!currentUser) return;
         const rows = [
           ["用户名", currentUser.username],
-          ["显示名称", currentUser.display_name],
+          ["显示名称", currentUser.display_name || "—"],
           ["学号", currentUser.student_id || "未填写"],
           ["角色", currentUser.role === "admin" ? "管理员" : "普通用户"],
           ["注册时间", currentUser.created_at || "—"],
@@ -9920,7 +10156,7 @@
           }
           currentUser = st.user;
           showApp();
-          $("#userBox").textContent = currentUser.display_name +
+          $("#userBox").textContent = (currentUser.display_name || currentUser.username) +
             (currentUser.role === "admin" ? "（管理员）" : "");
           renderAccountInfo();
           $("#inviteBtn").classList.toggle("hidden", currentUser.role !== "admin");

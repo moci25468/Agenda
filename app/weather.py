@@ -18,6 +18,7 @@ WTTR_API = "https://wttr.in/{place}?format=j1"
 WTTR_PLACE = "Qingdao"
 CACHE_TTL = 1800          # 成功后缓存 30 分钟
 FAIL_TTL = 120            # 失败只短暂回避，两分钟后就允许重试
+STALE_MAX = 6 * 3600      # 兜底数据最多沿用 6 小时，避免把一天前的天气当今日
 TIMEOUT = 10.0            # 跨境访问偶发 5s 级抖动，8s 太紧
 PRIMARY_TIMEOUT = 5.0     # 主源连不通时是干等满超时，给短一点免得卡住页面/AI
 RETRY_DELAYS = (0.5,)     # 失败后再试一次，最多两次请求
@@ -105,13 +106,14 @@ def _parse_hourly(data: dict) -> dict:
     return out
 
 
-async def _fetch_from_wttr() -> dict:
+async def _fetch_from_wttr(lat: float, lon: float) -> dict:
     """备用源：wttr.in 逐小时数据，转成与主源相同结构。失败返回 {}。"""
     out: dict = {}
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT, trust_env=False) as client:
             r = await client.get(
-                WTTR_API.format(place=WTTR_PLACE),
+                # 用经纬度而非写死城市名，用户改了位置也能正确回退
+                WTTR_API.format(place=f"{lat},{lon}"),
                 headers={"User-Agent": "curl/7.68"},
             )
             r.raise_for_status()
@@ -183,14 +185,15 @@ async def fetch_hourly(lat: float, lon: float) -> dict:
             _primary_dead_until = time.monotonic() + DEAD_TTL
     # 主源不可用（境内 VPS 常见 SSL 握手超时）时切备用源
     if not out:
-        out = await _fetch_from_wttr()
+        out = await _fetch_from_wttr(lat, lon)
         if out:
             log.info("主天气源不可用，已切换到备用源 wttr.in（%s）", err)
     if out:
-        _last_good[key] = out
+        _last_good[key] = (now, out)
         _cache[key] = (now, out)
         return out
-    stale = _last_good.get(key) or {}
+    entry = _last_good.get(key)
+    stale = entry[1] if entry and now - entry[0] < STALE_MAX else {}
     if stale:
         log.warning("天气获取失败（%s, %s）：%s；沿用上次成功的数据", lat, lon, err)
         # 按「有数据」缓存，避免持续不通时反复打接口

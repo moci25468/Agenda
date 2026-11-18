@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 
 from . import db
+from .netguard import UnsafeURLError, assert_safe_outbound_url
 
 WECOM_API = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key="
 WECOM_HOST = "qyapi.weixin.qq.com"
@@ -64,6 +65,10 @@ async def send_bark(cfg: dict, title: str, body: str, url: str = "") -> tuple[bo
     if url:
         payload["url"] = url
     try:
+        assert_safe_outbound_url(server)  # 防 SSRF
+    except UnsafeURLError as e:
+        return False, f"Bark 服务器地址不安全：{e}"
+    try:
         async with httpx.AsyncClient(timeout=15, trust_env=False) as client:
             r = await client.post(f"{server}/{key}", json=payload)
             data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
@@ -85,6 +90,10 @@ async def send_wecom(cfg: dict, title: str, body: str) -> tuple[bool, str]:
         return False, bad
     hook = _wecom_url(raw)
     payload = {"msgtype": "text", "text": {"content": f"{title}\n{body}"}}
+    try:
+        assert_safe_outbound_url(hook)  # 防 SSRF
+    except UnsafeURLError as e:
+        return False, f"机器人地址不安全：{e}"
     try:
         async with httpx.AsyncClient(timeout=15, trust_env=False) as client:
             r = await client.post(hook, json=payload)

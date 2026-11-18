@@ -12,6 +12,7 @@ import re
 import httpx
 
 from ..models import Course, parse_weeks
+from ..netguard import assert_safe_outbound_url
 from .base import AuthExpiredError, TimetableProvider
 
 WEEKDAY_MAP = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "日": 7, "天": 7}
@@ -154,6 +155,8 @@ class HttpJsonProvider(TimetableProvider):
         self.mapping = portal.get("mapping") or p.get("http_mapping") or {}
         if not self.url:
             raise ValueError("未配置课表 API 地址")
+        # 防 SSRF：拒绝本机/内网/云元数据地址
+        assert_safe_outbound_url(self.url)
 
     @staticmethod
     def _parse_json(text, default):

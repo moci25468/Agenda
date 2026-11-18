@@ -96,10 +96,21 @@ def _open_zip(data: bytes, kind: str) -> zipfile.ZipFile:
         raise FileError(f"这个 {kind} 文件已损坏，或者后缀和真实格式不一致")
 
 
+MAX_INFLATED_BYTES = 50 * 1024 * 1024  # 单个 zip 条目解压上限，防 zip bomb
+
+
+def _read_entry(z: zipfile.ZipFile, name: str) -> bytes:
+    """读取 zip 条目前先看声明的解压大小，避免 20MB 压缩包膨胀成数 GB 撑爆内存。"""
+    info = z.getinfo(name)
+    if info.file_size > MAX_INFLATED_BYTES:
+        raise FileError("文件解压后过大（可能是异常文件），已拒绝处理")
+    return z.read(name)
+
+
 def _docx_text(data: bytes) -> str:
     with _open_zip(data, "Word") as z:
         try:
-            xml = z.read("word/document.xml")
+            xml = _read_entry(z, "word/document.xml")
         except KeyError:
             raise FileError("这个 .docx 里没找到正文（可能不是真正的 Word 文档）")
     root = ET.fromstring(xml)
@@ -130,7 +141,7 @@ def _pptx_text(data: bytes) -> str:
         blocks = []
         for i, name in enumerate(names, 1):
             try:
-                root = ET.fromstring(z.read(name))
+                root = ET.fromstring(_read_entry(z, name))
             except ET.ParseError:
                 continue
             paras = []
@@ -156,8 +167,8 @@ def _xlsx_sheet_names(z: zipfile.ZipFile, names: list[str]) -> dict[str, str]:
     mapping: dict[str, str] = {}
     if "xl/workbook.xml" in names and "xl/_rels/workbook.xml.rels" in names:
         try:
-            book = ET.fromstring(z.read("xl/workbook.xml"))
-            rels = ET.fromstring(z.read("xl/_rels/workbook.xml.rels"))
+            book = ET.fromstring(_read_entry(z, "xl/workbook.xml"))
+            rels = ET.fromstring(_read_entry(z, "xl/_rels/workbook.xml.rels"))
             rid2target = {}
             for rel in rels.iter(_PKG_R + "Relationship"):
                 target = (rel.get("Target") or "").lstrip("/")
@@ -180,7 +191,7 @@ def _xlsx_text(data: bytes) -> str:
         shared: list[str] = []
         if "xl/sharedStrings.xml" in names:
             try:
-                root = ET.fromstring(z.read("xl/sharedStrings.xml"))
+                root = ET.fromstring(_read_entry(z, "xl/sharedStrings.xml"))
                 for si in root.iter(_S + "si"):
                     shared.append("".join(t.text or "" for t in si.iter(_S + "t")))
             except ET.ParseError:
@@ -189,7 +200,7 @@ def _xlsx_text(data: bytes) -> str:
         blocks = []
         for idx, path in enumerate(_xlsx_sheets(names)[:8], 1):
             try:
-                root = ET.fromstring(z.read(path))
+                root = ET.fromstring(_read_entry(z, path))
             except (ET.ParseError, KeyError):
                 continue
             rows = []

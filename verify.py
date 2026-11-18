@@ -28,7 +28,7 @@ from app.providers.base import AuthExpiredError
 from app.providers.zhengfang import zhengfang_configured
 import httpx
 from app.curl_import import parse_curl, guess_mapping
-from app.config import load_config as _load_cfg, save_config as _save_cfg
+from app.config import load_config as _load_cfg, save_config as _save_cfg, MASK
 from app import db as _db
 from datetime import date, datetime, timedelta
 from app.push import (push_all, send_wecom, _wecom_url, WECOM_API,
@@ -648,7 +648,7 @@ _weather.clear_cache()
 _weather._primary_dead_until = time.monotonic() + 60
 _wttr_hits = {"n": 0}
 _orig_wttr_fetch = _weather._fetch_from_wttr
-async def _fake_wttr_fetch():
+async def _fake_wttr_fetch(lat=None, lon=None):
     _wttr_hits["n"] += 1
     return {f"{_today_s}T08:00": {"temp": 9, "code": 0, "pop": 0}}
 class _NoNetClient:
@@ -1663,8 +1663,11 @@ async def http_tests(port: int):
         check("推送.裸 hex 保存被拒", r.status_code == 400 and "key" in r.text,
               str(r.text)[:200])
         keep = (await ca.get(f"{base}/api/settings")).json().get("push", {})
-        check("推送.被拒后配置未被覆盖", keep.get("wecom_webhook") == WECOM_OK,
-              str(keep.get("wecom_webhook"))[:80])
+        # webhook 现在按密钥脱敏回传（MASK），只要求仍是原值或掩码、且没被非法输入覆盖
+        _keep_hook = keep.get("wecom_webhook")
+        check("推送.被拒后配置未被覆盖",
+              _keep_hook in (WECOM_OK, MASK) and "work.weixin" not in str(_keep_hook),
+              str(_keep_hook)[:80])
         await ca.post(f"{base}/api/settings", json={"push": {
             "wecom_enabled": False, "wecom_webhook": ""}})
         r = await ca.post(f"{base}/api/ingest",

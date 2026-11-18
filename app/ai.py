@@ -15,6 +15,7 @@ import httpx
 
 from . import db, files
 from .config import load_config, resolve_course_source, zhengfang_configured
+from .netguard import assert_safe_outbound_url
 from .models import (
     Course, Event, Exam, apply_course_overrides, apply_exam_overrides,
     current_week, event_line,
@@ -496,6 +497,7 @@ async def list_models() -> list[str]:
     base_url = (ai.get("base_url") or "").rstrip("/")
     if not base_url or not ai.get("api_key"):
         raise ValueError("请先填写接口地址与 API Key")
+    assert_safe_outbound_url(base_url)  # 防 SSRF
     async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
         r = await client.get(f"{base_url}/models", headers=_request_headers(ai))
     if r.status_code != 200:
@@ -513,6 +515,7 @@ async def test_connection() -> dict:
     base_url = (ai.get("base_url") or "").rstrip("/")
     if not base_url or not ai.get("api_key"):
         raise ValueError("请先填写接口地址与 API Key")
+    assert_safe_outbound_url(base_url)  # 防 SSRF
     async with httpx.AsyncClient(timeout=45, trust_env=False) as client:
         r = await client.post(
             f"{base_url}/chat/completions",
@@ -546,11 +549,11 @@ async def chat(message: str, history: list[dict] | None = None,
     ai, base_url, messages = await _prepare(message, history, attachments)
     headers = _request_headers(ai)
     async with httpx.AsyncClient(timeout=90, trust_env=False) as client:
-        r = await client.post(
-            f"{base_url}/chat/completions",
+        r = await _post_with_retry(
+            client, f"{base_url}/chat/completions",
             headers=headers,
-            json={"model": ai.get("model", "qwen-plus"),
-                  "messages": messages, "temperature": 0.4},
+            payload={"model": ai.get("model", "qwen-plus"),
+                     "messages": messages, "temperature": 0.4},
         )
         if r.status_code != 200:
             raise ValueError(_attach_hint(
@@ -669,6 +672,7 @@ async def _prepare(message: str, history: list[dict] | None,
     cfg = load_config()
     ai = cfg.get("ai", {})
     base_url = (ai.get("base_url") or "").rstrip("/")
+    assert_safe_outbound_url(base_url)  # 防 SSRF
     # 用户明确问「第 N 周」时，把该周课表也展开；最近两轮里的周次用于「那第 20 周呢」这类追问
     mentioned = weeks_mentioned(message)
     for h in (history or [])[-2:]:
@@ -698,7 +702,85 @@ async def _prepare(message: str, history: list[dict] | None,
     messages.append({"role": "user",
                      "content": _user_content(blocks, images, question,
                                               stamp=_time_stamp(now))})
-    return ai, base_url, messages
+    budget = int(ai.get("max_context_chars") or 60000)
+    return ai, base_url, _fit_messages(messages, budget)
+
+
+def _fit_messages(messages: list[dict], budget: int) -> list[dict]:
+    """按字符预算裁剪上下文，避免超出模型上下文上限（中文约 1 字≈1 token）。
+
+    保留 system 与最后一条 user（当前问题），从最早的历史消息开始丢弃；
+    仍超预算时截断最后一条文本。图片不计入字符预算（体积另由其上传上限约束）。
+    """
+    def size(m: dict) -> int:
+        c = m.get("content")
+        if isinstance(c, str):
+            return len(c)
+        if isinstance(c, list):
+            return sum(len(p.get("text", "")) for p in c if isinstance(p, dict))
+        return 0
+
+    if budget <= 0:
+        return messages
+    if sum(size(m) for m in messages) <= budget:
+        return messages
+    head = messages[:1]
+    tail = messages[-1:] if len(messages) > 1 else []
+    middle = messages[1:-1] if len(messages) > 2 else []
+    while middle and sum(size(m) for m in head + middle + tail) > budget:
+        middle.pop(0)
+    if sum(size(m) for m in head + middle + tail) > budget and tail:
+        last = tail[-1]
+        if isinstance(last.get("content"), str):
+            others = sum(size(m) for m in head + middle)
+            last["content"] = last["content"][:max(1000, budget - others)]
+    return head + middle + tail
+
+
+def _sse_error(line: str) -> str | None:
+    """解析 SSE 里的错误事件（上游 200 但 body 是 error），返回可读原因。"""
+    line = line.strip()
+    if not line.startswith("data:"):
+        return None
+    data = line[5:].strip()
+    if not data or data == "[DONE]":
+        return None
+    try:
+        obj = json.loads(data)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(obj, dict):
+        return None
+    err = obj.get("error")
+    if isinstance(err, dict):
+        return str(err.get("message") or err.get("type") or "上游返回错误")
+    if isinstance(err, str) and err:
+        return err
+    code = obj.get("code")
+    if code not in (None, 0, "0", 200, "200") and obj.get("message"):
+        return str(obj.get("message"))
+    return None
+
+
+_RETRY_STATUS = {429, 500, 502, 503, 504}
+
+
+async def _post_with_retry(client: httpx.AsyncClient, url: str, *,
+                           headers: dict, payload: dict, attempts: int = 3) -> httpx.Response:
+    """POST 带上指数退避重试，缓解 429/5xx 与瞬时连接错误。"""
+    delay = 0.6
+    for i in range(attempts):
+        try:
+            r = await client.post(url, headers=headers, json=payload)
+        except httpx.TransportError:
+            if i == attempts - 1:
+                raise
+        else:
+            if r.status_code not in _RETRY_STATUS or i == attempts - 1:
+                return r
+        await asyncio.sleep(delay)
+        delay *= 2
+    raise RuntimeError("AI 请求重试耗尽")  # 理论上不可达
 
 
 def _sse_delta(line: str) -> str | None:
@@ -732,12 +814,31 @@ async def chat_stream(message: str, history: list[dict] | None = None,
     ai, base_url, messages = await _prepare(message, history, attachments)
     timeout = httpx.Timeout(120, connect=20)
     async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
-        async with client.stream(
+        req = client.build_request(
             "POST", f"{base_url}/chat/completions",
             headers=_request_headers(ai),
             json={"model": ai.get("model", "qwen-plus"), "messages": messages,
                   "temperature": 0.4, "stream": True},
-        ) as r:
+        )
+        # 建立连接阶段可重试（真正开始 yield 之后就不能再重试，否则会重复内容）
+        r = None
+        delay = 0.6
+        for i in range(3):
+            try:
+                r = await client.send(req, stream=True)
+            except httpx.TransportError:
+                if i == 2:
+                    raise
+                await asyncio.sleep(delay)
+                delay *= 2
+                continue
+            if r.status_code in _RETRY_STATUS and i < 2:
+                await r.aclose()
+                await asyncio.sleep(delay)
+                delay *= 2
+                continue
+            break
+        try:
             if r.status_code != 200:
                 body = (await r.aread()).decode("utf-8", "replace")[:200]
                 raise ValueError(_attach_hint(
@@ -753,6 +854,11 @@ async def chat_stream(message: str, history: list[dict] | None = None,
                         f"AI 响应格式异常: {json.dumps(data, ensure_ascii=False)[:200]}")
                 return
             async for line in r.aiter_lines():
+                err = _sse_error(line)
+                if err:
+                    raise ValueError(f"AI 上游错误：{err}")
                 chunk = _sse_delta(line)
                 if chunk:
                     yield chunk
+        finally:
+            await r.aclose()

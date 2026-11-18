@@ -25,10 +25,21 @@ from .scheduler import run_sync
 from .user_context import get_current_user, set_current_user
 
 PORTAL_ENTRY = "http://portal.qut.edu.cn/portal/event"
-PROFILE_DIR = DATA_DIR / "browser_profile"
+PROFILE_DIR = DATA_DIR / "browser_profile"   # 1 号用户沿用历史目录（升级免重登）
+PROFILE_ROOT = DATA_DIR / "browser_profiles"  # 其他用户按 uid 隔离
 TIMEOUT_SECONDS = 300
 COLLECT_MAX_SECONDS = 25   # 登录后最多等这么久收集接口
 SETTLE_SECONDS = 3         # 发现第一个候选后再等这么久收尾
+
+
+def _profile_dir(uid: int):
+    """每个用户独立的浏览器 profile，避免 A 的登录态被 B 复用（跨用户串号）。
+
+    1 号用户继续用历史目录，升级后无需重新登录；其余用户落在 browser_profiles/u<uid>。
+    """
+    if uid == 1:
+        return PROFILE_DIR
+    return PROFILE_ROOT / f"u{uid}"
 
 # 统一身份认证相关子域，出现这些主机名说明还没进门户
 _AUTH_HOSTS = {"sso", "cas", "auth", "login", "id", "passport"}
@@ -385,8 +396,10 @@ def _run(uid: int):
         return
 
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    profile_dir = _profile_dir(uid)
+    profile_dir.mkdir(parents=True, exist_ok=True)
     try:
-        os.chmod(PROFILE_DIR, 0o700)
+        os.chmod(profile_dir, 0o700)
     except OSError:
         pass
     candidates: list[dict] = []
@@ -406,13 +419,13 @@ def _run(uid: int):
                     # 本机有桌面：优先用已安装的 Chrome 弹出可见窗口（密码/验证码更方便）
                     try:
                         ctx = pw.chromium.launch_persistent_context(
-                            str(PROFILE_DIR), channel="chrome", headless=False,
+                            str(profile_dir), channel="chrome", headless=False,
                             args=["--no-first-run", "--no-default-browser-check"],
                             viewport={"width": 1180, "height": 820},
                         )
                     except Exception:
                         ctx = pw.chromium.launch_persistent_context(
-                            str(PROFILE_DIR), headless=True, args=launch_args)
+                            str(profile_dir), headless=True, args=launch_args)
                 else:
                     # 无桌面（macOS / Windows 本机，或手机浏览器访问本机后端）：
                     # 无界面打开登录页，二维码回传前端供手机扫码。优先用本机 Chrome
@@ -420,11 +433,11 @@ def _run(uid: int):
                     # 没有 Chrome 时再退回自带 Chromium（Docker 镜像已装 headless shell）。
                     try:
                         ctx = pw.chromium.launch_persistent_context(
-                            str(PROFILE_DIR), channel="chrome", headless=True,
+                            str(profile_dir), channel="chrome", headless=True,
                             args=launch_args)
                     except Exception:
                         ctx = pw.chromium.launch_persistent_context(
-                            str(PROFILE_DIR), headless=True, args=launch_args)
+                            str(profile_dir), headless=True, args=launch_args)
             except Exception as e:
                 brief = str(e).splitlines()[0][:200]
                 raise RuntimeError(
@@ -561,14 +574,14 @@ def _run(uid: int):
             except Exception:  # noqa: BLE001
                 pass
     except Exception as e:  # noqa: BLE001
-        _set(status="error")
+        _set(status="error", qr_image=None)
         _log(f"浏览器登录失败：{e}")
         return
 
     _set(status="analyzing", candidates=_public_candidates(candidates))
     _log(f"共发现 {len(candidates)} 个候选数据接口")
     if cancelled or (_stop_event and _stop_event.is_set()):
-        _set(status="cancelled")
+        _set(status="cancelled", qr_image=None)
         _log("已取消，未修改数据源配置")
         return
     best = pick_best(candidates)
@@ -593,20 +606,21 @@ def start() -> dict:
     uid = get_current_user()
     if uid is None:
         return {"ok": False, "message": "请先登录后再使用一键登录"}
-    with _lock:
-        if _thread is not None and _thread.is_alive():
-            return {"ok": False, "message": "已有一个登录窗口在进行中，请先等待或取消"}
     try:
         import playwright.sync_api  # noqa: F401
     except ImportError:
         return {"ok": False, "message": "缺少可选依赖 playwright，请在项目目录执行：.venv/bin/pip install playwright"}
-    _stop_event = threading.Event()
-    _force_event.clear()
-    _owner_uid = uid
-    _set(status="starting", message="", started_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-         candidates=[], result={}, log=[], qr_image=None)
-    _thread = threading.Thread(target=_run, args=(uid,), daemon=True)
-    _thread.start()
+    # 判定与置位必须同锁，否则两个并发 start() 会同时通过 is_alive() 各起一个浏览器线程
+    with _lock:
+        if _thread is not None and _thread.is_alive():
+            return {"ok": False, "message": "已有一个登录窗口在进行中，请先等待或取消"}
+        _stop_event = threading.Event()
+        _force_event.clear()
+        _owner_uid = uid
+        _set(status="starting", message="", started_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+             candidates=[], result={}, log=[], qr_image=None)
+        _thread = threading.Thread(target=_run, args=(uid,), daemon=True)
+        _thread.start()
     return {"ok": True, "message": "已启动，登录页二维码将显示在下方面板，请用微信扫码"}
 
 

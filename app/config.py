@@ -18,13 +18,17 @@ CONFIG_PATH = DATA_DIR / "config.json"
 MASK = "********"
 
 # 需要脱敏的字段（点路径）。课程接口 headers、正方密码/Cookie 等都不能回传前端。
+# 注意：portal.url / portal.body 常含 ticket、token、code 等一次性票据，也必须脱敏；
+# 企业微信 Webhook 整条 URL 自带机器人 key，同样不能明文回传。
 MASK_PATHS = [
     ("ai", "api_key"), ("ai", "headers"),
-    ("push", "bark_key"),
+    ("push", "bark_key"), ("push", "wecom_webhook"),
     ("security", "token"),
     ("provider", "zhengfang", "password"),
     ("provider", "zhengfang", "cookie"),
+    ("provider", "portal", "url"),
     ("provider", "portal", "headers"),
+    ("provider", "portal", "body"),
     ("calendar_subscribe_token",),
 ]
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -28,6 +29,13 @@ JOB_ID = "daily_timetable_sync"
 REMINDER_JOB_ID = "class_reminders"
 NEXT_DAY_JOB_ID = "next_day_summary"
 BACKUP_JOB_ID = "daily_backup"
+SYNC_CHECK_JOB_ID = "daily_sync_check"
+
+# 同步串行化：手动同步与定时同步可能同时触发，若并发执行会各自基于同一份旧快照
+# 算出重复变更并重复推送。用非阻塞锁保证同一时刻只有一个同步流程。
+# （apply_snapshot 另有一把短锁，保护 diff→保存→写日志这段无 await 的临界区。）
+_sync_lock = threading.Lock()
+_apply_lock = threading.Lock()
 
 
 def section_time(cfg: dict, section: int, end: bool = False) -> str:
@@ -79,22 +87,24 @@ async def apply_snapshot(cfg: dict, courses: list[Course], source: str,
     定时同步与外部注入（App WebView / 浏览器扩展）共用，换登录方式不动这段逻辑。
     exams 为 None 时表示当前数据源不提供考试，保留已有考试快照。
     """
-    old = db.get_snapshot()
-    if old:
-        old_courses = [Course.from_dict(d) for d in old["courses"]]
-        changes = diff_courses(old_courses, courses)
-    else:
-        changes = {"added": [], "removed": [], "changed": [], "has_change": False, "first_sync": True}
+    # diff → 保存快照 → 写日志 全程无 await，用短锁串行化，避免并发读到同一份旧快照
+    with _apply_lock:
+        old = db.get_snapshot()
+        if old:
+            old_courses = [Course.from_dict(d) for d in old["courses"]]
+            changes = diff_courses(old_courses, courses)
+        else:
+            changes = {"added": [], "removed": [], "changed": [], "has_change": False, "first_sync": True}
 
-    db.save_snapshot([c.to_dict() for c in courses], source)
-    if exams is not None:
-        db.save_exam_snapshot([e.to_dict() for e in exams], exam_source or source)
-    summary = f"同步成功：{len(courses)} 门课程" + ("（首次同步）" if changes.get("first_sync") else "")
-    if exams is not None:
-        summary += f"，{len(exams)} 场考试"
-    if changes.get("has_change"):
-        summary += f"，检测到变更：新增 {len(changes['added'])} / 取消 {len(changes['removed'])} / 调整 {len(changes['changed'])}"
-    db.add_sync_log("ok", summary, changes)
+        db.save_snapshot([c.to_dict() for c in courses], source)
+        if exams is not None:
+            db.save_exam_snapshot([e.to_dict() for e in exams], exam_source or source)
+        summary = f"同步成功：{len(courses)} 门课程" + ("（首次同步）" if changes.get("first_sync") else "")
+        if exams is not None:
+            summary += f"，{len(exams)} 场考试"
+        if changes.get("has_change"):
+            summary += f"，检测到变更：新增 {len(changes['added'])} / 取消 {len(changes['removed'])} / 调整 {len(changes['changed'])}"
+        db.add_sync_log("ok", summary, changes)
 
     pushed = []
     if push:
@@ -165,12 +175,22 @@ async def _fallback_bundle(cfg: dict):
 
 
 async def run_sync(push: bool = True) -> dict:
-    """按当前数据源拉取一次课表并应用快照。
+    """按当前数据源拉取一次课表并应用快照（同一时刻只允许一个同步流程）。
 
     课表主数据源由 provider.primary 决定（auto = 正方优先，没配正方才用门户）；
     考试始终优先从正方拉取（门户只提供课表），门户存在时也不影响考试同步。
     auto 模式下主源拉取失败会自动回退到另一套来源，避免单个账号故障导致课表停更。
     """
+    if not _sync_lock.acquire(blocking=False):
+        return {"ok": False, "message": "已有一个同步在进行中，请稍后再试",
+                "changes": {}, "pushed": []}
+    try:
+        return await _run_sync_inner(push)
+    finally:
+        _sync_lock.release()
+
+
+async def _run_sync_inner(push: bool = True) -> dict:
     cfg = load_config()
     fallback_note = ""
     try:
@@ -495,6 +515,34 @@ def _reminder_job_wrapper():
             current_user_id.reset(ctx)
 
 
+def _sync_check_wrapper():
+    """每分钟逐用户检查是否到各自的 sync_time；命中且当天未同步才同步。
+
+    sync_time 是每用户配置，而 APScheduler 的 cron 任务是全局的，用一个固定
+    时刻会让「最后保存设置的人」决定所有人时间。改为每分钟按用户比对，既尊重
+    各自配置，也避免互相覆盖。
+    """
+    from .user_context import current_user_id, set_current_user
+
+    now = datetime.now(TZ)
+    hm = now.strftime("%H:%M")
+    today = now.date().isoformat()
+    for uid in (db.list_user_ids() or [1]):
+        ctx = set_current_user(uid)
+        try:
+            cfg = load_config()
+            if (cfg.get("sync_time") or "12:00") != hm:
+                continue
+            if db.reminder_sent(today, "daily_sync"):
+                continue
+            db.mark_reminder(today, "daily_sync")  # 先占位，避免同一分钟重复触发
+            asyncio.run(run_sync(push=True))
+        except Exception as e:  # noqa: BLE001
+            db.add_sync_log("fail", f"定时同步异常：{type(e).__name__}: {e}")
+        finally:
+            current_user_id.reset(ctx)
+
+
 def _job_wrapper():
     """定时任务：逐个用户切换上下文后同步，配置 / 快照 / 推送互不串扰。"""
     from .user_context import current_user_id, set_current_user
@@ -534,6 +582,12 @@ def _backup_job_wrapper():
         print(f"[backup] 已备份到 {path}", flush=True)
     except Exception as e:  # noqa: BLE001
         print(f"[backup] 备份失败：{type(e).__name__}: {e}", flush=True)
+    try:
+        removed = db.prune_logs(keep_days=30)
+        if removed:
+            print(f"[backup] 已清理 {removed} 条过期日志", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[backup] 日志清理失败：{type(e).__name__}: {e}", flush=True)
 
 
 def start_scheduler(cfg: dict):
@@ -553,6 +607,12 @@ def start_scheduler(cfg: dict):
         id=NEXT_DAY_JOB_ID, replace_existing=True, max_instances=1,
         coalesce=True, misfire_grace_time=120,
     )
+    # 每日同步：每分钟检查各用户的 sync_time（每用户可不同），命中且当天未同步才跑
+    _scheduler.add_job(
+        _sync_check_wrapper, IntervalTrigger(minutes=1, timezone=TZ),
+        id=SYNC_CHECK_JOB_ID, replace_existing=True, max_instances=1,
+        coalesce=True, misfire_grace_time=120,
+    )
     # 每天凌晨备份一次数据库；进程启动时当天还没备份就补一份
     _scheduler.add_job(
         _backup_job_wrapper, CronTrigger(hour=3, minute=20, timezone=TZ),
@@ -563,40 +623,36 @@ def start_scheduler(cfg: dict):
         from .backup import BACKUP_DIR
 
         today = datetime.now(TZ).strftime("%Y%m%d")
-        if not (BACKUP_DIR / f"campus-{today}.db").exists():
+        if not any(BACKUP_DIR.glob(f"campus-{today}*.db")):
             _backup_job_wrapper()
     except Exception as e:  # noqa: BLE001
         print(f"[backup] 启动备份失败：{type(e).__name__}: {e}", flush=True)
-    reschedule(cfg)
 
 
 def reschedule(cfg: dict):
-    if _scheduler is None:
-        return
+    """兼容旧调用：同步时间已改为每分钟按用户比对，无需重排全局 cron。
+
+    保留函数是为了不破坏 post_settings 等既有调用点；真正的调度逻辑见
+    _sync_check_wrapper。
+    """
+    return None
+
+
+def next_run_time() -> str | None:
+    """按当前用户的 sync_time 估算下次同步时间（今天未到则今天，否则明天）。"""
     try:
-        _scheduler.remove_job(JOB_ID)
-    except Exception:  # noqa: BLE001
-        pass
-    try:
+        cfg = load_config()
         parts = (cfg.get("sync_time") or "12:00").split(":")
         hh, mm = int(parts[0]), int(parts[1])
         if not (0 <= hh <= 23 and 0 <= mm <= 59):
             raise ValueError
     except (ValueError, IndexError, TypeError):
-        hh, mm = 12, 0   # 时间填错时回退默认，避免启动崩溃
-    _scheduler.add_job(
-        _job_wrapper, CronTrigger(hour=hh, minute=mm, timezone=TZ),
-        id=JOB_ID, replace_existing=True, misfire_grace_time=3600,
-    )
-
-
-def next_run_time() -> str | None:
-    if _scheduler is None:
-        return None
-    job = _scheduler.get_job(JOB_ID)
-    if job and job.next_run_time:
-        return job.next_run_time.strftime("%Y-%m-%d %H:%M:%S")
-    return None
+        hh, mm = 12, 0
+    now = datetime.now(TZ)
+    target = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return target.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def shutdown_scheduler():

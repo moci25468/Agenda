@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -17,6 +18,13 @@ def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    # 主库含密码哈希、明文 provider 凭据与明文 session token，必须仅属主可读；
+    # WAL/SHM 可能由 SQLite 另行创建，一并收紧（失败不阻断，仅尽力而为）。
+    for suffix in ("", "-wal", "-shm"):
+        try:
+            os.chmod(str(DB_PATH) + suffix, 0o600)
+        except OSError:
+            pass
     return conn
 
 
@@ -185,6 +193,20 @@ def init_db():
                WHERE i.used_by IS NOT NULL
                  AND NOT EXISTS (SELECT 1 FROM invite_uses u
                                  WHERE u.code = i.code AND u.user_id = i.used_by)""")
+        # 关键索引补在迁移之后：旧库补 user_id 列后再建，避免缺列报错
+        for stmt in (
+            "CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)",
+            "CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_sync_log_user ON sync_log(user_id, id)",
+            "CREATE INDEX IF NOT EXISTS idx_push_log_user ON push_log(user_id, id)",
+            "CREATE INDEX IF NOT EXISTS idx_reminders_user_sent ON reminders(user_id, sent_at)",
+            "CREATE INDEX IF NOT EXISTS idx_invites_expires ON invites(expires_at)",
+            "CREATE INDEX IF NOT EXISTS idx_invite_uses_user ON invite_uses(user_id)",
+        ):
+            try:
+                conn.execute(stmt)
+            except sqlite3.OperationalError:
+                continue
 
 
 def now_str() -> str:
@@ -320,6 +342,23 @@ def get_logs(limit: int = 50) -> dict:
         except json.JSONDecodeError:
             s["changes"] = {}
     return {"sync": sync, "push": push}
+
+
+def prune_logs(keep_days: int = 30) -> int:
+    """清理超过 keep_days 的同步/推送/审计日志，返回删除行数。
+
+    日志表只增不删会无限膨胀（尤其推送通道配错时每分钟一行），由定时任务调用。
+    """
+    cutoff = (datetime.now() - timedelta(days=keep_days)).strftime("%Y-%m-%d %H:%M:%S")
+    removed = 0
+    with get_conn() as conn:
+        for table in ("sync_log", "push_log", "admin_log"):
+            try:
+                cur = conn.execute(f"DELETE FROM {table} WHERE ts < ?", (cutoff,))
+                removed += cur.rowcount or 0
+            except sqlite3.OperationalError:
+                continue
+    return removed
 
 
 # ---------- 个人日程（按当前用户） ----------

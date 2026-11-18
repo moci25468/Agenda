@@ -32,22 +32,38 @@ def backup_now(now: datetime | None = None) -> Path:
         os.chmod(BACKUP_DIR, 0o700)
     except OSError:
         pass
-    stamp = (now or datetime.now()).strftime("%Y%m%d")
+    now_dt = now or datetime.now()
+    stamp = now_dt.strftime("%Y%m%d")
     target = BACKUP_DIR / f"campus-{stamp}.db"
+    # 同一天多次备份（如启动补备份 + 定时任务）时不覆盖已有备份，追加时分秒
+    if target.exists():
+        target = BACKUP_DIR / f"campus-{stamp}-{now_dt.strftime('%H%M%S')}.db"
     tmp = target.with_name(target.name + ".part")
     src = sqlite3.connect(DB_PATH, timeout=10)
     try:
         dst = sqlite3.connect(tmp)
         try:
             src.backup(dst)
+            # 校验副本完整性，避免把损坏的库当作可用备份
+            check = dst.execute("PRAGMA integrity_check").fetchone()
+            if not check or check[0] != "ok":
+                raise RuntimeError(f"备份完整性校验失败：{check}")
         finally:
             dst.close()
+    except Exception:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
     finally:
         src.close()
     tmp.replace(target)
     os.chmod(target, 0o600)
     if CONFIG_PATH.exists():
         cfg_target = BACKUP_DIR / f"config-{stamp}.json"
+        if cfg_target.exists():
+            cfg_target = BACKUP_DIR / f"config-{stamp}-{now_dt.strftime('%H%M%S')}.json"
         shutil.copy2(CONFIG_PATH, cfg_target)
         os.chmod(cfg_target, 0o600)
     _prune()

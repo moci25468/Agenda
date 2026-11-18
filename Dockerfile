@@ -22,4 +22,7 @@ COPY static ./static
 
 VOLUME ["/data"]
 EXPOSE 8300
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8300"]
+# --proxy-headers：nginx 反代后 request.url.scheme 才能是 https，会话 Cookie 的 Secure 才生效。
+# 信任网段必须是「宿主→容器」的实际来源：容器内看到的 nginx 来源是 docker 网关（如 10.255.1.1），
+# 只写 127.0.0.1 是不生效的；这里限定私有网段，公网地址无法伪造 X-Forwarded-Proto。
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8300", "--proxy-headers", "--forwarded-allow-ips", "127.0.0.1,::1,10.255.0.0/16,172.16.0.0/12"]

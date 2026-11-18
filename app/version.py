@@ -31,22 +31,26 @@ def _strip_v(tag: str) -> str:
     return tag[1:] if tag.startswith("v") else tag
 
 
+# 版本信息在进程生命周期内不会变，缓存首次结果，避免 /api/health 每次 fork 3 个 git 子进程。
+_cache: dict | None = None
+
+
 def get_version() -> str:
     """返回语义化版本号（不含 v 前缀），如 1.0.3。"""
-    tag = _git("describe", "--tags", "--abbrev=0")
-    if tag:
-        return _strip_v(tag)
-    return FALLBACK_VERSION
+    return get_full_version()["version"]
 
 
 def get_full_version() -> dict:
-    """返回完整版本信息，供 /api/health 展示。"""
-    tag = _git("describe", "--tags", "--abbrev=0")
-    commit = _git("rev-parse", "--short", "HEAD")
-    date = _git("show", "-s", "--format=%ci", "HEAD")
-    return {
-        "version": _strip_v(tag) if tag else FALLBACK_VERSION,
-        "tag": tag or "",
-        "commit": commit,
-        "committed_at": date,
-    }
+    """返回完整版本信息，供 /api/health 展示（结果缓存，只探测一次 git）。"""
+    global _cache
+    if _cache is None:
+        tag = _git("describe", "--tags", "--abbrev=0")
+        commit = _git("rev-parse", "--short", "HEAD")
+        date = _git("show", "-s", "--format=%ci", "HEAD")
+        _cache = {
+            "version": _strip_v(tag) if tag else FALLBACK_VERSION,
+            "tag": tag or "",
+            "commit": commit,
+            "committed_at": date,
+        }
+    return dict(_cache)

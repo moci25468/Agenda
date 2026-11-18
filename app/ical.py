@@ -30,8 +30,13 @@ def _fmt_dt_utc(d: date, hhmm: str) -> str:
 
 
 def _escape(s: str) -> str:
-    """iCalendar 文本字段转义：反斜杠、分号、逗号、换行。"""
-    return (s or "").replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
+    """iCalendar 文本字段转义：反斜杠、分号、逗号、换行。
+
+    先把 CRLF/CR 统一成 LF，再转义——否则外部数据里的 \\r 可在 ICS 中伪造新属性行。
+    """
+    s = (s or "").replace("\r\n", "\n").replace("\r", "\n")
+    return (s.replace("\\", "\\\\").replace(";", "\\;")
+             .replace(",", "\\,").replace("\n", "\\n"))
 
 
 def _uid(c: Course, d: date) -> str:
