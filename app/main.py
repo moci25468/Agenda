@@ -44,6 +44,14 @@ from . import ical
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 
+async def _warm_weather():
+    """启动时先暖一遍天气缓存：第一次抓取可能要十几秒，别让首个请求去等。"""
+    try:
+        await hours_map(load_config())
+    except Exception:  # noqa: BLE001 - 预热失败不影响启动
+        pass
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_db()
@@ -52,6 +60,7 @@ async def lifespan(app: FastAPI):
     # 首次启动无课表时静默同步一次（不推送），保证打开页面即有数据
     if db.get_snapshot() is None:
         asyncio.create_task(run_sync(push=False))
+    asyncio.create_task(_warm_weather())
     yield
     shutdown_scheduler()
 

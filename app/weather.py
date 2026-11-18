@@ -17,9 +17,11 @@ API = "https://api.open-meteo.com/v1/forecast"
 WTTR_API = "https://wttr.in/{place}?format=j1"
 WTTR_PLACE = "Qingdao"
 CACHE_TTL = 1800          # 成功后缓存 30 分钟
-FAIL_TTL = 60             # 失败只短暂回避，一分钟后就允许重试
+FAIL_TTL = 120            # 失败只短暂回避，两分钟后就允许重试
 TIMEOUT = 10.0            # 跨境访问偶发 5s 级抖动，8s 太紧
+PRIMARY_TIMEOUT = 5.0     # 主源连不通时是干等满超时，给短一点免得卡住页面/AI
 RETRY_DELAYS = (0.5,)     # 失败后再试一次，最多两次请求
+DEAD_TTL = 900            # 主源连续失败后熔断 15 分钟，期间直接走备用源
 
 # wttr.in 英文天气描述 → 近似 WMO code，复用 WMO_TEXT 得到统一中文文案
 _WTTR_CODE = [
@@ -56,6 +58,8 @@ WMO_TEXT = {
 _cache: dict[tuple[float, float], tuple[float, dict]] = {}
 # 最近一次成功的数据：抓取失败时用它兜底，避免一次网络抖动就把天气全部变空
 _last_good: dict[tuple[float, float], dict] = {}
+# 主源熔断截止时间（monotonic）：到点前不再尝试主源，直接用备用源
+_primary_dead_until = 0.0
 
 
 def describe_code(code) -> str:
@@ -144,7 +148,10 @@ async def fetch_hourly(lat: float, lon: float) -> dict:
 
     主源 Open-Meteo 失败时自动切换到 wttr.in；都失败则回落上次成功的数据
     （宁可显示几小时前的天气，也不要整块变空），完全没有历史数据时返回 {}。
+    主源在境内 VPS 上经常连不通，会「干等满超时」，所以连续失败后熔断 15 分钟，
+    期间直接走备用源，避免每个请求都白等十几秒。
     """
+    global _primary_dead_until
     key = (round(float(lat), 2), round(float(lon), 2))
     hit = _cache.get(key)
     now = time.monotonic()
@@ -153,24 +160,32 @@ async def fetch_hourly(lat: float, lon: float) -> dict:
     params = _params(lat, lon)
     out: dict = {}
     err = ""
-    for attempt in range(len(RETRY_DELAYS) + 1):
-        try:
-            async with httpx.AsyncClient(timeout=TIMEOUT, trust_env=False) as client:
-                r = await client.get(API, params=params)
-                r.raise_for_status()
-                out = _parse_hourly(r.json())
-            if out:
-                break
-            err = "接口返回空数据"
-        except Exception as e:  # noqa: BLE001
-            err = f"{type(e).__name__}: {e}"
-        if attempt < len(RETRY_DELAYS):
-            await asyncio.sleep(RETRY_DELAYS[attempt])
+    if now < _primary_dead_until:
+        err = "主源熔断中，直接走备用源"
+    else:
+        for attempt in range(len(RETRY_DELAYS) + 1):
+            try:
+                async with httpx.AsyncClient(timeout=PRIMARY_TIMEOUT,
+                                             trust_env=False) as client:
+                    r = await client.get(API, params=params)
+                    r.raise_for_status()
+                    out = _parse_hourly(r.json())
+                if out:
+                    _primary_dead_until = 0.0
+                    break
+                err = "接口返回空数据"
+            except Exception as e:  # noqa: BLE001
+                err = f"{type(e).__name__}: {e}"
+            if attempt < len(RETRY_DELAYS):
+                await asyncio.sleep(RETRY_DELAYS[attempt])
+        if not out:
+            # 主源这一轮彻底失败：接下来 15 分钟不再尝试，省下每次十几秒的空等
+            _primary_dead_until = time.monotonic() + DEAD_TTL
     # 主源不可用（境内 VPS 常见 SSL 握手超时）时切备用源
     if not out:
         out = await _fetch_from_wttr()
         if out:
-            log.info("主天气源不可用，已切换到备用源 wttr.in")
+            log.info("主天气源不可用，已切换到备用源 wttr.in（%s）", err)
     if out:
         _last_good[key] = out
         _cache[key] = (now, out)
@@ -323,5 +338,7 @@ async def lesson_weather_map(cfg: dict) -> dict:
 
 def clear_cache():
     """测试或手动刷新用。"""
+    global _primary_dead_until
     _cache.clear()
     _last_good.clear()
+    _primary_dead_until = 0.0

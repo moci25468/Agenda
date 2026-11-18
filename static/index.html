@@ -4806,6 +4806,48 @@
 
       /* 分区切换：非当前分区卡片由 JS 加 .section-hidden 隐藏 */
       #tab-settings .card.section-hidden { display: none !important; }
+
+      /* === iOS 风格开关（外观卡：深色模式 / 自动切换）=== */
+      .switch-list { display: flex; flex-direction: column; }
+      .switch-row {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 14px; padding: 11px 0; min-height: 44px;
+        border-bottom: 1px solid var(--line); cursor: pointer;
+      }
+      .switch-row:first-child { padding-top: 4px; }
+      .switch-row:last-child { border-bottom: 0; padding-bottom: 0; }
+      .switch-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+      .switch-text b { font-size: 15px; font-weight: 500; color: var(--text); }
+      .switch-text small { font-size: 12.5px; color: var(--sub); line-height: 1.35; }
+      .switch-input {
+        position: absolute; width: 1px; height: 1px;
+        opacity: 0; margin: 0; pointer-events: none;
+      }
+      .switch-track {
+        position: relative; flex: 0 0 auto;
+        width: 51px; height: 31px; border-radius: 999px;
+        background: var(--fill-strong);
+        transition: background-color .22s ease;
+        box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .05);
+      }
+      .switch-track::after {
+        content: ""; position: absolute; top: 2px; left: 2px;
+        width: 27px; height: 27px; border-radius: 50%;
+        background: #fff;
+        box-shadow: 0 3px 8px rgba(0, 0, 0, .18), 0 0 1px rgba(0, 0, 0, .12);
+        transition: transform .22s cubic-bezier(.32, .72, 0, 1);
+      }
+      .switch-input:checked + .switch-track { background: var(--accent); }
+      .switch-input:checked + .switch-track::after { transform: translateX(20px); }
+      .switch-input:focus-visible + .switch-track {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+      .switch-row:active .switch-track::after { width: 29px; }
+      .switch-row:active .switch-input:checked + .switch-track::after {
+        transform: translateX(18px);
+      }
+      .switch-input:disabled + .switch-track { opacity: .4; }
       @media (max-width: 720px) {
         #tab-settings .card { scroll-margin-top: 0; }
       }
@@ -5290,13 +5332,22 @@
         <div class="settings-body">
         <div class="card" id="settingsAppearance">
           <h2>外观</h2>
-          <div class="theme-choice" id="themeChoice">
-            <button type="button" data-theme-choice="system">跟随系统</button>
-            <button type="button" data-theme-choice="light">浅色</button>
-            <button type="button" data-theme-choice="dark">深色</button>
+          <div class="switch-list" id="themeSwitches">
+            <label class="switch-row">
+              <span class="switch-text"><b>深色模式</b></span>
+              <input type="checkbox" class="switch-input" id="themeDarkToggle" role="switch" aria-label="深色模式" />
+              <span class="switch-track" aria-hidden="true"></span>
+            </label>
+            <label class="switch-row">
+              <span class="switch-text"
+                ><b>自动切换</b><small>跟随手机 / 电脑的系统外观</small></span
+              >
+              <input type="checkbox" class="switch-input" id="themeAutoToggle" role="switch" aria-label="自动切换" />
+              <span class="switch-track" aria-hidden="true"></span>
+            </label>
           </div>
           <p class="hint">
-            默认跟随手机 / 电脑的系统外观；也可以固定为浅色或深色。选择保存在本机浏览器，刷新后依然生效。
+            开启「自动切换」后，外观跟随系统设置，系统变深色它也跟着变；此时手动拨动上面的「深色模式」会自动退出自动切换，改为手动指定。设置保存在本机浏览器，刷新后依然生效。
           </p>
         </div>
         <div class="card" id="settingsAccount">
@@ -8362,20 +8413,19 @@
         el.addEventListener("input", () => setFieldError(el, fieldError(el)));
         el.addEventListener("blur", () => setFieldError(el, fieldError(el)));
       });
-      // 任意表单控件变动都标记为未保存（事件委托，覆盖文本框/下拉/复选框/主题按钮）
+      // 任意表单控件变动都标记为未保存（事件委托，覆盖文本框/下拉/复选框）
       (function bindSettingsDirty() {
         const root = document.getElementById("tab-settings");
         if (!root) return;
         const onChange = (e) => {
           const t = e.target;
-          if (t.closest("button") && !t.closest("#themeChoice")) return; // 普通按钮点击不算改动
+          // 主题开关即时生效、存在本机浏览器，既不算改动也不清掉其他字段的未保存状态
+          if (t.closest && t.closest("#themeSwitches")) return;
+          if (t.closest("button")) return; // 普通按钮点击不算改动
           setSettingsDirty(true);
         };
         root.addEventListener("input", onChange);
         root.addEventListener("change", onChange);
-        root.addEventListener("click", (e) => {
-          if (e.target.closest("#themeChoice button")) setSettingsDirty(false); // 主题即时生效，无需保存
-        });
       })();
       function collectSettings() {
         const cfg = {};
@@ -8672,34 +8722,55 @@
         });
       }
 
-      /* ---------- 外观主题（跟随系统 / 浅色 / 深色） ---------- */
+      /* ---------- 外观主题（深色模式开关 + 自动切换开关） ---------- */
       const THEME_KEY = "qut.theme";
+      const themeDarkToggle = document.getElementById("themeDarkToggle");
+      const themeAutoToggle = document.getElementById("themeAutoToggle");
       function readThemeChoice() {
         try {
           const v = localStorage.getItem(THEME_KEY);
           return ["system", "light", "dark"].includes(v) ? v : "system";
         } catch (e) { return "system"; }
       }
+      function systemPrefersDark() {
+        return window.matchMedia("(prefers-color-scheme: dark)").matches;
+      }
+      function effectiveDark(choice) {
+        return choice === "dark" || (choice === "system" && systemPrefersDark());
+      }
+      /** 开关状态始终反映"当前实际效果"，自动模式下深色开关随系统实时变化 */
+      function syncThemeSwitches(choice) {
+        if (themeDarkToggle) themeDarkToggle.checked = effectiveDark(choice);
+        if (themeAutoToggle) themeAutoToggle.checked = choice === "system";
+      }
       function applyTheme(choice) {
-        const dark = choice === "dark" ||
-          (choice === "system" &&
-            window.matchMedia("(prefers-color-scheme: dark)").matches);
+        const dark = effectiveDark(choice);
         const el = document.getElementById("darkThemeCss");
         if (el) el.disabled = !dark;
         document.documentElement.dataset.theme = dark ? "dark" : "light";
         document.documentElement.style.colorScheme = dark ? "dark" : "light";
         const meta = document.getElementById("themeColorMeta");
-        if (meta) meta.content = dark ? "#000000" : "#f5f5f7";
-        document.querySelectorAll("#themeChoice button").forEach((b) =>
-          b.classList.toggle("active", b.dataset.themeChoice === choice));
+        if (meta) meta.content = dark ? "#16171b" : "#f5f5f7";
+        syncThemeSwitches(choice);
       }
-      $("#themeChoice").addEventListener("click", (e) => {
-        const btn = e.target.closest("button[data-theme-choice]");
-        if (!btn) return;
-        try { localStorage.setItem(THEME_KEY, btn.dataset.themeChoice); } catch (err) {}
-        applyTheme(btn.dataset.themeChoice);
-      });
-      // 选「跟随系统」时，系统外观变化要即时跟随（含老浏览器 addListener 兜底）
+      function setThemeChoice(choice) {
+        try { localStorage.setItem(THEME_KEY, choice); } catch (err) {}
+        applyTheme(choice);
+      }
+      // 深色开关：手动指定浅色 / 深色（自动切换会自动让位）
+      if (themeDarkToggle) {
+        themeDarkToggle.addEventListener("change", () => {
+          setThemeChoice(themeDarkToggle.checked ? "dark" : "light");
+        });
+      }
+      // 自动切换：打开则跟随系统；关闭则固化为当前看到的样子，避免闪一下
+      if (themeAutoToggle) {
+        themeAutoToggle.addEventListener("change", () => {
+          if (themeAutoToggle.checked) setThemeChoice("system");
+          else setThemeChoice(systemPrefersDark() ? "dark" : "light");
+        });
+      }
+      // 自动模式下，系统外观变化要即时跟随（含老浏览器 addListener 兜底）
       const themeMq = window.matchMedia("(prefers-color-scheme: dark)");
       const onSystemThemeChange = () => {
         if (readThemeChoice() === "system") applyTheme("system");
@@ -9184,7 +9255,7 @@
                     </div></div>`;
                 })
                 .join("")
-            : `<div class="empty"><div class="empty-title">还没有推送记录</div><div class="empty-sub">点上面的「发送测试消息」试一次。</div></div>`;
+            : `<div class="empty"><div class="empty-title">还没有推送记录</div><div class="empty-sub">点上面的「测试 Bark 推送」或「测试企业微信推送」试一次。</div></div>`;
         } catch (e) {
           $("#pushLogList").innerHTML = `<div class="hint">读取失败：${esc(e.message)}</div>`;
         }

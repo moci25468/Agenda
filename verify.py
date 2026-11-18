@@ -15,7 +15,8 @@ import socket
 from app.ai import (build_context, _request_headers, _sse_delta, SYSTEM_PROMPT,
                     weeks_mentioned, last_room_query, room_query_context,
                     free_sections, free_sections_context, _free_spans,
-                    _config_status_lines, current_section_lines)
+                    _config_status_lines, current_section_lines,
+                    now_anchor_lines, _time_stamp, _user_content, _wants_weather)
 from app.providers.httpjson import courses_from_payload
 from app.browser_login import (
     build_candidate, pick_best, _headers_for_config, _parse_body, _public_candidates,
@@ -360,31 +361,29 @@ check("空教室.响应解析", _room["code"] == "C2-4-114" and _room["seats"] =
       and _room["building"] == "环境实验楼" and _room["campus"] == "黄岛校区",
       str(_room)[:200])
 
-# 空教室 × AI：提示词规则 7 可渲染（JSON  braces 已转义）、上下文按配置状态提示
+# 空教室 × AI：对话不再提供空教室查询，提示词只指路到「日程」页周课表的空格
 _prompt_room = SYSTEM_PROMPT.format(context="占位上下文")
-check("空教室.AI 提示词模板可渲染", "[查空教室]" in _prompt_room
-      and '"date"' in _prompt_room and '"campus"' in _prompt_room)
+check("空教室.提示词不含查询标记", "[查空教室]" not in _prompt_room
+      and "空教室不在对话里提供" in _prompt_room, "")
 _ctx_room = build_context(load_config())
-check("空教室.AI 上下文未配置提示", "空教室查询：未配置" in _ctx_room, _ctx_room[-160:])
+check("空教室.上下文指向日程页", "空教室查询：该功能不在对话里提供" in _ctx_room
+      and "查空教室" in _ctx_room, _ctx_room[-200:])
 _cfg_room = load_config()
 _cfg_room["provider"] = {**_cfg_room.get("provider", {}), "zhengfang": {
     **_cfg_room.get("provider", {}).get("zhengfang", {}),
     "username": "20260001", "password": "dummy"}}
 save_config(_cfg_room)
-check("空教室.AI 上下文已就绪提示",
-      "空教室查询：已就绪" in build_context(load_config()))
-# 空教室默认校区：配置项存在，设置后注入 AI 上下文与配置现状，未设置则不出现
+check("空教室.上下文不泄露凭据",
+      "20260001" not in build_context(load_config())
+      and "dummy" not in build_context(load_config()))
+# 默认校区：仅用于周课表空教室查询，不再注入 AI 上下文
 check("默认校区.配置含默认项",
       "default_campus" in load_config().get("rooms", {}), "")
 _cfg_room["rooms"] = {"default_campus": "05", "default_campus_name": "黄岛校区"}
 save_config(_cfg_room)
 _ctx_def = build_context(load_config())
-check("默认校区.已注入 AI 上下文",
-      "用户默认校区：黄岛校区" in _ctx_def, _ctx_def[-300:])
-check("默认校区.配置现状含默认校区",
-      "空教室默认校区：黄岛校区" in _ctx_def, _ctx_def[-500:])
-check("默认校区.提示词要求按默认查询",
-      "用户默认校区" in SYSTEM_PROMPT, "")
+check("默认校区.不注入 AI 上下文",
+      "用户默认校区" not in _ctx_def, _ctx_def[-300:])
 _cfg_room["rooms"] = {"default_campus": "", "default_campus_name": ""}
 save_config(_cfg_room)
 check("默认校区.未设置不注入",
@@ -424,7 +423,8 @@ check("空教室.失败结果不算条件",
       last_room_query([{"role": "assistant", "content":
                         '[空教室结果] {"error": "超时", "date": "2026-11-10", '
                         '"start": 5, "end": 8}'}]) is None, "")
-check("空教室.提示词含追问规则", "10.1 空教室多轮追问" in SYSTEM_PROMPT, "")
+check("空教室.提示词不再要求追问", "空教室查询条件" not in SYSTEM_PROMPT
+      and "查空教室的 start/end" not in SYSTEM_PROMPT, "")
 
 # 空闲节次：后端按课表算好注入 AI，问「我没课的时候」不再靠模型自己数课表
 check("空闲节次.区间合并", _free_spans({1, 2, 5, 6}) == [(3, 4), (7, 12)]
@@ -447,14 +447,15 @@ check("空闲节次.注入含查询日期", "用户空闲节次" in _fs_ctx
       and "2026-11-12" in _fs_ctx and "当天无课" in _fs_ctx, _fs_ctx)
 if _fs_orig:
     db.save_snapshot(_fs_orig["courses"], _fs_orig["source"])
-check("空闲节次.提示词引用", "用户空闲节次" in SYSTEM_PROMPT, "")
+check("空闲节次.上下文自解释", "用户空闲节次" in _fs_ctx
+      and "不要自己重新数课表" in _fs_ctx, "")
 
 # 当前节次：AI 回答「现在去哪自习」不能漏掉正在上的这一节
 from datetime import datetime as _dt
 _cs_cfg = load_config()
 _cs_1430 = current_section_lines(_cs_cfg, _dt(2026, 11, 9, 14, 30))
 check("当前节次.正在上的一节",
-      "正在上第 5 节" in _cs_1430 and "必须包含第 5 节" in _cs_1430, _cs_1430)
+      "正在上第 5 节" in _cs_1430 and "按第 5 节回答" in _cs_1430, _cs_1430)
 _cs_0955 = current_section_lines(_cs_cfg, _dt(2026, 11, 9, 9, 55))
 check("当前节次.课间给最近一节",
       "不在上课时段" in _cs_0955 and "第 3 节" in _cs_0955, _cs_0955)
@@ -462,7 +463,25 @@ _cs_2300 = current_section_lines(_cs_cfg, _dt(2026, 11, 9, 23, 0))
 check("当前节次.今天已放学", "都已结束" in _cs_2300, _cs_2300)
 check("当前节次.注入AI上下文", "当前节次" in build_context(_fs_cfg), "")
 check("当前节次.提示词含现在规则",
-      "正在上的这一节" in SYSTEM_PROMPT and "现在" in SYSTEM_PROMPT, "")
+      "现在上什么" in SYSTEM_PROMPT and "下一节" in SYSTEM_PROMPT, "")
+
+# 时间锚点：每轮都注入本机时间，且明确「重复问明天=同一天」
+_na_now = _dt(2026, 11, 18, 23, 58)
+_na_ctx = build_context(_fs_cfg, now=_na_now)
+check("时间锚点.上下文首行是当前时间",
+      _na_ctx.startswith("【当前时间】") and "2026-11-18" in _na_ctx.splitlines()[0],
+      _na_ctx.splitlines()[0][:80])
+check("时间锚点.给出今明后天具体日期",
+      all(s in _na_ctx for s in ("明天 = 2026-11-19", "后天 = 2026-11-20")),
+      _na_ctx.splitlines()[0])
+check("时间锚点.禁止按历史日期顺延",
+      "顺延成后天" in "\n".join(now_anchor_lines(_na_now, 12))
+      and "往后推一天" in SYSTEM_PROMPT and "【提问时间】" in SYSTEM_PROMPT, "")
+_na_stamp = _time_stamp(_na_now)
+check("时间锚点.每条消息带提问时间",
+      _na_stamp.startswith("【提问时间】") and "2026-11-18" in _na_stamp
+      and _user_content([], [], "明天什么课", stamp=_na_stamp).startswith("【提问时间】"),
+      _na_stamp)
 
 # 应用辅导 + 配置状态注入 AI 上下文
 _ctx_cfg = build_context(load_config())
@@ -475,7 +494,7 @@ check("辅导.提示词含应用使用说明",
       and "一键订阅" in _prompt_guide, "")
 check("推送.提示词含推送标记规则",
       "[推送]" in _prompt_guide and '"channels"' in _prompt_guide
-      and "企业微信" in _prompt_guide and "12. 用户明确要求" in _prompt_guide, "")
+      and "企业微信" in _prompt_guide and "4. 用户明确要求" in _prompt_guide, "")
 # 可用通道：只列已开启且已配置的通道，且不泄露具体 Key / webhook
 _pcfg = load_config()
 _pcfg["push"] = {**_pcfg.get("push", {}), "bark_enabled": True,
@@ -606,6 +625,55 @@ _empty = asyncio.run(_weather.fetch_hourly(10.0, 100.0))
 check("天气.无历史数据时返回空表", _empty == {}, str(_empty)[:120])
 _weather.httpx.AsyncClient = _orig_client
 _weather.clear_cache()
+
+# 主源熔断：境内 VPS 连不通 Open-Meteo 会干等满超时，失败后 15 分钟内直接走备用源
+_weather.clear_cache()
+_weather._primary_dead_until = time.monotonic() + 60
+_wttr_hits = {"n": 0}
+_orig_wttr_fetch = _weather._fetch_from_wttr
+async def _fake_wttr_fetch():
+    _wttr_hits["n"] += 1
+    return {f"{_today_s}T08:00": {"temp": 9, "code": 0, "pop": 0}}
+class _NoNetClient:
+    def __init__(self, *a, **k):
+        raise AssertionError("熔断期间不应再请求主源")
+
+_weather._fetch_from_wttr = _fake_wttr_fetch
+_weather.httpx.AsyncClient = _NoNetClient
+_cb_hourly = asyncio.run(_weather.fetch_hourly(35.96, 120.20))
+_weather.httpx.AsyncClient = _orig_client
+_weather._fetch_from_wttr = _orig_wttr_fetch
+_weather.clear_cache()
+check("天气.主源熔断后直接走备用源",
+      _wttr_hits["n"] == 1 and _cb_hourly.get(f"{_today_s}T08:00", {}).get("temp") == 9,
+      f"wttr={_wttr_hits['n']} {str(_cb_hourly)[:80]}")
+
+# 天气慢时不能拖着 AI 一起等：3 秒预算，超时就不带天气、后台继续跑
+import app.ai as _ai_mod
+_orig_wctx = _ai_mod._weather_context
+async def _slow_wctx(cfg):
+    await asyncio.sleep(3.5)
+    return "今日天气（慢）：晴。"
+async def _probe_budget():
+    t0 = time.monotonic()
+    out = await _ai_mod._weather_context_bounded(load_config())
+    dur = time.monotonic() - t0
+    for tk in list(_ai_mod._bg_tasks):   # 等后台任务收尾，避免事件循环关闭时告警
+        await tk
+    return out, dur
+_ai_mod._weather_context = _slow_wctx
+_budget_out, _budget_dur = asyncio.run(_probe_budget())
+_ai_mod._weather_context = _orig_wctx
+check("天气.AI 注入有 3 秒预算",
+      _budget_out == "" and _budget_dur < 3.4, f"{_budget_dur:.1f}s")
+
+# 按需拉天气：不问天气就不碰天气接口（下节课、课表、日程…都秒过）
+check("天气.问天气才触发",
+      _wants_weather("今天天气怎么样") and _wants_weather("明天会下雨吗"))
+check("天气.与天气无关不触发",
+      not _wants_weather("下节课是什么时候")
+      and not _wants_weather("明天有什么课")
+      and not _wants_weather("帮我加个日程：周五开会"))
 
 
 # 流式回复的 SSE 行解析（OpenAI 兼容格式）
