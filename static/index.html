@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#F4F6F8" id="themeColorMeta" />
+    <meta name="theme-color" content="#f5f5f7" id="themeColorMeta" />
     <meta name="description" content="Agenda 知序 — 青岛理工大学日程、课表、考试与校园问答。" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -2451,60 +2451,49 @@
       /* 简约焕新：统一留白、层级与交互，保留所有既有 DOM 契约 */
       /* 设计令牌（01-visual-direction §2.1）：全站唯一事实来源，组件规则只引用 var()/color-mix */
       :root {
-        /* 表面（冷感极简：冷灰底，纯白卡浮于其上） */
-        --bg: #F4F6F8;
-        --card: #FFFFFF;
-        --fill: #EDF0F3;
-        --fill-strong: #E3E7EC;
-        /* 文字（冷墨） */
-        --text: #1F242B;
-        --sub: #66707C;
-        --faint: #98A2AE;
-        --muted: #66707C;
-        /* 分隔（更细更淡的 1px 冷灰线） */
-        --line: #E4E8ED;
-        --line-strong: #D3D9E0;
-        /* 强调·墨青（全站唯一强调色）：主按钮、选中态、关键数字 */
-        --accent: #35617A;
-        --accent-hover: #2C5268;
-        --accent-soft: #EAF0F4;
-        --accent-faint: #8AA6B8;
-        --accent-ink: #F2F7FA;
-        /* 点睛（保留语义位，冷感版与主强调同色相收敛） */
-        --cinnabar: #35617A;
-        --cinnabar-soft: #EAF0F4;
-        /* 冷点缀（刊头内弱强调，冰蓝灰） */
-        --gilt: #7FA0B8;
-        /* 刊头（今日英雄区：深墨青冷调） */
-        --hero: #1E2A36;
-        --hero-2: #161F2A;
-        --hero-text: #EFF3F7;
-        --hero-sub: #8CA0B2;
-        --hero-gilt: #82A8C6;
-        /* 语义色（冷化处理：绿保功能、琥珀降暖、砖红转冷红） */
-        --ok: #3F7D5F;
-        --ok-soft: #E6F0EA;
-        --warn: #93712F;
-        --warn-soft: #F3EEDC;
-        --fail: #A6493B;
-        --fail-soft: #F6E9E6;
-        /* 形状与深度（圆角统一、阴影更柔更浅偏冷） */
-        --radius-s: 5px;
-        --radius: 8px;
-        --radius-l: 12px;
-        --radius-xl: 16px;
+        /* Apple 浅色：apple.com 中性色 + 单一 Apple 蓝 */
+        --bg: #f5f5f7;
+        --card: #ffffff;
+        --fill: #f5f5f7;
+        --fill-strong: #e8e8ed;
+        --text: #1d1d1f;
+        --sub: #86868b;
+        --faint: #aeaeb2;
+        --muted: #86868b;
+        --line: #e5e5ea;
+        --line-strong: #d2d2d7;
+        --accent: #0071e3;
+        --accent-hover: #0077ed;
+        --accent-soft: rgba(0, 113, 227, 0.10);
+        --accent-faint: #6baee8;
+        --accent-ink: #ffffff;
+        --cinnabar: #0071e3;
+        --cinnabar-soft: rgba(0, 113, 227, 0.10);
+        --gilt: #0071e3;
+        --hero: #ffffff;
+        --hero-2: #ffffff;
+        --hero-text: #1d1d1f;
+        --hero-sub: #86868b;
+        --hero-gilt: #0071e3;
+        /* iOS 系统语义色只表达状态 */
+        --ok: #34c759;
+        --ok-soft: rgba(52, 199, 89, 0.12);
+        --warn: #ff9500;
+        --warn-soft: rgba(255, 149, 0, 0.12);
+        --fail: #ff3b30;
+        --fail-soft: rgba(255, 59, 48, 0.12);
+        --radius-s: 10px;
+        --radius: 12px;
+        --radius-l: 18px;
+        --radius-xl: 20px;
         --shadow: var(--shadow-1);
-        --shadow-1: 0 1px 2px rgba(23, 28, 35, 0.05);
-        --shadow-2: 0 8px 24px rgba(23, 28, 35, 0.08);
-        --shadow-3: 0 20px 56px rgba(18, 23, 30, 0.18);
-        /* 间距刻度（4 的倍数） */
+        --shadow-1: 0 2px 8px rgba(0, 0, 0, 0.04);
+        --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.04);
+        --shadow-3: 0 12px 32px rgba(0, 0, 0, 0.10);
         --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
         --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-10: 40px;
-        /* 字体：全站统一冷调无衬线；数字用同一套字体 + tabular-nums 对齐 */
-        --font-text: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
-          "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
-        --font-num: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC",
-          "Helvetica Neue", sans-serif;
+        --font-text: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "PingFang SC", sans-serif;
+        --font-num: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "PingFang SC", sans-serif;
         --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       }
       html { scroll-behavior: smooth; }
@@ -3315,7 +3304,7 @@
       .today-card { padding: 0; overflow: hidden; border-radius: 14px; }
       .today-card .day-head {
         margin: 0; padding: 30px 32px 26px; border-bottom: 0;
-        background: linear-gradient(172deg, var(--hero) 0%, var(--hero-2) 100%);
+        background: var(--card);
       }
       .today-card .section-kicker { color: var(--hero-gilt); letter-spacing: 0.26em; }
       .today-card .day-head .date {
@@ -3375,7 +3364,7 @@
       input:focus, textarea:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
 
       /* —— 登录页：整页深墨青，表单浮成一纸 —— */
-      .auth-screen { background: linear-gradient(168deg, var(--hero) 0%, var(--hero-2) 100%); }
+      .auth-screen { background: var(--bg); }
       .auth-eyebrow { color: var(--hero-gilt); letter-spacing: 0.3em; }
       .auth-title { color: var(--hero-text); font-family: var(--font-num); font-weight: 600; }
       .auth-title span { color: var(--hero-gilt); font-family: var(--font-text); letter-spacing: 0.3em; }
@@ -3515,36 +3504,36 @@
         /* 深色 = 同一套色相在暗处的反演（01 §2.2）：只覆写 :root 变量与个别无法变量化的规则。
            JS 契约不变：仍由脚本 el.disabled 启停本块。 */
         :root {
-          /* 冷感极简·深色：同一套墨青色相在暗处的反演 */
-          --bg: #14181E;
-          --card: #1C2229;
-          --fill: #232A32;
-          --fill-strong: #2B333D;
-          --text: #E4E8ED;
-          --sub: #93A0AD;
-          --faint: #5F6B78;
-          --muted: #93A0AD;
-          --line: #2A323B;
-          --line-strong: #39434E;
-          --accent: #7FA8C9;
-          --accent-hover: #93B9D8;
-          --accent-soft: #21303D;
-          --accent-faint: #55708A;
-          --accent-ink: #0F1B24;
-          --cinnabar: #7FA8C9;
-          --cinnabar-soft: #21303D;
-          --gilt: #7FA8C9;
-          --hero: #1D2936;
-          --hero-2: #141D28;
-          --hero-text: #E7ECF1;
-          --hero-sub: #8396A8;
-          --hero-gilt: #82A8C6;
-          --ok: #7FB89B;  --ok-soft: #1E2C26;
-          --warn: #C0A265;  --warn-soft: #2C281D;
-          --fail: #C98272;  --fail-soft: #32231F;
-          --shadow-1: none;
-          --shadow-2: 0 8px 26px rgba(0, 0, 0, 0.30);
-          --shadow-3: 0 20px 60px rgba(0, 0, 0, 0.46);
+          /* Apple 深色：纯黑底、深灰卡片、同一 Apple 蓝 */
+          --bg: #000000;
+          --card: #1d1d1f;
+          --fill: #2c2c2e;
+          --fill-strong: #3a3a3c;
+          --text: #f5f5f7;
+          --sub: #86868b;
+          --faint: #636366;
+          --muted: #86868b;
+          --line: #38383a;
+          --line-strong: #48484a;
+          --accent: #0071e3;
+          --accent-hover: #0077ed;
+          --accent-soft: rgba(0, 113, 227, 0.20);
+          --accent-faint: #6baee8;
+          --accent-ink: #ffffff;
+          --cinnabar: #0071e3;
+          --cinnabar-soft: rgba(0, 113, 227, 0.20);
+          --gilt: #0071e3;
+          --hero: #1d1d1f;
+          --hero-2: #1d1d1f;
+          --hero-text: #f5f5f7;
+          --hero-sub: #86868b;
+          --hero-gilt: #0071e3;
+          --ok: #34c759;  --ok-soft: rgba(52, 199, 89, 0.16);
+          --warn: #ff9500;  --warn-soft: rgba(255, 149, 0, 0.16);
+          --fail: #ff3b30;  --fail-soft: rgba(255, 59, 48, 0.16);
+          --shadow-1: 0 2px 8px rgba(0, 0, 0, 0.16);
+          --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.16);
+          --shadow-3: 0 12px 32px rgba(0, 0, 0, 0.32);
         }
         ::selection { background: color-mix(in srgb, var(--accent) 30%, var(--bg)); color: var(--text); }
         /* 深色 primary：底 --accent，文字 --accent-ink（对比 9.2:1） */
@@ -4113,6 +4102,304 @@
       .week-nav button.label:active { transform: none; }
       .week-nav button.label.clickable { cursor: pointer; }
     </style>
+    <style>
+      /* Apple / iOS 原生视觉：只覆盖样式，不改变 DOM 与交互契约 */
+      html { background: var(--bg); }
+      body {
+        font-family: var(--font-text);
+        font-variant-numeric: tabular-nums;
+        font-feature-settings: "tnum" 1;
+        letter-spacing: 0;
+        line-height: 1.5;
+      }
+      h1, h2, h3, h4, .card h2, .day-head .date, .week-nav .label,
+      .auth-title, .boot-mark, .empty-title, .confirm-box h3 {
+        font-family: var(--font-text);
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        line-height: 1.25;
+      }
+      p, .hint, .confirm-text, .auth-intro-sub { line-height: 1.65; }
+      .muted, .hint, .header-sub, .field > span, .course-meta,
+      .today-card #todayCount, .today-card .day-meta .muted { color: var(--sub); }
+
+      /* 卡片与内容层级 */
+      .card, .today-card, .source-card, .auth-card, .chat-box,
+      .week-grid, .day-card, .search-results, .install-tip {
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--card);
+        box-shadow: var(--shadow-1);
+      }
+      .card { padding: 28px; }
+      .card + .card { margin-top: 20px; }
+      .card h2 { margin-bottom: 16px; font-size: 20px; }
+      .section-kicker, .auth-eyebrow {
+        color: var(--sub);
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+      .brand-mark { border-radius: 12px; box-shadow: none; }
+      .brand-mark svg rect:first-of-type { fill: var(--accent); }
+      .brand-mark svg circle { fill: #ffffff; }
+      header h1 { font-size: 28px; letter-spacing: -0.02em; }
+      header h1 .brand-cn { color: var(--sub); letter-spacing: 0.02em; }
+      .header-sub { font-size: 12px; letter-spacing: 0; }
+      .statusbar {
+        padding: 10px 14px;
+        border-color: var(--line);
+        border-radius: 14px;
+        background: var(--card);
+        color: var(--sub);
+        font-size: 11px;
+        letter-spacing: 0;
+      }
+
+      /* 按钮、胶囊与表单 */
+      button, button.small, button.primary, #syncBtn,
+      .chips button, .reply-followup, .theme-choice button,
+      button.log-toggle, .attach-btn {
+        border-radius: 999px;
+        font-weight: 500;
+        letter-spacing: 0;
+        box-shadow: none;
+        transition: background-color 0.2s ease, border-color 0.2s ease,
+          color 0.2s ease, opacity 0.2s ease, transform 0.2s ease;
+      }
+      button {
+        border-color: color-mix(in srgb, var(--text) 18%, transparent);
+        background: color-mix(in srgb, var(--card) 72%, transparent);
+        color: var(--text);
+      }
+      button:hover {
+        border-color: color-mix(in srgb, var(--text) 30%, transparent);
+        background: var(--fill);
+        color: var(--text);
+      }
+      button.primary, #syncBtn, .chips button, .reply-followup,
+      .theme-choice button.active, .settings-nav button.active,
+      .auth-tabs button.primary {
+        border-color: var(--accent);
+        background: var(--accent);
+        color: #ffffff;
+        box-shadow: none;
+      }
+      button.primary:hover, #syncBtn:hover, .chips button:hover,
+      .reply-followup:hover, .theme-choice button.active:hover,
+      .settings-nav button.active:hover, .auth-tabs button.primary:hover {
+        border-color: var(--accent-hover);
+        background: var(--accent-hover);
+        color: #ffffff;
+      }
+      button:focus-visible, a:focus-visible {
+        outline: 3px solid color-mix(in srgb, var(--accent) 35%, transparent);
+        outline-offset: 2px;
+      }
+      .reply-followup::after { content: ""; }
+      .badge, .ai-badge, .sr-kind {
+        border-radius: 999px;
+        letter-spacing: 0;
+        font-variant-numeric: tabular-nums;
+      }
+      input, select, textarea {
+        border-color: var(--line);
+        border-radius: 12px;
+        background: var(--fill);
+        color: var(--text);
+        transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+      }
+      input:focus, select:focus, textarea:focus {
+        border-color: var(--accent);
+        background: var(--card);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+      }
+
+      /* 桌面吸顶导航与设置快捷栏 */
+      nav {
+        top: 12px;
+        gap: 4px;
+        margin-bottom: 28px;
+        padding: 5px;
+        border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--bg) 78%, transparent);
+        box-shadow: none;
+        backdrop-filter: saturate(180%) blur(20px);
+        -webkit-backdrop-filter: saturate(180%) blur(20px);
+      }
+      nav button {
+        min-height: 38px;
+        padding: 8px 17px;
+        border: 0;
+        border-radius: 999px;
+        color: var(--sub);
+        font-size: 13px;
+        font-weight: 500;
+      }
+      nav button:hover { background: var(--fill-strong); color: var(--text); }
+      nav button.active {
+        border: 0;
+        background: var(--accent);
+        color: #ffffff;
+        font-weight: 600;
+        box-shadow: none;
+      }
+      nav button.active::after { content: none; }
+      .settings-nav {
+        border-color: color-mix(in srgb, var(--line) 80%, transparent);
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--card) 78%, transparent);
+        box-shadow: none;
+        backdrop-filter: saturate(180%) blur(20px);
+        -webkit-backdrop-filter: saturate(180%) blur(20px);
+      }
+      .settings-nav button { border-radius: 999px; }
+      .settings-nav button.active { color: #ffffff; }
+      #tab-settings > .form-actions {
+        background: color-mix(in srgb, var(--bg) 78%, transparent);
+        backdrop-filter: saturate(180%) blur(20px);
+        -webkit-backdrop-filter: saturate(180%) blur(20px);
+      }
+
+      /* 今日：明亮大标题与大数字，不再使用深色渐变刊头 */
+      .today-card { padding: 0; overflow: hidden; border-radius: 20px; }
+      .today-card .day-head {
+        padding: 32px;
+        border-bottom: 1px solid var(--line);
+        background: var(--card);
+      }
+      .today-card .section-kicker { color: var(--sub); letter-spacing: 0.02em; }
+      .today-card .day-head .date {
+        color: var(--text);
+        font-size: 44px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        line-height: 1.2;
+      }
+      .today-card .day-head .date .dow {
+        color: var(--sub);
+        font-size: 17px;
+        font-weight: 500;
+        letter-spacing: 0;
+      }
+      .today-card .day-meta .muted, .today-card #todayCount { color: var(--sub); }
+      .today-card > #todayList { padding: 8px 32px 30px; }
+      .today-card > .empty { margin: 8px 32px 30px; }
+      .tomorrow-card .day-head .date { font-size: 32px; font-weight: 600; letter-spacing: -0.02em; }
+      .next-class {
+        margin: 0 20px 20px;
+        padding: 16px 20px;
+        border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line));
+        border-radius: 18px;
+        background: var(--accent-soft);
+        box-shadow: none;
+      }
+      .next-class:hover { border-color: var(--accent); background: var(--accent-soft); }
+      .next-class .nc-kicker, .next-class .nc-count b { color: var(--accent); }
+      .next-class .nc-count b, .exam-countdown b, .rp-room-seats b {
+        font-family: var(--font-num);
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.02em;
+      }
+      .course-time .range { font-weight: 600; letter-spacing: -0.01em; }
+      .course-row { padding: 20px 0; }
+
+      /* 周课表：同一 Apple 蓝的明度层次，不再引入第二强调色 */
+      .week-grid { overflow: hidden; box-shadow: var(--shadow-1); }
+      .mini-course, .mini-course.tone-0, .mini-course.tone-1,
+      .mini-course.tone-2, .mini-course.tone-3, .mini-course.tone-4 {
+        border-left-color: var(--accent);
+        border-radius: 10px;
+        color: var(--text);
+        box-shadow: none;
+      }
+      .mini-course.tone-0 { background: rgba(0, 113, 227, 0.08); }
+      .mini-course.tone-1 { background: rgba(0, 113, 227, 0.11); }
+      .mini-course.tone-2 { background: rgba(0, 113, 227, 0.14); }
+      .mini-course.tone-3 { background: rgba(0, 113, 227, 0.17); }
+      .mini-course.tone-4 { background: rgba(0, 113, 227, 0.20); }
+      .mini-course .n { color: var(--text); font-weight: 600; }
+      .mini-course .t, .mini-course .r { color: var(--sub); }
+      .week-cell .wc-free, .chat-more { border-radius: 999px; }
+      .day-card-head { background: var(--fill); }
+      .day-card.today .day-card-head { background: var(--accent-soft); }
+
+      /* AI、登录与悬浮层 */
+      .chat-box { border-radius: 20px; }
+      .chat-input input, .chat-input button { border-radius: 999px; }
+      .msg.user {
+        border-radius: 18px 18px 5px 18px;
+        background: var(--accent);
+        color: #ffffff;
+        box-shadow: none;
+      }
+      .msg.ai::before { color: var(--sub); letter-spacing: 0.02em; }
+      .chat-file, .msg .msg-file, .log-box {
+        border-color: var(--line);
+        border-radius: 12px;
+        background: var(--fill);
+      }
+      .msg .msg-file { background: color-mix(in srgb, var(--card) 72%, transparent); }
+      .auth-screen { background: var(--bg); }
+      .auth-title { color: var(--text); font-size: 58px; }
+      .auth-title span {
+        border-color: var(--line);
+        background: var(--card);
+        color: var(--sub);
+        letter-spacing: 0;
+      }
+      .auth-intro-sub, .auth-features dd { color: var(--sub); }
+      .auth-features dt { color: var(--text); }
+      .auth-card { border: 1px solid var(--line); box-shadow: var(--shadow-1); }
+      .auth-tabs { border-radius: 999px; background: var(--fill); }
+      .auth-tabs button { border-radius: 999px; }
+      .week-menu, .sheet-panel, .confirm-box, .room-pop-panel {
+        border-color: color-mix(in srgb, var(--line) 85%, transparent);
+        background: color-mix(in srgb, var(--card) 92%, transparent);
+        box-shadow: var(--shadow-3);
+        backdrop-filter: saturate(180%) blur(20px);
+        -webkit-backdrop-filter: saturate(180%) blur(20px);
+      }
+      #toast { border-radius: 999px; background: var(--text); color: var(--bg); }
+      #toast[data-type="success"] { background: var(--ok); color: #ffffff; }
+      #toast[data-type="error"] { background: var(--fail); color: #ffffff; }
+      #toast[data-type="warn"] { background: var(--warn); color: #ffffff; }
+      .net-banner { background: var(--fail); box-shadow: none; }
+
+      @media (max-width: 720px) {
+        .card { padding: 22px; border-radius: 18px; }
+        .today-card { padding: 0; border-radius: 20px; }
+        .today-card .day-head { padding: 24px 22px 20px; }
+        .today-card .day-head .date { font-size: 34px; }
+        .today-card .day-head .date .dow { font-size: 14px; }
+        .today-card > #todayList { padding: 6px 22px 24px; }
+        .today-card > .empty { margin: 6px 22px 24px; }
+        .next-class { margin: 0 14px 14px; padding: 14px 16px; }
+        #nav {
+          border: 0;
+          border-top: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+          border-radius: 0;
+          background: color-mix(in srgb, var(--bg) 78%, transparent);
+          box-shadow: none;
+          backdrop-filter: saturate(180%) blur(20px);
+          -webkit-backdrop-filter: saturate(180%) blur(20px);
+        }
+        #nav button, #nav button.active {
+          border-radius: 999px;
+          box-shadow: none;
+        }
+        #nav button.active { background: var(--accent); color: #ffffff; }
+        .settings-nav { border-radius: 18px; }
+        .auth-title { font-size: 42px; }
+        .auth-card { border-radius: 20px; box-shadow: var(--shadow-1); }
+      }
+      @media (max-width: 480px) {
+        .card { padding: 20px; }
+        .today-card { padding: 0; }
+        .today-card .day-head .date { font-size: 32px; }
+        nav button { font-size: 12px; }
+      }
+    </style>
     <script>
       // 主题在页面渲染前尽早应用，避免浅色闪一下再变深色；设置页随后同步按钮状态
       (function () {
@@ -4129,7 +4416,7 @@
         document.documentElement.dataset.theme = dark ? "dark" : "light";
         document.documentElement.style.colorScheme = dark ? "dark" : "light";
         var meta = document.getElementById("themeColorMeta");
-        if (meta) meta.content = dark ? "#14181E" : "#F4F6F8";
+        if (meta) meta.content = dark ? "#000000" : "#f5f5f7";
       })();
     </script>
   </head>
@@ -7940,7 +8227,7 @@
         document.documentElement.dataset.theme = dark ? "dark" : "light";
         document.documentElement.style.colorScheme = dark ? "dark" : "light";
         const meta = document.getElementById("themeColorMeta");
-        if (meta) meta.content = dark ? "#14181E" : "#F4F6F8";
+        if (meta) meta.content = dark ? "#000000" : "#f5f5f7";
         document.querySelectorAll("#themeChoice button").forEach((b) =>
           b.classList.toggle("active", b.dataset.themeChoice === choice));
       }
