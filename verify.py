@@ -597,7 +597,8 @@ _BoomClient.calls = 0
 _stale = asyncio.run(_weather.fetch_hourly(35.96, 120.20))
 check("天气.抓取失败沿用上次成功数据",
       _stale == _ok_h, str(_stale)[:120])
-check("天气.失败会重试一次", _BoomClient.calls == 2, str(_BoomClient.calls))
+# 主源失败会重试一次，随后还会尝试备用源 wttr.in 一次，共 3 次请求
+check("天气.失败会重试并尝试备用源", _BoomClient.calls == 3, str(_BoomClient.calls))
 # 从未成功过的地方，失败后返回空字典（而不是抛错）
 _weather.clear_cache()
 _weather.httpx.AsyncClient = _BoomClient

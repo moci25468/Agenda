@@ -12,10 +12,29 @@ import time
 import httpx
 
 API = "https://api.open-meteo.com/v1/forecast"
+# 备用源：部分服务器（尤其境内 VPS）访问 Open-Meteo 会 SSL 握手超时，
+# 用 wttr.in 兜底，它返回逐小时数据且无需 Key。按 地点名 查询。
+WTTR_API = "https://wttr.in/{place}?format=j1"
+WTTR_PLACE = "Qingdao"
 CACHE_TTL = 1800          # 成功后缓存 30 分钟
 FAIL_TTL = 60             # 失败只短暂回避，一分钟后就允许重试
 TIMEOUT = 10.0            # 跨境访问偶发 5s 级抖动，8s 太紧
 RETRY_DELAYS = (0.5,)     # 失败后再试一次，最多两次请求
+
+# wttr.in 英文天气描述 → 近似 WMO code，复用 WMO_TEXT 得到统一中文文案
+_WTTR_CODE = [
+    ("sunny", 0), ("clear", 0), ("cloudy", 3), ("overcast", 3),
+    ("partly", 2), ("thunder", 95), ("snow", 71), ("sleet", 85),
+    ("drizzle", 51), ("rain", 61), ("fog", 45), ("mist", 45),
+]
+
+
+def _wttr_code(desc: str) -> int | None:
+    text = (desc or "").lower()
+    for needle, code in _WTTR_CODE:
+        if needle in text:
+            return code
+    return None
 
 log = logging.getLogger(__name__)
 
@@ -82,11 +101,49 @@ def _parse_hourly(data: dict) -> dict:
     return out
 
 
+async def _fetch_from_wttr() -> dict:
+    """备用源：wttr.in 逐小时数据，转成与主源相同结构。失败返回 {}。"""
+    out: dict = {}
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT, trust_env=False) as client:
+            r = await client.get(
+                WTTR_API.format(place=WTTR_PLACE),
+                headers={"User-Agent": "curl/7.68"},
+            )
+            r.raise_for_status()
+            days = (r.json() or {}).get("weather") or []
+        for day in days:
+            date_s = day.get("date")
+            if not date_s:
+                continue
+            # wttr.in 每 3 小时一个点（00/03/06…），课表按整点查（08:00、10:00…），
+            # 先把稀疏点铺满 0~23 每个整点，保证任意上课时刻都能命中。
+            slots: dict[int, dict] = {}
+            for h in day.get("hourly") or []:
+                hour = int(h.get("time", 0) or 0) // 100
+                desc = ((h.get("weatherDesc") or [{}])[0] or {}).get("value", "")
+                slots[hour] = {
+                    "temp": h.get("tempC"),
+                    "code": _wttr_code(desc),
+                    "pop": h.get("chanceofrain"),
+                }
+            if not slots:
+                continue
+            for hour in range(24):
+                # 取不晚于当前时刻的最近一个已知点
+                known = [h for h in slots if h <= hour]
+                src = slots[max(known)] if known else slots[min(slots)]
+                out[f"{date_s}T{hour:02d}:00"] = dict(src)
+    except Exception as e:  # noqa: BLE001
+        log.warning("备用天气源 wttr.in 获取失败：%s", e)
+    return out
+
+
 async def fetch_hourly(lat: float, lon: float) -> dict:
     """拉取未来 2 天的逐小时天气，返回 {"YYYY-MM-DDTHH:00": {...}}。
 
-    失败时先重试一次；仍失败则回落上次成功的数据（宁可显示几小时前的天气，
-    也不要整块变空），完全没有历史数据时返回 {}。
+    主源 Open-Meteo 失败时自动切换到 wttr.in；都失败则回落上次成功的数据
+    （宁可显示几小时前的天气，也不要整块变空），完全没有历史数据时返回 {}。
     """
     key = (round(float(lat), 2), round(float(lon), 2))
     hit = _cache.get(key)
@@ -109,6 +166,11 @@ async def fetch_hourly(lat: float, lon: float) -> dict:
             err = f"{type(e).__name__}: {e}"
         if attempt < len(RETRY_DELAYS):
             await asyncio.sleep(RETRY_DELAYS[attempt])
+    # 主源不可用（境内 VPS 常见 SSL 握手超时）时切备用源
+    if not out:
+        out = await _fetch_from_wttr()
+        if out:
+            log.info("主天气源不可用，已切换到备用源 wttr.in")
     if out:
         _last_good[key] = out
         _cache[key] = (now, out)

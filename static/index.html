@@ -4223,6 +4223,16 @@
         color: var(--text);
         transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
       }
+      /* 原生 date/time 控件默认比文本框高 2px，统一固定高度使其与其他输入框对齐 */
+      label.field > input {
+        box-sizing: border-box;
+        height: 44px;
+      }
+      input[type="date"]::-webkit-calendar-picker-indicator,
+      input[type="time"]::-webkit-calendar-picker-indicator {
+        opacity: 0.55;
+        cursor: pointer;
+      }
       input:focus, select:focus, textarea:focus {
         border-color: var(--accent);
         background: var(--card);
@@ -5079,7 +5089,7 @@
         </div>
 
         <div class="card" id="settingsBark">
-          <h2>Bark 推送（iOS）</h2>
+          <h2>推送通道</h2>
           <div class="check">
             <input type="checkbox" id="barkEnabled" /><span
               >启用 Bark（iOS 推送）</span
@@ -5107,12 +5117,9 @@
             在 iOS App Store 安装 Bark，复制 App 里的 Key 填入即可。开启课前提醒后，每节课、日程、考试开始前都会推送一次。
           </p>
           <div class="form-actions">
-            <button id="testPushBtn">发送测试推送</button>
+            <button id="testPushBtn">测试 Bark 推送</button>
           </div>
-        </div>
-
-        <div class="card" id="settingsBots">
-          <h2>企业微信 / 钉钉群机器人</h2>
+          <div class="subhead">企业微信 / 钉钉群机器人</div>
           <div class="check">
             <input type="checkbox" id="wecomEnabled" /><span
               >启用群机器人（安卓 / 微信内接收）</span
@@ -5129,7 +5136,7 @@
             <code>work.weixin.qq.com</code> 的网页地址不能用作推送地址。
           </p>
           <div class="form-actions">
-            <button id="testWecomBtn">发送测试消息</button>
+            <button id="testWecomBtn">测试企业微信推送</button>
           </div>
         </div>
 
@@ -8864,7 +8871,7 @@
           loadPushLog();
         }
       }
-      $("#testPushBtn").addEventListener("click", (e) => runPushTest("", e.currentTarget));
+      $("#testPushBtn").addEventListener("click", (e) => runPushTest("bark", e.currentTarget));
       $("#testWecomBtn").addEventListener("click", (e) => runPushTest("wecom", e.currentTarget));
       $("#refreshPushLogBtn").addEventListener("click", () => loadPushLog());
 
