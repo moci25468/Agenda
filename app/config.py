@@ -94,6 +94,7 @@ DEFAULT_CONFIG = {
     },
     "ai": {
         "enabled": False,
+        "show_in_nav": True,      # 是否在主页导航显示 AI 助手分块；关闭后主页只留其余分块
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "api_key": "",
         "model": "qwen-plus",
@@ -232,8 +233,9 @@ def resolve_course_source(cfg: dict) -> str:
     """
     p = cfg.get("provider", {})
     ptype = p.get("type") or "mock"
-    # 用户显式选择演示或通用 HTTP 时，不再被 auto 策略抢回。
-    if ptype in ("mock", "httpjson"):
+    # 通用 HTTP（httpjson）是用户显式选的来源，不再被 auto 策略抢回。
+    # mock 是未配置任何真实来源时的兜底；一旦真的配了教务/门户，就不再返回 mock。
+    if ptype == "httpjson":
         return ptype
     primary = p.get("primary") or "auto"
     zf_ok = zhengfang_configured(cfg)
@@ -246,7 +248,8 @@ def resolve_course_source(cfg: dict) -> str:
         return "zhengfang"
     if portal_ok:
         return "portal"
-    return ptype
+    # 既没配正方也没配门户：显式选了 mock 才用演示数据，否则也是 mock 兜底
+    return "mock"
 
 
 def global_config() -> dict:

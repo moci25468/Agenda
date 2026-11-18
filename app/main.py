@@ -235,8 +235,6 @@ async def status():
             if not e.is_finished():
                 upcoming_exams.append(e)
         upcoming_exams.sort(key=lambda e: (e.date or "9999-12-31", e.start or "23:59"))
-    provider_type = cfg.get("provider", {}).get("type", "mock")
-    primary = cfg.get("provider", {}).get("primary", "auto")
     from .config import resolve_course_source, portal_configured, zhengfang_configured
     resolved = resolve_course_source(cfg)
     portal_ok = portal_configured(cfg)
@@ -252,8 +250,8 @@ async def status():
         "semester_start": cfg.get("semester_start"),
         "total_weeks": cfg.get("total_weeks", 30),
         "provider": resolved,
-        "provider_type": provider_type,
-        "primary": primary,
+        "provider_type": resolved,
+        "primary": cfg.get("provider", {}).get("primary", "auto"),
         "portal_configured": portal_ok,
         "zhengfang_configured": zf_ok,
         "has_source": bool(portal_ok or zf_ok),
@@ -268,6 +266,7 @@ async def status():
         "sync_time": cfg.get("sync_time", "12:00"),
         "next_sync": next_run_time(),
         "ai_enabled": bool(cfg.get("ai", {}).get("enabled") and cfg.get("ai", {}).get("api_key")),
+        "ai_show_in_nav": cfg.get("ai", {}).get("show_in_nav", True) is not False,
         "push_channels": [c for c, on in (
             ("bark", push_cfg.get("bark_enabled")),
             ("wecom", push_cfg.get("wecom_enabled")),
@@ -1948,6 +1947,9 @@ async def save_zhengfang(req: ZhengfangSaveRequest):
         zf["password"] = req.password
         zf["cookie"] = ""  # 账号密码模式：清空 Cookie，避免混用
     p["zhengfang"] = zf
+    # 配了正方凭证就不再是演示数据：type 从 mock 切到 zhengfang，避免演示兜底抢回
+    if p.get("type") == "mock":
+        p["type"] = "zhengfang"
     p["primary"] = p.get("primary") or "auto"
     save_config(cfg)  # 先存凭证；学期等测试成功再回写
 

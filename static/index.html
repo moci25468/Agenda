@@ -4848,6 +4848,9 @@
         transform: translateX(18px);
       }
       .switch-input:disabled + .switch-track { opacity: .4; }
+      /* 开关放进 .form-grid 时占满整行、去掉 form-grid 给 label 的样式干扰 */
+      .form-grid .switch-list { grid-column: 1 / -1; }
+      .form-grid .switch-list .switch-row { display: flex; }
       @media (max-width: 720px) {
         #tab-settings .card { scroll-margin-top: 0; }
       }
@@ -5378,15 +5381,19 @@
               ><span>学期总周数</span
               ><input name="total_weeks" type="number" min="1" max="40"
             /></label>
-            <div class="full check">
-              <input type="checkbox" id="pushNextDay" /><span
-                >同步后推送次日课表预览</span
-              >
-            </div>
-            <div class="full check">
-              <input type="checkbox" id="alertOnFail" /><span
-                >登录失效 / 同步失败时推送提醒</span
-              >
+            <div class="full">
+              <div class="switch-list">
+                <label class="switch-row">
+                  <span class="switch-text"><b>同步后推送次日课表预览</b></span>
+                  <input type="checkbox" class="switch-input" id="pushNextDay" role="switch" aria-label="同步后推送次日课表预览" />
+                  <span class="switch-track" aria-hidden="true"></span>
+                </label>
+                <label class="switch-row">
+                  <span class="switch-text"><b>登录失效 / 同步失败时推送提醒</b></span>
+                  <input type="checkbox" class="switch-input" id="alertOnFail" role="switch" aria-label="登录失效或同步失败时推送提醒" />
+                  <span class="switch-track" aria-hidden="true"></span>
+                </label>
+              </div>
             </div>
           </div>
         </div>
@@ -5399,23 +5406,36 @@
               ><input name="push.daily_time" type="time" placeholder="22:00"
             /></label>
           </div>
-          <div class="check">
-            <input type="checkbox" id="dailyCourses" /><span>明日课表</span>
-          </div>
-          <div class="check">
-            <input type="checkbox" id="dailyEvents" /><span>明日日程与考试</span>
-          </div>
-          <div class="check">
-            <input type="checkbox" id="dailyWeather" /><span>明日天气概况</span>
+          <div class="switch-list">
+            <label class="switch-row">
+              <span class="switch-text"><b>明日课表</b></span>
+              <input type="checkbox" class="switch-input" id="dailyCourses" role="switch" aria-label="明日课表" />
+              <span class="switch-track" aria-hidden="true"></span>
+            </label>
+            <label class="switch-row">
+              <span class="switch-text"><b>明日日程与考试</b></span>
+              <input type="checkbox" class="switch-input" id="dailyEvents" role="switch" aria-label="明日日程与考试" />
+              <span class="switch-track" aria-hidden="true"></span>
+            </label>
+            <label class="switch-row">
+              <span class="switch-text"><b>明日天气概况</b></span>
+              <input type="checkbox" class="switch-input" id="dailyWeather" role="switch" aria-label="明日天气概况" />
+              <span class="switch-track" aria-hidden="true"></span>
+            </label>
           </div>
           <p class="hint">
             每天到点推送一次明天的安排（需先开启 Bark 或群机器人）。内容可自由组合，全部关闭则不推送。
           </p>
           <div class="subhead">天气与复习提醒</div>
-          <div class="check">
-            <input type="checkbox" id="weatherEnabled" /><span
-              >上课提醒里附上当堂天气</span
-            >
+          <div class="switch-list">
+            <label class="switch-row">
+              <span class="switch-text"
+                ><b>上课提醒里附当堂天气</b
+                ><small>连堂只第一节带天气</small></span
+              >
+              <input type="checkbox" class="switch-input" id="weatherEnabled" role="switch" aria-label="上课提醒里附当堂天气" />
+              <span class="switch-track" aria-hidden="true"></span>
+            </label>
           </div>
           <div class="form-grid">
             <label class="field"
@@ -5434,10 +5454,15 @@
           <p class="hint">
             天气来自 Open-Meteo（免费、无需 Key），默认青岛黄岛区。连续两节连上的课只在第一节提醒里带天气。
           </p>
-          <div class="check">
-            <input type="checkbox" id="examReviewEnabled" /><span
-              >考试前推送复习提醒</span
-            >
+          <div class="switch-list">
+            <label class="switch-row">
+              <span class="switch-text"
+                ><b>考试前推送复习提醒</b
+                ><small>早上 8 点后，同一场考试只提醒一次</small></span
+              >
+              <input type="checkbox" class="switch-input" id="examReviewEnabled" role="switch" aria-label="考试前推送复习提醒" />
+              <span class="switch-track" aria-hidden="true"></span>
+            </label>
           </div>
           <label class="field"
             ><span>提前天数</span
@@ -5450,15 +5475,21 @@
 
         <div class="card" id="settingsBark">
           <h2>推送通道</h2>
-          <div class="check">
-            <input type="checkbox" id="barkEnabled" /><span
-              >启用 Bark（iOS 推送）</span
-            >
-          </div>
-          <div class="check">
-            <input type="checkbox" id="reminderEnabled" /><span
-              >课前提醒（课程 / 日程 / 考试开始前推送）</span
-            >
+          <div class="switch-list">
+            <label class="switch-row">
+              <span class="switch-text"
+                ><b>启用 Bark</b><small>iOS 推送</small></span
+              >
+              <input type="checkbox" class="switch-input" id="barkEnabled" role="switch" aria-label="启用 Bark" />
+              <span class="switch-track" aria-hidden="true"></span>
+            </label>
+            <label class="switch-row">
+              <span class="switch-text"
+                ><b>课前提醒</b><small>课程 / 日程 / 考试开始前推送</small></span
+              >
+              <input type="checkbox" class="switch-input" id="reminderEnabled" role="switch" aria-label="课前提醒" />
+              <span class="switch-track" aria-hidden="true"></span>
+            </label>
           </div>
           <div class="form-grid">
             <label class="field"
@@ -5480,10 +5511,14 @@
             <button id="testPushBtn">测试 Bark 推送</button>
           </div>
           <div class="subhead">企业微信 / 钉钉群机器人</div>
-          <div class="check">
-            <input type="checkbox" id="wecomEnabled" /><span
-              >启用群机器人（安卓 / 微信内接收）</span
-            >
+          <div class="switch-list">
+            <label class="switch-row">
+              <span class="switch-text"
+                ><b>启用群机器人</b><small>安卓 / 微信内接收</small></span
+              >
+              <input type="checkbox" class="switch-input" id="wecomEnabled" role="switch" aria-label="启用群机器人" />
+              <span class="switch-track" aria-hidden="true"></span>
+            </label>
           </div>
           <label class="field"
             ><span>机器人 Webhook</span
@@ -5513,10 +5548,21 @@
 
         <div class="card" id="settingsAi">
           <h2>AI 助手</h2>
-          <div class="check">
-            <input type="checkbox" id="aiEnabled" /><span
-              >启用 AI 问答（OpenAI 兼容接口）</span
-            >
+          <div class="switch-list">
+            <label class="switch-row">
+              <span class="switch-text"
+                ><b>启用 AI 问答</b><small>OpenAI 兼容接口</small></span
+              >
+              <input type="checkbox" class="switch-input" id="aiEnabled" role="switch" aria-label="启用 AI 问答" />
+              <span class="switch-track" aria-hidden="true"></span>
+            </label>
+            <label class="switch-row">
+              <span class="switch-text"
+                ><b>在主页显示 AI 助手</b><small>关闭后主页只保留今日、日程、课表来源等分块</small></span
+              >
+              <input type="checkbox" class="switch-input" id="aiShowInNav" role="switch" aria-label="在主页显示 AI 助手" />
+              <span class="switch-track" aria-hidden="true"></span>
+            </label>
           </div>
           <div class="form-grid">
             <label class="field full"
@@ -6048,6 +6094,7 @@
           .filter(Boolean)
           .map((s) => `<span>${s}</span>`)
           .join("");
+        if (typeof applyAiNavVisibility === "function") applyAiNavVisibility();
       }
 
       function courseRow(c) {
@@ -8327,6 +8374,7 @@
         $("#weatherEnabled").checked = cfg.weather?.enabled !== false;
         $("#examReviewEnabled").checked = cfg.push?.exam_review_enabled !== false;
         $("#aiEnabled").checked = !!cfg.ai?.enabled;
+        $("#aiShowInNav").checked = cfg.ai?.show_in_nav !== false;
         // 载入的是服务器已保存值，不算用户改动：隐藏保存条并清除 dirty
         setSettingsDirty(false);
         if (typeof layoutSettingsColumns === "function") requestAnimationFrame(layoutSettingsColumns);
@@ -8448,6 +8496,7 @@
         cfg.push.exam_review_enabled = $("#examReviewEnabled").checked;
         cfg.ai = cfg.ai || {};
         cfg.ai.enabled = $("#aiEnabled").checked;
+        cfg.ai.show_in_nav = $("#aiShowInNav").checked;
         return cfg;
       }
       function toggleProviderFields() {
@@ -8778,6 +8827,24 @@
       if (themeMq.addEventListener) themeMq.addEventListener("change", onSystemThemeChange);
       else if (themeMq.addListener) themeMq.addListener(onSystemThemeChange);
       applyTheme(readThemeChoice());
+
+      /* ---------- AI 助手主页分块显隐 ---------- */
+      // 关闭「在主页显示 AI 助手」后，主页导航不再出现 AI 助手分块；
+      // 若当前正停在 AI 页，则自动切回「今日」，避免停在已隐藏的页面上。
+      function applyAiNavVisibility() {
+        const aiNavBtn = document.querySelector('#nav button[data-tab="ai"]');
+        const show = status && status.ai_show_in_nav !== false;
+        if (aiNavBtn) aiNavBtn.classList.toggle("hidden", !show);
+        const row = document.querySelector('#settingsHome .ios-row[data-target="settingsAi"]');
+        if (row) row.classList.toggle("hidden", !show);
+        if (!show) {
+          const saved = readSavedTab();
+          if (saved === "ai") {
+            saveTab("today");
+            switchTab("today");
+          }
+        }
+      }
 
       /* ---------- Tab 切换 ---------- */
       // 记住当前页面，刷新后停留在原 tab（按浏览器本地保存，不含任何隐私数据）
@@ -9737,6 +9804,9 @@
             }
             // 非管理员不恢复「用户管理」，并清掉无效记录；today 是默认页且已加载，无需重复切换
             if (saved === "admin" && currentUser.role !== "admin") {
+              saveTab("today");
+            } else if (saved === "ai" && status && status.ai_show_in_nav === false) {
+              // AI 分块已隐藏，不落回 AI 页
               saveTab("today");
             } else if (saved && saved !== "today") {
               switchTab(saved);

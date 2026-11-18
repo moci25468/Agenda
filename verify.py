@@ -169,6 +169,23 @@ check("考试.正方凭证识别",
           "zf_base": "x", "zf_username": "u", "zf_password": "p"}})
       and not zhengfang_configured({"provider": {"zf_base": "x"}}))
 
+# 数据源解析：配了真实凭证后，即使 type 还是默认 mock，也绝不能再返回演示数据
+from app.config import resolve_course_source as _resolve_src, DEFAULT_CONFIG as _def_cfg
+import json as _json
+check("数据源.配正方后不再回退 mock",
+      _resolve_src({**_json.loads(_json.dumps(_def_cfg)),
+                    "provider": {**_def_cfg["provider"],
+                                 "zhengfang": {"base": "https://x", "username": "u", "password": "p"}}})
+      == "zhengfang")
+check("数据源.配门户后不再回退 mock",
+      _resolve_src({**_json.loads(_json.dumps(_def_cfg)),
+                    "provider": {**_def_cfg["provider"],
+                                 "portal": {"url": "https://portal.qut.edu.cn/x",
+                                            "headers": '{"cookie": "c"}'}}})
+      == "portal")
+check("数据源.未配置任何真实来源才回退 mock",
+      _resolve_src(_json.loads(_json.dumps(_def_cfg))) == "mock")
+
 from app.providers.zhengfang import rsa_encrypt, _hidden_value, _page_message
 _rsa_n = base64.b64encode(((1 << 1023) + 0x12345).to_bytes(128, "big")).decode()
 _rsa_enc = base64.b64decode(rsa_encrypt("p@ss", _rsa_n, base64.b64encode(b"\x01\x00\x01").decode()))
@@ -1850,7 +1867,10 @@ async def http_tests(port: int):
             "enabled": False, "token": "", "allowed_origins": []}})
 
         # 考试链路：切到演示源同步，验证快照 → API → 分组字段
-        await ca.post(f"{base}/api/settings", json={"provider": {"type": "mock"}})
+        # （真实凭证会优先于 mock，必须先清空 portal/zhengfang 才能落到演示数据）
+        await ca.post(f"{base}/api/settings", json={"provider": {
+            "type": "mock", "portal": {"url": "", "headers": ""},
+            "zhengfang": {"username": "", "password": "", "cookie": ""}}})
         sr = (await ca.post(f"{base}/api/sync")).json()
         check("考试.同步带考试数据", sr.get("ok") is True
               and "考试" in sr.get("message", ""), str(sr)[:220])
