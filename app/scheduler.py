@@ -118,33 +118,18 @@ async def apply_snapshot(cfg: dict, courses: list[Course], source: str,
             parts.append("【课表变更】\n" + format_changes(cfg, changes))
         elif changes.get("first_sync"):
             parts.append(f"首次同步完成，共 {len(courses)} 门课程。")
-        # 同步后推送：优先推「今天剩余课程」（同步时刻之后还没结束的课）；
-        # 今天没课了才推「明日课表」。明日课表的定时推送由每晚 22:00 任务负责，
-        # 两者共用 reminders 表去重，同一天「明日课表」只推一次。
-        if cfg.get("push_next_day", True):
+        # 同步后推送：只推「今天剩余课程」（同步时刻之后还没结束的课）与课表变更。
+        # 明日课表/日程统一由每晚定时任务（各用户 daily_time，默认 22:00）推送。
+        # 不在这里提前推明日课表：2026-11-18 线上实测，中午同步提前推会占用
+        # next_day 去重键，导致配置了 22:30 等自定义时间的用户当晚收不到推送；
+        # 同时没有推送通道的用户也会被白占去重位。
+        if cfg.get("push_next_day", True) and _push_ready(cfg):
             today_courses = courses_on(cfg, effective, today)
             remaining = _courses_after(cfg, today_courses, now)
             if remaining:
                 parts.append(
                     f"【今日剩余课程】{WEEKDAY_CN[today.isoweekday() - 1]}\n"
                     + "\n".join(course_line(cfg, c) for c in remaining))
-            else:
-                tomorrow = today + timedelta(days=1)
-                tomorrow_s = tomorrow.isoformat()
-                if not db.reminder_sent(tomorrow_s, "next_day"):
-                    next_courses = courses_on(cfg, effective, tomorrow)
-                    if next_courses:
-                        parts.append(f"【明日课表】{tomorrow.strftime('%m月%d日')} {WEEKDAY_CN[tomorrow.isoweekday() - 1]}\n"
-                                     + "\n".join(course_line(cfg, c) for c in next_courses))
-                    else:
-                        parts.append(f"【明日课表】{tomorrow.strftime('%m月%d日')} 没有课，好好休息。")
-                    next_events = [Event.from_dict(d) for d in
-                                   db.list_events(date_from=tomorrow_s, date_to=tomorrow_s)]
-                    if next_events:
-                        parts.append("【明日日程】\n" + "\n".join(event_line(e) for e in next_events))
-                    if not has_change:
-                        title = "明日安排提醒" if next_events else "明日课表提醒"
-                    db.mark_reminder(tomorrow_s, "next_day")
         if parts:
             pushed = await push_all(cfg, title, "\n\n".join(parts))
     return {"ok": True, "message": summary, "changes": changes, "pushed": pushed}

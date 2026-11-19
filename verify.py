@@ -916,13 +916,15 @@ asyncio.run(run_reminders(now=_at("2026-11-13T07:50:00")))
 check("提醒.用户间互不串扰", not _push_calls
       and not db.reminder_sent("2026-11-13", "course:周五隔离课:1:"), str(_push_calls))
 
-# 同步后推送逻辑：今天有剩余课 → 只推今日剩余；今天没课 → 推明日课表
-# 明日课表按天去重（同步兜底推 / 每晚 22:00 定时推，同一天只推一次）
+# 同步后推送逻辑：今天有剩余课 → 推「今日剩余课程」；今天没课 → 不提前推
+# 明日课表、不占 next_day 去重键（2026-11-18 线上修复：中午同步提前推会占用
+# 去重键，导致配置了 22:30 等自定义时间用户当晚收不到定时推送）。
+# 明日课表统一由每晚定时任务按各用户 daily_time（默认 22:00）推送。
 _sync_cfg = load_config()
 _sync_cfg["push"] = {**_sync_cfg.get("push", {}), "bark_enabled": True, "bark_key": "t",
                      "push_next_day": True, "reminder_enabled": False}
 # 把第 10 节的结束时间固定到当天最晚，让「今日剩余课程」不依赖真实时钟，
-# 否则晚上跑测试时该分支永远为空，还会误标记明日课表去重导致后面连锁失败
+# 否则晚上跑测试时该分支永远为空
 _orig_section_ends = _sync_cfg.get("section_ends")
 _sync_cfg["section_ends"] = {**(_orig_section_ends or {}), "10": "23:59"}
 save_config(_sync_cfg)
@@ -931,7 +933,7 @@ db.save_snapshot([], "test")
 with db.get_conn() as conn:
     conn.execute("DELETE FROM reminders WHERE user_id = 1")
 
-# 1) 今天有剩余课（周一 day=1，用真实 today 判断）→ 只推「今日剩余课程」
+# 1) 今天有剩余课（用真实 today 判断）→ 推「今日剩余课程」
 _today = date.today()
 _today_dow = _today.isoweekday()
 _today_course = [Course("今日课", day=_today_dow, start=9, end=10,
@@ -943,35 +945,53 @@ check("同步推送.今天有课只推今日剩余",
       and "今日课" in _push_calls[0][1] and "明日课表" not in _push_calls[0][1],
       str(_push_calls))
 
-# 2) 今天没课 → 推「明日课表」
+# 2) 今天没课 → 不提前推明日课表、不占去重键（回归 2026-11-18 问题）
 _tmr_dow = (_today + timedelta(days=1)).isoweekday()
+_tmr_s = (_today + timedelta(days=1)).isoformat()
 _push_calls.clear()
 asyncio.run(_sched.apply_snapshot(_sync_cfg,
       [Course("明日课", day=_tmr_dow, start=1, end=2, weeks=list(range(1, 20)))],
       "test", push=True))
-check("同步推送.今天没课推明日课表",
-      len(_push_calls) == 1 and "明日课表" in _push_calls[0][1]
-      and "明日课" in _push_calls[0][1], str(_push_calls))
+check("同步推送.没课不提前占键",
+      len(_push_calls) == 1 and "明日课表" not in _push_calls[0][1]
+      and not db.reminder_sent(_tmr_s, "next_day"), str(_push_calls))
 
-# 3) 明日课表当天已推过 → 再次同步不重复推
+# 3) 无可用推送通道的用户：同样不推也不标记，避免白占去重位
+_nc_cfg = load_config()
+_nc_cfg["push"] = {**_nc_cfg.get("push", {}), "bark_enabled": False,
+                   "wecom_enabled": False, "push_next_day": True,
+                   "reminder_enabled": False}
+save_config(_nc_cfg)
 _push_calls.clear()
-asyncio.run(_sched.apply_snapshot(_sync_cfg,
+asyncio.run(_sched.apply_snapshot(_nc_cfg,
       [Course("明日课", day=_tmr_dow, start=1, end=2, weeks=list(range(1, 20)))],
       "test", push=True))
-check("同步推送.明日已推不重复", not _push_calls, str(_push_calls))
+check("同步推送.无通道不占去重键",
+      not _push_calls and not db.reminder_sent(_tmr_s, "next_day"), str(_push_calls))
+save_config(_sync_cfg)  # 恢复有通道配置
 
-# 4) 每晚 22:00 定时任务按天去重：已推过则不再推
-_push_calls.clear()
-asyncio.run(_sched.push_next_day_summary(now=_at(_today.isoformat() + "T22:00:00")))
-check("定时推送.明日已推则跳过", not _push_calls, str(_push_calls))
-
-# 清理去重记录，验证定时任务在「未推过」时能推
-with db.get_conn() as conn:
-    conn.execute("DELETE FROM reminders WHERE user_id = 1")
+# 4) 每晚定时任务：未推过 → 按默认 22:00 推；已推过（被标记）→ 跳过
 _push_calls.clear()
 asyncio.run(_sched.push_next_day_summary(now=_at(_today.isoformat() + "T22:00:00")))
 check("定时推送.未推则推送明日", len(_push_calls) == 1
       and "明日课表" in _push_calls[0][0], str(_push_calls))
+_push_calls.clear()
+asyncio.run(_sched.push_next_day_summary(now=_at(_today.isoformat() + "T22:00:00")))
+check("定时推送.明日已推则跳过", not _push_calls, str(_push_calls))
+
+# 5) 用户设定的推送时间（如 22:30）能命中，当晚照常推（回归 2026-11-18 问题）
+with db.get_conn() as conn:
+    conn.execute("DELETE FROM reminders WHERE user_id = 1")
+_dt_cfg = load_config()
+_dt_cfg["push"] = {**_dt_cfg.get("push", {}), "bark_enabled": True, "bark_key": "t",
+                   "push_next_day": True, "reminder_enabled": False, "daily_time": "22:30"}
+save_config(_dt_cfg)
+_push_calls.clear()
+asyncio.run(_sched.push_next_day_summary(now=_at(_today.isoformat() + "T22:30:00")))
+check("定时推送.设定时间照常推送", len(_push_calls) == 1
+      and "明日课表" in _push_calls[0][0], str(_push_calls))
+with db.get_conn() as conn:
+    conn.execute("DELETE FROM reminders WHERE user_id = 1")
 
 # 清理本段测试的去重记录，并恢复节次时间，避免影响后续
 with db.get_conn() as conn:
@@ -1156,7 +1176,7 @@ async def main():
     # 5. 手动同步（无推送通道 → skip 日志，不报错）
     r = await run_sync(push=True)
     check("手动同步成功", r["ok"], r["message"])
-    check("无通道时推送记录为 skip", any(x["channel"] == "none" for x in r["pushed"]))
+    check("无通道时同步不报错不推送", r["ok"] and not r["pushed"], str(r["pushed"]))
 
     # 6. Bark 未配置 Key 的失败路径（不发真实网络请求）
     cfg2 = load_config()
