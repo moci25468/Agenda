@@ -69,6 +69,8 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_warm_weather())
     yield
     shutdown_scheduler()
+    from . import ai as _ai
+    await _ai.aclose_http()
 
 
 app = FastAPI(title="Agenda 知序", version=get_version(), lifespan=lifespan)

@@ -13,7 +13,7 @@ import time
 import subprocess
 import socket
 from app.ai import (build_context, _request_headers, _sse_delta, SYSTEM_PROMPT,
-                    weeks_mentioned, last_room_query, room_query_context,
+                    weeks_mentioned, relative_weeks, last_room_query, room_query_context,
                     free_sections, free_sections_context, _free_spans,
                     _config_status_lines, current_section_lines,
                     now_anchor_lines, _time_stamp, _user_content, _wants_weather)
@@ -485,9 +485,9 @@ check("当前节次.提示词含现在规则",
 # 时间锚点：每轮都注入本机时间，且明确「重复问明天=同一天」
 _na_now = _dt(2026, 11, 18, 23, 58)
 _na_ctx = build_context(_fs_cfg, now=_na_now)
-check("时间锚点.上下文首行是当前时间",
-      _na_ctx.startswith("【当前时间】") and "2026-11-18" in _na_ctx.splitlines()[0],
-      _na_ctx.splitlines()[0][:80])
+check("时间锚点.上下文末段是当前时间",
+      "【当前时间】" in _na_ctx[-600:] and not _na_ctx.startswith("【当前时间】"),
+      _na_ctx[-160:])
 check("时间锚点.给出今明后天具体日期",
       all(s in _na_ctx for s in ("明天 = 2026-11-19", "后天 = 2026-11-20")),
       _na_ctx.splitlines()[0])
@@ -732,19 +732,35 @@ check("AI 上下文.本周课程可见", "本周常规课" in _ctx_weeks)
 check("AI 上下文.按周标注", f"第 {_w_next} 周" in _ctx_weeks and "下周" in _ctx_weeks)
 check("AI 上下文.已同步不误报", "课表已同步" in _ctx_weeks
       and "课表尚未同步" not in _ctx_weeks)
-check("AI 上下文.范围外有说明", "上面只展开以下周次" in _ctx_weeks)
+check("AI 上下文.范围外有说明", "只展开以下周次" in _ctx_weeks)
 check("AI 上下文.提取指定周次", weeks_mentioned("我第 20 周有什么课？") == [20],
       str(weeks_mentioned("我第 20 周有什么课？")))
 _ctx_far = build_context(cfg, extra_weeks=[20])
 check("AI 上下文.按需展开指定周", "第20周" in _ctx_far and "第 20 周" in _ctx_far,
       _ctx_far[:200])
-# 每周都上的课在 4 个周次里内容相同，应压缩成「与第 N 周完全相同」
+# 每周都上的课在默认展开的周次里若内容相同，应压缩成「与第 N 周完全相同」
+# （默认只展开本周+下周，因此至少出现 1 条去重行；显式传入更多周可产生更多）
 db.save_snapshot([
     {"name": "每周固定课", "day": 3, "start": 1, "end": 2, "room": "B101", "weeks": []},
 ], "portal")
 _ctx_dup = build_context(cfg)
-check("AI 上下文.重复周课表去重", _ctx_dup.count("与第") >= 3, _ctx_dup[:300])
+check("AI 上下文.重复周课表去重", _ctx_dup.count("与第") >= 1, _ctx_dup[:300])
 db.save_snapshot(_w_orig["courses"], _w_orig["source"])
+
+# AI 速度优化：相对周次解析 + 默认只展开本周/下周 + 时间锚定后置 + 连接池复用
+_rel = relative_weeks("下周和大下周的课", 5, 30)
+check("AI 优化.相对周次解析", _rel == [6, 7], str(_rel))
+check("AI 优化.上周解析", relative_weeks("上周考得怎样", 5, 30) == [4],
+      str(relative_weeks("上周考得怎样", 5, 30)))
+check("AI 优化.本周不重复展开", relative_weeks("本周安排", 5, 30) == [],
+      str(relative_weeks("本周安排", 5, 30)))
+_base_weeks = [ln for ln in build_context(cfg).splitlines() if ln.startswith("第 ")]
+check("AI 优化.默认只展开两周", len(_base_weeks) <= 2, str(_base_weeks))
+_opt_ctx = build_context(cfg, now=_dt(2026, 11, 18, 23, 58))
+check("AI 优化.时间锚定位于末段",
+      "【当前时间】" in _opt_ctx[-600:] and not _opt_ctx.startswith("【当前时间】"), "")
+check("AI 优化.精炼输出条款",
+      "客套话一律不写" in SYSTEM_PROMPT and "先给一句话结论" in SYSTEM_PROMPT, "")
 
 # 课前提醒：固定 now + mock 推送，验证窗口 / 去重 / 开关 / 提前量 / 用户隔离
 _orig_push = _sched.push_all

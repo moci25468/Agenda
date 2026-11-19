@@ -33,6 +33,28 @@ def weeks_mentioned(text: str) -> list[int]:
     return [int(x) for x in re.findall(r"第\s*(\d{1,2})\s*周", text or "")]
 
 
+_WEEK_WORD_MAP = (
+    ("大下下周", 3), ("下下周", 2), ("大下周", 2),
+    ("下周", 1), ("上周", -1), ("本周", 0), ("这周", 0),
+)
+_WEEK_WORD_RE = re.compile("大下下周|下下周|大下周|下周|上周|本周|这周")
+
+
+def relative_weeks(text: str, week: int, total: int) -> list[int]:
+    """把「下周 / 大下周 / 上周」这类相对说法换算成具体教学周号。
+
+    课表默认只展开本周与下周，用户问「大下周」「上周」时必须靠这里补上
+    对应周次，否则模型看不到那一周的数据。
+    """
+    out = []
+    for m in _WEEK_WORD_RE.findall(text or ""):
+        offset = dict(_WEEK_WORD_MAP).get(m)
+        w = week + offset if offset is not None else None
+        if w and w != week and 1 <= w <= total and w not in out:
+            out.append(w)
+    return out
+
+
 # 遗留：空教室已改为「周课表空格里点按钮」的纯前端交互，对话不再产出这两个标记。
 # 保留解析逻辑只为读旧历史里的 [查空教室] 记录，并避免回归测试 import 失败。
 _ROOM_MARK_RE = re.compile(r"\[(?:查空教室|空教室结果)\]\s*(\{[^\n]*\})")
@@ -227,19 +249,12 @@ def build_context(cfg: dict, extra_weeks: list[int] | None = None,
     sunday = monday + timedelta(days=6)
     total = cfg.get("total_weeks", 30) or 30
     snap = db.get_snapshot()
-    lines = now_anchor_lines(now, week) + [
-        f"本周日期范围：{monday.strftime('%Y-%m-%d')}（周一）至 {sunday.strftime('%Y-%m-%d')}（周日）；"
-        f"上周为第 {max(1, week - 1)} 周，下周为第 {min(total, week + 1)} 周。",
-        f"学校：{cfg.get('school', '青岛理工大学')}。",
-    ]
-    # 凌晨时段（00:00–05:00）提醒：避免用户熬夜时把「明天」和自然日搞混
-    if now.hour < 5:
-        lines.append(
-            f"现在是凌晨（北京时间 {now.strftime('%H:%M')}），很多人还在熬夜，"
-            f"你说的「今天」通常指 {today.strftime('%m月%d日')} 白天、「明天」可能指 "
-            f"{(today + timedelta(days=1)).strftime('%m月%d日')}，但也可能是熬夜者口中的"
-            f"「今天白天」（即 {today.strftime('%m月%d日')}）。回答涉及「今天/明天/后天」等"
-            f"相对时间时，务必先与用户确认他指的是哪个自然日，再给出课表/日程。")
+    # 前缀缓存友好排序：稳定内容（学校/节次表/课表/考试/日程/记忆/配置）在前，
+    # 每分钟都在变化的时间锚定（【当前时间】/当前节次/凌晨提醒）放在末尾。
+    # 支持 context cache 的 OpenAI 兼容服务（DashScope、DeepSeek 等）能复用
+    # 前面的稳定长前缀，prefill 更快更省；时间锚定仍在最后，模型依然
+    # 优先读到最新时间，防幻觉效果不变。
+    lines = [f"学校：{cfg.get('school', '青岛理工大学')}。"]
     section_rows = []
     for i in range(1, 13):
         start, end = section_time(cfg, i), section_time(cfg, i, end=True)
@@ -247,18 +262,13 @@ def build_context(cfg: dict, extra_weeks: list[int] | None = None,
             section_rows.append(f"{i}节 {start}-{end}")
     if section_rows:
         lines.append("节次时间表：" + "；".join(section_rows) + "。")
-    cur_section = current_section_lines(cfg, now)
-    if cur_section:
-        lines.append(cur_section)
     courses = apply_course_overrides(
         [Course.from_dict(d) for d in snap["courses"]] if snap else [],
         cfg.get("course_overrides"))
-    # 按周展开（上周 / 本周 / 下周 / 大下周），否则问「下周的课」时模型看不到任何课程数据
-    lo = max(1, week - 1)
-    hi = min(total, week + 2)
-    if hi < lo:
-        hi = lo
-    week_set = set(range(lo, hi + 1))
+    # 按需展开：默认只展开本周与下周（最高频的两周），其余周由 _prepare 根据
+    # 用户消息里的「第 N 周 / 大下周 / 上周」等说法动态补入。少注入两周课表，
+    # 输入 token 明显下降，模型 prefill（首字延迟）更快。
+    week_set = {max(1, min(total, week)), max(1, min(total, week + 1))}
     for w in (extra_weeks or []):
         if isinstance(w, int) and 1 <= w <= total:
             week_set.add(w)
@@ -317,8 +327,9 @@ def build_context(cfg: dict, extra_weeks: list[int] | None = None,
             lines.append(head)
             lines.extend(day_lines(cs))
         lines.append(
-            f"说明：上面只展开以下周次：{shown_weeks}；被问到未列出的周次时，"
-            "说明详细课表当前只提供这些周次、可到「周视图」查看，不要说课表未同步。")
+            f"说明：为控制上下文长度，课表只展开以下周次：{shown_weeks}；"
+            "被问到未列出的周次时，请用户直接说出周次（如「第 8 周」）再查，"
+            "并提示可到「周视图」查看完整课表，不要说课表未同步。")
     else:
         lines.append("课表尚未同步，暂无课程数据。")
     if snap and snap["source"] == "mock":
@@ -371,6 +382,23 @@ def build_context(cfg: dict, extra_weeks: list[int] | None = None,
 
     # 应用配置状态：让 AI 能针对性地辅导用户配置推送 / 日历订阅等
     lines.append(_config_status_lines(cfg))
+
+    # —— 易变尾部：每轮请求都变，放在最末尾才不会破坏上面的稳定前缀缓存 ——
+    lines.append(
+        f"本周日期范围：{monday.strftime('%Y-%m-%d')}（周一）至 {sunday.strftime('%Y-%m-%d')}（周日）；"
+        f"上周为第 {max(1, week - 1)} 周，下周为第 {min(total, week + 1)} 周。")
+    lines.extend(now_anchor_lines(now, week))
+    # 凌晨时段（00:00–05:00）提醒：避免用户熬夜时把「明天」和自然日搞混
+    if now.hour < 5:
+        lines.append(
+            f"现在是凌晨（北京时间 {now.strftime('%H:%M')}），很多人还在熬夜，"
+            f"你说的「今天」通常指 {today.strftime('%m月%d日')} 白天、「明天」可能指 "
+            f"{(today + timedelta(days=1)).strftime('%m月%d日')}，但也可能是熬夜者口中的"
+            f"「今天白天」（即 {today.strftime('%m月%d日')}）。回答涉及「今天/明天/后天」等"
+            f"相对时间时，务必先与用户确认他指的是哪个自然日，再给出课表/日程。")
+    cur_section = current_section_lines(cfg, now)
+    if cur_section:
+        lines.append(cur_section)
     return "\n".join(lines)
 
 
@@ -451,6 +479,7 @@ SYSTEM_PROMPT = """你是「Agenda 知序」，一个友好、简洁的校园 AI
 
 二、排版（前端按 Markdown 渲染，请严格遵守）
 - 先给一句话结论，再给细节；一般不超过 200 字，清单类可适当放宽。
+- 同一件事不要换一种说法重复；没有把握的补充说明、免责式结尾、客套话一律不写；数据本身能说清就不要解释推理过程。
 - 多条并列信息用 - 列表或 1. 有序列表，每条单独一行；三门以上的课表、考试优先用 Markdown 表格，表头简短（如 时间 | 课程 | 教室）。
 - 表格每行以 | 开头和结尾，表头下一行必须写 | --- | --- | 这样的分隔行。
 - 关键信息用 **加粗**（课程名、日期、教室号），节次时间可用行内代码突出；需要分层时用 ### 小标题。
@@ -491,6 +520,33 @@ def _request_headers(ai: dict) -> dict:
     return headers
 
 
+# 全局共享的 HTTP 连接池：避免每次对话都重新 TCP + TLS 握手（实测省 100~300ms/次）。
+# base_url / 鉴权头都不绑定在 client 上（每次请求显式传入），用户改配置无需重建连接。
+_http: httpx.AsyncClient | None = None
+
+
+def _shared_client() -> httpx.AsyncClient:
+    global _http
+    if _http is None or _http.is_closed:
+        _http = httpx.AsyncClient(
+            trust_env=False,
+            timeout=httpx.Timeout(120, connect=20),
+            limits=httpx.Limits(max_keepalive_connections=8, keepalive_expiry=60),
+        )
+    return _http
+
+
+async def aclose_http() -> None:
+    """应用关闭时释放连接池（main.py 的 lifespan 调用）。"""
+    global _http
+    if _http is not None and not _http.is_closed:
+        try:
+            await _http.aclose()
+        except Exception:  # noqa: BLE001 - 关闭失败不影响退出
+            pass
+    _http = None
+
+
 async def list_models() -> list[str]:
     """探测当前服务可用的模型（GET /models）。"""
     ai = load_config().get("ai", {})
@@ -498,8 +554,8 @@ async def list_models() -> list[str]:
     if not base_url or not ai.get("api_key"):
         raise ValueError("请先填写接口地址与 API Key")
     assert_safe_outbound_url(base_url)  # 防 SSRF
-    async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
-        r = await client.get(f"{base_url}/models", headers=_request_headers(ai))
+    r = await _shared_client().get(f"{base_url}/models",
+                                   headers=_request_headers(ai), timeout=20)
     if r.status_code != 200:
         raise ValueError(f"模型列表接口返回 {r.status_code}：{r.text[:200]}")
     try:
@@ -516,14 +572,14 @@ async def test_connection() -> dict:
     if not base_url or not ai.get("api_key"):
         raise ValueError("请先填写接口地址与 API Key")
     assert_safe_outbound_url(base_url)  # 防 SSRF
-    async with httpx.AsyncClient(timeout=45, trust_env=False) as client:
-        r = await client.post(
-            f"{base_url}/chat/completions",
-            headers=_request_headers(ai),
-            json={"model": ai.get("model") or "qwen-plus",
-                  "messages": [{"role": "user", "content": "只回复两个字：正常"}],
-                  "temperature": 0},
-        )
+    r = await _shared_client().post(
+        f"{base_url}/chat/completions",
+        headers=_request_headers(ai),
+        timeout=45,
+        json={"model": ai.get("model") or "qwen-plus",
+              "messages": [{"role": "user", "content": "只回复两个字：正常"}],
+              "temperature": 0},
+    )
     if r.status_code != 200:
         raise ValueError(f"接口返回 {r.status_code}：{r.text[:200]}")
     data = r.json()
@@ -548,18 +604,18 @@ async def chat(message: str, history: list[dict] | None = None,
                attachments: list[dict] | None = None) -> str:
     ai, base_url, messages = await _prepare(message, history, attachments)
     headers = _request_headers(ai)
-    async with httpx.AsyncClient(timeout=90, trust_env=False) as client:
-        r = await _post_with_retry(
-            client, f"{base_url}/chat/completions",
-            headers=headers,
-            payload={"model": ai.get("model", "qwen-plus"),
-                     "messages": messages, "temperature": 0.4},
-        )
-        if r.status_code != 200:
-            raise ValueError(_attach_hint(
-                f"AI 接口返回 {r.status_code}: {r.text[:200]}",
-                _image_count(attachments)))
-        data = r.json()
+    r = await _post_with_retry(
+        _shared_client(), f"{base_url}/chat/completions",
+        headers=headers,
+        payload={"model": ai.get("model", "qwen-plus"),
+                 "messages": messages, "temperature": 0.4},
+        timeout=90,
+    )
+    if r.status_code != 200:
+        raise ValueError(_attach_hint(
+            f"AI 接口返回 {r.status_code}: {r.text[:200]}",
+            _image_count(attachments)))
+    data = r.json()
     try:
         return data["choices"][0]["message"]["content"]
     except (KeyError, IndexError):
@@ -673,11 +729,14 @@ async def _prepare(message: str, history: list[dict] | None,
     ai = cfg.get("ai", {})
     base_url = (ai.get("base_url") or "").rstrip("/")
     assert_safe_outbound_url(base_url)  # 防 SSRF
-    # 用户明确问「第 N 周」时，把该周课表也展开；最近两轮里的周次用于「那第 20 周呢」这类追问
-    mentioned = weeks_mentioned(message)
-    for h in (history or [])[-2:]:
-        mentioned += weeks_mentioned(str(h.get("content", "")))
+    # 按需展开周次：显式「第 N 周」+ 相对说法（下周/大下周/上周），最近两轮
+    # 历史里的周次用于「那第 20 周呢」「那大下周呢」这类追问
     now = datetime.now(_SCHOOL_TZ) if _SCHOOL_TZ else datetime.now()
+    total = cfg.get("total_weeks", 30) or 30
+    week_now = current_week(cfg.get("semester_start", ""), now.date(), total)
+    recent = "\n".join(str(h.get("content", "")) for h in (history or [])[-2:])
+    mentioned = (weeks_mentioned(message) + relative_weeks(message, week_now, total)
+                 + weeks_mentioned(recent) + relative_weeks(recent, week_now, total))
     context = build_context(cfg, extra_weeks=mentioned, now=now)
     # 只有用户问天气时才拉天气；其他问题（如下节课、课表、日程）不碰天气接口
     if _wants_weather(message):
@@ -766,12 +825,14 @@ _RETRY_STATUS = {429, 500, 502, 503, 504}
 
 
 async def _post_with_retry(client: httpx.AsyncClient, url: str, *,
-                           headers: dict, payload: dict, attempts: int = 3) -> httpx.Response:
+                           headers: dict, payload: dict, attempts: int = 3,
+                           timeout: float | None = None) -> httpx.Response:
     """POST 带上指数退避重试，缓解 429/5xx 与瞬时连接错误。"""
     delay = 0.6
     for i in range(attempts):
         try:
-            r = await client.post(url, headers=headers, json=payload)
+            r = await client.post(url, headers=headers, json=payload,
+                                  timeout=timeout)
         except httpx.TransportError:
             if i == attempts - 1:
                 raise
@@ -812,53 +873,52 @@ async def chat_stream(message: str, history: list[dict] | None = None,
                       attachments: list[dict] | None = None):
     """逐段产出模型回复，供 SSE 转发。"""
     ai, base_url, messages = await _prepare(message, history, attachments)
-    timeout = httpx.Timeout(120, connect=20)
-    async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
-        req = client.build_request(
-            "POST", f"{base_url}/chat/completions",
-            headers=_request_headers(ai),
-            json={"model": ai.get("model", "qwen-plus"), "messages": messages,
-                  "temperature": 0.4, "stream": True},
-        )
-        # 建立连接阶段可重试（真正开始 yield 之后就不能再重试，否则会重复内容）
-        r = None
-        delay = 0.6
-        for i in range(3):
-            try:
-                r = await client.send(req, stream=True)
-            except httpx.TransportError:
-                if i == 2:
-                    raise
-                await asyncio.sleep(delay)
-                delay *= 2
-                continue
-            if r.status_code in _RETRY_STATUS and i < 2:
-                await r.aclose()
-                await asyncio.sleep(delay)
-                delay *= 2
-                continue
-            break
+    client = _shared_client()
+    req = client.build_request(
+        "POST", f"{base_url}/chat/completions",
+        headers=_request_headers(ai),
+        json={"model": ai.get("model", "qwen-plus"), "messages": messages,
+              "temperature": 0.4, "stream": True},
+    )
+    # 建立连接阶段可重试（真正开始 yield 之后就不能再重试，否则会重复内容）
+    r = None
+    delay = 0.6
+    for i in range(3):
         try:
-            if r.status_code != 200:
-                body = (await r.aread()).decode("utf-8", "replace")[:200]
-                raise ValueError(_attach_hint(
-                    f"AI 接口返回 {r.status_code}: {body}",
-                    _image_count(attachments)))
-            if "text/event-stream" not in r.headers.get("content-type", ""):
-                # 服务端忽略了 stream 参数，按普通 JSON 一次性返回
-                data = json.loads((await r.aread()).decode("utf-8", "replace"))
-                try:
-                    yield data["choices"][0]["message"]["content"]
-                except (KeyError, IndexError, TypeError):
-                    raise ValueError(
-                        f"AI 响应格式异常: {json.dumps(data, ensure_ascii=False)[:200]}")
-                return
-            async for line in r.aiter_lines():
-                err = _sse_error(line)
-                if err:
-                    raise ValueError(f"AI 上游错误：{err}")
-                chunk = _sse_delta(line)
-                if chunk:
-                    yield chunk
-        finally:
+            r = await client.send(req, stream=True)
+        except httpx.TransportError:
+            if i == 2:
+                raise
+            await asyncio.sleep(delay)
+            delay *= 2
+            continue
+        if r.status_code in _RETRY_STATUS and i < 2:
             await r.aclose()
+            await asyncio.sleep(delay)
+            delay *= 2
+            continue
+        break
+    try:
+        if r.status_code != 200:
+            body = (await r.aread()).decode("utf-8", "replace")[:200]
+            raise ValueError(_attach_hint(
+                f"AI 接口返回 {r.status_code}: {body}",
+                _image_count(attachments)))
+        if "text/event-stream" not in r.headers.get("content-type", ""):
+            # 服务端忽略了 stream 参数，按普通 JSON 一次性返回
+            data = json.loads((await r.aread()).decode("utf-8", "replace"))
+            try:
+                yield data["choices"][0]["message"]["content"]
+            except (KeyError, IndexError, TypeError):
+                raise ValueError(
+                    f"AI 响应格式异常: {json.dumps(data, ensure_ascii=False)[:200]}")
+            return
+        async for line in r.aiter_lines():
+            err = _sse_error(line)
+            if err:
+                raise ValueError(f"AI 上游错误：{err}")
+            chunk = _sse_delta(line)
+            if chunk:
+                yield chunk
+    finally:
+        await r.aclose()
