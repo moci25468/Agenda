@@ -1,0 +1,94 @@
+/* 编辑课表 */
+.sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.28);
+}
+.sheet-panel {
+  width: 100%;
+  max-width: 860px;
+  max-height: 92vh;
+  overflow-y: auto;
+  background: var(--card);
+  border-radius: 16px 16px 0 0;
+  padding: 20px;
+}
+.sheet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.sheet-head h2 {
+  font-size: 18px;
+  font-weight: 600;
+}
+.editor-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.editor-day {
+  font-size: 12px;
+  color: var(--sub);
+  margin: 16px 0 2px;
+}
+.editor-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+.editor-day + .editor-row {
+  border-top: none;
+  padding-top: 4px;
+}
+.editor-row .info {
+  min-width: 0;
+}
+.editor-row .nm {
+  font-weight: 500;
+}
+.editor-row .meta {
+  font-size: 12px;
+  color: var(--sub);
+  margin-top: 2px;
+}
+.editor-row .acts {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.editor-row .acts button {
+  padding: 3px 10px;
+  font-size: 12px;
+}
+@media (min-width: 721px) {
+  .sheet {
+    align-items: center;
+    padding: 24px;
+  }
+  .sheet-panel {
+    border-radius: var(--radius-xl);
+  }
+}
+@media (max-width: 720px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+  .msg {
+    max-width: 92%;
+  }
+  .course-time {
+    flex-basis: 76px;
+  }
+}

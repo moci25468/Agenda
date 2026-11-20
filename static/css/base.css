@@ -1,0 +1,152 @@
+/* 令牌已收敛：设计令牌唯一定义见下方「简约焕新」皮肤末尾的 :root 块 */
+:root {
+  --radius: 8px;
+}
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+body {
+  font-family:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+    "Helvetica Neue", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 20px 64px;
+}
+header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+h1 {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.header-sub {
+  color: var(--sub);
+  font-size: 13px;
+  margin-top: 2px;
+}
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.badge {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  white-space: nowrap;
+}
+.badge.real {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+button {
+  font: inherit;
+  cursor: pointer;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--text);
+  padding: 7px 16px;
+  transition: opacity 0.15s;
+}
+button:hover {
+  opacity: 0.8;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+button.small {
+  padding: 4px 12px;
+  font-size: 13px;
+}
+.statusbar {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  color: var(--sub);
+  font-size: 12px;
+  margin: 14px 0 0;
+}
+nav {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--line);
+  margin: 18px 0 20px;
+  overflow-x: auto;
+}
+nav button {
+  border: none;
+  background: none;
+  border-radius: 0;
+  padding: 10px 14px;
+  color: var(--sub);
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+nav button.active {
+  color: var(--text);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  padding: 18px;
+}
+.card + .card {
+  margin-top: 14px;
+}
+.card h2 {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.muted {
+  color: var(--sub);
+}
+/* 空状态：唯一一套组件定义，各皮肤只用 --empty-pad 调整间距 */
+.empty {
+  --empty-pad: 40px;
+  text-align: center;
+  color: var(--sub);
+  padding: var(--empty-pad) 20px;
+}
+.empty-title {
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.empty-sub {
+  margin-top: 6px;
+  color: var(--sub);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.hidden {
+  display: none !important;
+}

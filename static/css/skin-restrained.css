@@ -1,0 +1,444 @@
+/* 死皮肤（.sidebar/.main-content/.main-head/.week-mark 等，DOM 中无匹配节点）已清理；
+   仍需要的桌面规则移植到下方「简约焕新」活层的 ≥901px 媒体查询。 */
+/* 克制版：去掉模板化装饰，只保留课表工具需要的信息层级 */
+/* 克制版：去掉模板化装饰，只保留课表工具需要的信息层级 */
+body {
+  border-top: 0;
+  background: var(--bg);
+}
+.wrap {
+  display: block;
+  max-width: 1060px;
+  padding: 28px 24px 60px;
+}
+header {
+  display: flex;
+  align-items: center;
+  padding: 0 0 18px;
+  border: 0;
+}
+.brand-lockup {
+  display: block;
+}
+h1 {
+  color: var(--text);
+  font-size: 27px;
+  font-weight: 500;
+}
+.brand-cn {
+  display: inline-block;
+  margin-left: 8px;
+  color: var(--sub);
+  font-size: 10px;
+  vertical-align: 3px;
+}
+.header-sub {
+  margin-top: 5px;
+  color: var(--sub);
+  font-size: 12px;
+  font-weight: 400;
+}
+.header-right {
+  display: flex;
+  width: auto;
+  align-items: center;
+  gap: 8px;
+}
+#userBox {
+  display: inline;
+  margin: 0 4px 0 0;
+  padding: 0 12px 0 0;
+  border: 0;
+  border-right: 1px solid var(--line);
+  color: var(--sub);
+  font-size: 12px;
+}
+.statusbar {
+  margin: 0 0 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 0;
+  font-size: 11px;
+}
+nav {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: row;
+  gap: 24px;
+  margin: 0 0 22px;
+  padding: 0;
+  overflow-x: auto;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+nav button {
+  width: auto;
+  min-height: 42px;
+  padding: 9px 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--sub);
+  font-size: 13px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+nav button:hover {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text);
+}
+nav button.active {
+  border: 0;
+  border-bottom: 2px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  font-weight: 550;
+}
+.card,
+.today-card {
+  padding: 23px;
+  border-color: var(--line);
+  border-radius: var(--radius-l);
+  background: var(--card);
+  box-shadow: none;
+}
+.tomorrow-card {
+  padding: 20px 23px;
+}
+.card h2::before,
+.chat-head h2::before {
+  display: none;
+}
+.card h2 {
+  margin-bottom: 16px;
+  font-size: 16px;
+}
+.today-card .day-head,
+.day-head {
+  margin-bottom: 0;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+.section-kicker {
+  margin-bottom: 5px;
+  color: var(--sub);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+.today-card .day-head .date,
+.day-head .date {
+  font-size: 26px;
+  font-weight: 400;
+  letter-spacing: -0.025em;
+}
+.day-meta span {
+  display: block;
+}
+#todayCount {
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  color: var(--sub);
+  font-size: 11px;
+}
+.course-row {
+  gap: 22px;
+  padding: 20px 0;
+}
+.course-time {
+  flex-basis: 128px;
+}
+.course-time .range {
+  font-size: 15px;
+}
+.course-name {
+  font-size: 16px;
+}
+.empty { --empty-pad: 46px; }
+.exam-date .md {
+  font-size: 16px;
+  font-weight: 600;
+  font-family: inherit;
+  letter-spacing: 0;
+}
+.week-nav {
+  margin-bottom: 15px;
+  padding: 0;
+  border: 0;
+}
+.week-nav .label {
+  font-size: 16px;
+}
+.week-grid {
+  min-width: 940px;
+  border-radius: 9px;
+  box-shadow: none;
+}
+.mini-course,
+.mini-course.tone-0,
+.mini-course.tone-1,
+.mini-course.tone-2,
+.mini-course.tone-3,
+.mini-course.tone-4 {
+  padding: 8px 8px 8px 9px;
+  border-left: 2px solid #7E8C92;
+  border-radius: 4px;
+  background: #EBEEF0;
+  box-shadow: none;
+  transition: none;
+}
+.mini-course:hover {
+  transform: none;
+  box-shadow: none;
+}
+.mini-course .t,
+.mini-course .r {
+  color: var(--sub);
+}
+.chat-box {
+  height: 580px;
+  min-height: 0;
+  padding: 0;
+}
+.msg {
+  animation: none;
+}
+.msg.thinking {
+  animation: thinking 1.4s ease-in-out infinite;
+}
+.auth-card {
+  max-width: 400px;
+  padding: 30px;
+  border-color: var(--line);
+  border-radius: 10px;
+  box-shadow: none;
+}
+.auth-brand {
+  display: block;
+}
+.auth-title {
+  font-size: 33px;
+}
+.auth-sub {
+  margin-top: 11px;
+  padding-bottom: 18px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+.sheet-panel {
+  border-radius: 12px;
+}
+@media (max-width: 720px) {
+  .wrap {
+    padding: 20px 16px 46px;
+  }
+  header {
+    align-items: flex-start;
+  }
+  .header-right {
+    width: 100%;
+    justify-content: flex-end;
+  }
+  #userBox {
+    display: none;
+  }
+  nav {
+    gap: 21px;
+    margin-bottom: 18px;
+  }
+  .statusbar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  .card,
+  .today-card {
+    padding: 19px;
+  }
+  .tomorrow-card {
+    padding: 18px 19px;
+  }
+  .today-card .day-head .date,
+  .day-head .date {
+    font-size: 23px;
+  }
+  .course-time {
+    flex-basis: 100px;
+  }
+  .chat-box {
+    height: calc(100vh - 250px);
+    height: calc(100dvh - 250px);
+    min-height: 480px;
+  }
+}
+@media (max-width: 480px) {
+  h1 {
+    font-size: 25px;
+  }
+  .header-right {
+    gap: 6px;
+  }
+  .course-time {
+    flex-basis: 86px;
+  }
+  .course-time .range {
+    font-size: 13px;
+  }
+  .course-name {
+    font-size: 15px;
+  }
+  .auth-card {
+    padding: 26px 22px;
+  }
+}
+/* 登录页：双栏产品信息 + 克制表单 */
+.auth-screen {
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 48px 32px;
+}
+.auth-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 390px;
+  align-items: center;
+  gap: 90px;
+  width: 100%;
+  max-width: 940px;
+}
+.auth-intro {
+  padding: 8px 0;
+}
+.auth-title {
+  font-size: 50px;
+  font-weight: 500;
+  letter-spacing: -0.045em;
+}
+.auth-title span {
+  display: inline-block;
+  margin-left: 15px;
+  color: var(--sub);
+  font: 500 15px/1 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+  letter-spacing: 0.2em;
+  vertical-align: 8px;
+}
+.auth-intro-sub {
+  margin-top: 16px;
+  color: var(--sub);
+  font-size: 14px;
+}
+.auth-features {
+  max-width: 370px;
+  margin: 56px 0 0;
+  border-top: 1px solid var(--line);
+}
+.auth-features > div {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.auth-features dt {
+  color: var(--sub);
+  font-size: 11px;
+}
+.auth-features dd {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+}
+.auth-card {
+  width: 100%;
+  max-width: none;
+  padding: 31px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: none;
+}
+.auth-sub {
+  margin: 0 0 20px;
+  padding: 0 0 17px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  letter-spacing: 0.03em;
+}
+.auth-tabs {
+  display: flex;
+  gap: 20px;
+  margin: 0 0 22px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.auth-tabs button {
+  flex: 1;
+  min-height: 34px;
+  padding: 0 0 8px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--sub);
+  box-shadow: none;
+}
+.auth-tabs button:hover {
+  border-color: transparent;
+  border-bottom-color: #D5DAE0;
+  background: transparent;
+  color: var(--text);
+}
+.auth-tabs button.primary {
+  border: 0;
+  border-bottom: 2px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  box-shadow: none;
+}
+.auth-form {
+  gap: 16px;
+}
+@media (max-width: 720px) {
+  .auth-screen {
+    padding: 30px 20px;
+  }
+  .auth-layout {
+    display: block;
+    max-width: 430px;
+  }
+  .auth-intro {
+    padding: 0;
+    text-align: center;
+  }
+  .auth-title {
+    font-size: 38px;
+  }
+  .auth-title span {
+    margin-left: 10px;
+    font-size: 12px;
+    vertical-align: 5px;
+  }
+  .auth-intro-sub {
+    margin-top: 10px;
+    font-size: 12px;
+  }
+  .auth-features {
+    display: none;
+  }
+  .auth-card {
+    margin-top: 26px;
+    padding: 26px;
+  }
+}
+@media (max-width: 480px) {
+  .auth-card {
+    padding: 24px 22px;
+  }
+}

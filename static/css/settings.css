@@ -1,0 +1,77 @@
+/* 设置 */
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+}
+.form-grid .full {
+  grid-column: 1 / -1;
+}
+label.field {
+  display: block;
+  font-size: 12px;
+  color: var(--sub);
+}
+label.field > span {
+  display: block;
+  margin-bottom: 4px;
+}
+input,
+select,
+textarea {
+  font: inherit;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  outline: none;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent);
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  padding: 4px 0;
+}
+.check input {
+  width: auto;
+}
+.form-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+.hint {
+  font-size: 12px;
+  color: var(--sub);
+  margin-top: 8px;
+}
+.section-divider {
+  border-top: 1px solid var(--line);
+  margin: 16px 0;
+}
+button.danger {
+  color: var(--fail);
+  border-color: color-mix(in srgb, var(--fail) 30%, var(--card));
+}
+button.danger.solid {
+  background: var(--fail);
+  color: #fff;
+  border-color: var(--fail);
+}
+.account-grid {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 8px 12px;
+  font-size: 13px;
+}
+.account-grid .k {
+  color: var(--sub);
+}

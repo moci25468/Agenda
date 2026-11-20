@@ -1,0 +1,407 @@
+/* ==================== 冷感极简（2026-11 改版） ====================
+   Apple/Notion 式干净冷调：冷灰中性底、单一墨青强调、无衬线数字、
+   更淡的 1px 分隔线。只覆盖视觉，不动 DOM 契约；旧规则仍在上方，此处层叠胜出。 */
+
+/* —— 顶栏品牌：衬线刊名（Apple 标题层） —— */
+header h1 { font-family: var(--font-serif); font-weight: 400; font-size: 26px; letter-spacing: -0.01em; }
+header h1 .brand-cn {
+  margin-left: 6px; font-family: var(--font-mono); font-size: 12px;
+  color: var(--sub); letter-spacing: 0.34em; vertical-align: 3px;
+}
+.header-sub { font-size: 11px; letter-spacing: 0.14em; color: var(--faint); }
+
+/* —— 主导航（桌面）：细线文字 tab，选中压一道墨青 —— */
+nav {
+  gap: 2px; margin-bottom: 26px; padding: 0 2px;
+  border: 0; border-bottom: 1px solid var(--line); border-radius: 0;
+  /* 吸顶后必须挡住从下面滚过的内容：页面底色 88% + 背景模糊，
+     与移动端底部标签栏同一条配方。旧值 background: transparent 会让卡片文字
+     直接穿透导航栏——设置页快捷跳转条、周课表网格滚动时都会出现「两行文字叠在一起」。
+     color-mix 不被支持时整条声明失效，回落到更早的 background: var(--bg)（实色，同样不透视）。 */
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  box-shadow: none;
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+}
+nav button {
+  position: relative; min-height: 44px; padding: 10px 16px 13px;
+  border-radius: 0; color: var(--sub); font-size: 13.5px; letter-spacing: 0.02em;
+}
+nav button:hover { background: transparent; color: var(--text); }
+nav button.active { background: transparent; box-shadow: none; color: var(--text); font-weight: 650; }
+nav button.active::after {
+  content: ""; position: absolute; left: 16px; right: 16px; bottom: -1px;
+  height: 2px; background: var(--accent); border-radius: 1px;
+}
+
+/* —— 卡片：纯白 + 淡线，标题去装饰只靠字重层级 —— */
+.card, .today-card { border-color: var(--line); box-shadow: var(--shadow-1); }
+.card h2 { border-left: 0; padding-left: 0; font-size: 17px; font-weight: 650; letter-spacing: -0.01em; }
+.section-kicker { color: var(--accent); letter-spacing: 0.18em; }
+
+/* —— 审计日志：折叠区（默认只露最近几条，可展开） —— */
+.log-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.log-head h2 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 0;
+}
+.log-count {
+  color: var(--faint);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+button.log-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 5px 10px 5px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--sub);
+  font-size: 12px;
+  transition: color 0.16s ease, background 0.16s ease, border-color 0.16s ease, transform 0.12s ease;
+}
+button.log-toggle:hover { color: var(--text); background: var(--fill); }
+button.log-toggle:active { transform: scale(0.97); }
+.log-chevron {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.2s ease;
+}
+button.log-toggle[aria-expanded="true"] .log-chevron { transform: rotate(180deg); }
+
+.log-collapse {
+  position: relative;
+  transition: max-height 0.24s ease-out;
+}
+.log-collapse.collapsed {
+  max-height: 208px;
+  overflow: hidden;
+}
+.log-collapse.more.collapsed::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 60px;
+  background: linear-gradient(to bottom, transparent, var(--card) 88%);
+  pointer-events: none;
+}
+.log-collapse.expanded {
+  max-height: 62vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+@media (max-width: 720px) {
+  .log-head { gap: 8px; }
+  .log-collapse.collapsed { max-height: 172px; }
+  .log-collapse.expanded { max-height: 56vh; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .log-collapse { transition: none; }
+  button.log-toggle, .log-chevron { transition: none; }
+}
+
+/* —— 扫码登录：长网址不再撑破布局；窄屏只保留二维码 —— */
+.login-state {
+  display: block;
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.login-result {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: pre-line;
+}
+.qr-image {
+  display: block;
+  width: 216px;
+  height: 216px;
+  margin-top: 12px;
+  padding: 8px;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: var(--shadow-1);
+  object-fit: contain;
+  box-sizing: content-box;
+}
+@media (max-width: 720px) {
+  /* 手机上看二维码就够了：技术日志与接入地址一律不显示，避免长 URL 把页面撑宽 */
+  #browserLoginLog { display: none !important; }
+  .qr-image {
+    width: 232px;
+    height: 232px;
+    margin: 16px auto 0;
+  }
+  .login-state { font-size: 12.5px; text-align: center; margin-top: 12px; }
+  .login-result { text-align: center; }
+}
+
+/* —— 品牌标记（页头 / 登录页） —— */
+.brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.brand-mark {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  box-shadow: 0 2px 10px rgba(20, 30, 42, 0.16);
+}
+.brand-mark svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.auth-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+}
+.auth-brand .brand-mark {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.35);
+}
+html[data-theme="dark"] .brand-mark {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+}
+@media (max-width: 720px) {
+  /* 手机上登录页是居中排版，品牌标记也跟着居中 */
+  .auth-brand { align-items: center; }
+  .auth-brand .brand-mark { width: 46px; height: 46px; border-radius: 13px; }
+}
+@media (max-width: 480px) {
+  .brand-mark {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+  }
+  .brand-lockup { gap: 10px; }
+}
+
+/* —— 今日刊头：白卡顶栏 + 松绿点缀 —— */
+.today-card { padding: 0; overflow: hidden; border-radius: 14px; }
+.today-card .day-head {
+  margin: 0; padding: 30px 32px 26px; border-bottom: 0;
+  background: var(--card);
+}
+.today-card .section-kicker { color: var(--hero-gilt); letter-spacing: 0.26em; }
+.today-card .day-head .date {
+  font-family: var(--font-num); font-weight: 600; font-size: 40px;
+  color: var(--hero-text); letter-spacing: -0.01em; line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+.today-card .day-meta .muted { color: var(--hero-gilt); letter-spacing: 0.08em; }
+.today-card #todayCount { color: var(--hero-sub); }
+.today-card > #todayList { padding: 6px 32px 30px; }
+.today-card > .empty { margin: 6px 32px 30px; }
+
+/* —— 下一节课：白卡通栏 + 松绿书脊 —— */
+.next-class {
+  margin: 0; padding: 15px 32px; border: 0; border-radius: 0;
+  border-top: 1px solid var(--line); border-left: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--card); box-shadow: inset 3px 0 0 var(--accent);
+}
+.next-class:hover { background: var(--card); border-color: var(--line); }
+.next-class .nc-kicker { color: var(--accent); }
+.next-class .nc-count b { color: var(--accent); font-family: var(--font-num); font-weight: 650; }
+
+/* —— 今日课程行：冷调等宽数字时刻 —— */
+.course-time .range { font-family: var(--font-num); font-size: 16px; font-weight: 650; letter-spacing: 0.01em; font-variant-numeric: tabular-nums; }
+.course-row { border-top-color: var(--line); }
+.course-row:hover .course-name { color: var(--accent); }
+
+/* —— 明日卡：无衬线日期 —— */
+.tomorrow-card .day-head .date { font-family: var(--font-num); font-weight: 600; font-size: 30px; font-variant-numeric: tabular-nums; }
+
+/* —— 按钮：墨青主按钮 —— */
+button.primary {
+  border-radius: 8px; background: var(--accent); color: var(--accent-ink);
+  letter-spacing: 0.04em;
+}
+button.primary:hover { background: var(--accent-hover); }
+button.small { border-radius: 7px; }
+
+/* —— 徽章：冷灰方角 —— */
+.badge { border-radius: 4px; letter-spacing: 0.08em; }
+
+/* —— 考试倒计时：墨青无衬线 —— */
+.exam-countdown b { color: var(--accent); font-weight: 650; }
+.exam-countdown.urgent b { color: var(--fail); }
+
+/* —— 周课表：冷感低饱和色板（青灰/钢蓝/靛灰/冷紫灰/灰绿） —— */
+.mini-course.tone-0 { border-left-color: #4E7B74; background: #DEEAE7; }
+.mini-course.tone-1 { border-left-color: #5E7490; background: #E2E8F1; }
+.mini-course.tone-2 { border-left-color: #66689A; background: #E6E7F2; }
+.mini-course.tone-3 { border-left-color: #7D6E80; background: #ECE8EF; }
+.mini-course.tone-4 { border-left-color: #6B826F; background: #E4EDE5; }
+.week-grid { box-shadow: none; }
+
+/* —— 表单：冷灰底输入框 —— */
+input, textarea, select { background: var(--fill); border-color: var(--line-strong); border-radius: 8px; }
+input:focus, textarea:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
+
+/* —— 登录页：整页深墨青，表单浮成一纸 —— */
+.auth-screen { background: var(--bg); }
+.auth-eyebrow { color: var(--hero-gilt); letter-spacing: 0.3em; }
+.auth-title { color: var(--hero-text); font-family: var(--font-num); font-weight: 600; }
+.auth-title span { color: var(--hero-gilt); font-family: var(--font-text); letter-spacing: 0.3em; }
+.auth-intro-sub { color: var(--hero-sub); }
+.auth-features dt { color: var(--hero-gilt); }
+.auth-features dd { color: var(--hero-sub); }
+.auth-card {
+  background: var(--card); border: 0; border-radius: 14px;
+  box-shadow: 0 24px 64px rgba(8, 13, 20, 0.42);
+}
+
+/* —— 移动端 —— */
+@media (max-width: 720px) {
+  .today-card .day-head { padding: 22px 20px 18px; }
+  .today-card .day-head .date { font-size: 30px; }
+  .today-card > #todayList { padding: 4px 20px 22px; }
+  .next-class { padding: 13px 20px; }
+  #nav {
+    border-top: 1px solid var(--line-strong);
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    box-shadow: none;
+  }
+  #nav button.active {
+    background: transparent; color: var(--accent);
+    box-shadow: inset 0 2px 0 var(--accent); border-radius: 0;
+  }
+}
+
+/* 深色模式样式独立成表，由脚本按用户选择启停（跟随系统 / 浅色 / 深色） */
+:root { color-scheme: light dark; }
+/* —— v2.1 微调：视觉回归后收紧 —— */
+.wrap { max-width: 1000px; }
+.statusbar { color: var(--faint); font-size: 10.5px; letter-spacing: 0.05em; }
+.statusbar span:not(:last-child)::after { margin: 0 9px; opacity: 0.55; }
+
+/* 刊头：日期收行距，右侧信息压低 */
+.today-card .day-head .date { line-height: 1.06; letter-spacing: -0.004em; }
+.today-card .day-meta .muted { font-size: 11.5px; }
+.today-card #todayCount { font-size: 11px; letter-spacing: 0.04em; }
+
+/* 下一节课：去箭头、数字降调、禁止换行 */
+.next-class .nc-arrow { display: none; }
+.next-class .nc-count { white-space: nowrap; }
+.next-class .nc-count b { font-size: 22px; }
+.next-class .nc-count span { letter-spacing: 0.04em; }
+
+/* 今日课程行：收紧节奏 */
+.course-row { gap: 22px; padding: 18px 0; }
+.course-time .sections { color: var(--faint); }
+
+/* 周课表：冷感低饱和色，五类课一眼可分 */
+.mini-course.tone-0 { border-left-color: #4E7B74; background: #DEEAE7; }
+.mini-course.tone-1 { border-left-color: #5E7490; background: #E2E8F1; }
+.mini-course.tone-2 { border-left-color: #66689A; background: #E6E7F2; }
+.mini-course.tone-3 { border-left-color: #7D6E80; background: #ECE8EF; }
+.mini-course.tone-4 { border-left-color: #6B826F; background: #E4EDE5; }
+.mini-course .n { color: var(--text); font-weight: 650; letter-spacing: 0; }
+.mini-course .r { color: color-mix(in srgb, var(--text) 62%, transparent); }
+
+/* 今日列：墨青淡染，与彩色课块拉开 */
+.week-cell.today { background: color-mix(in srgb, var(--accent) 5%, var(--card)); }
+.week-head-cell.today { background: color-mix(in srgb, var(--accent) 9%, var(--card)); }
+.week-head-cell.today .dow, .week-head-cell.today .dnum { color: var(--accent); }
+.week-head-cell .dow { font-size: 12px; letter-spacing: 0.06em; }
+.week-head-cell .dnum { font-family: var(--font-num); font-size: 12px; }
+
+/* 表格：线更淡、行更紧、节次列等宽数字 */
+.week-grid { background: color-mix(in srgb, var(--line) 55%, var(--card)); border-radius: 10px; }
+.week-cell { min-height: 92px; padding: 6px; }
+.week-period { background: color-mix(in srgb, var(--fill) 72%, var(--card)); }
+.week-period .p { font-size: 10.5px; font-weight: 650; letter-spacing: 0.04em; }
+.week-period .t { font-family: var(--font-num); font-size: 10.5px; }
+
+/* 空格子「加日程」：默认几乎隐形，悬停才亮 */
+.week-cell .wc-free {
+  opacity: 0.3;
+  border-color: color-mix(in srgb, var(--line) 65%, transparent);
+  font-size: 10px;
+}
+.week-cell:hover .wc-free, .wc-free:hover { opacity: 1; }
+
+/* —— v2.2 修正：宽度溢出 / 状态条换行 / 课块浓度 / 表头比例 —— */
+.wrap { max-width: 1040px; }
+.week-grid { overflow: visible; min-width: 0; }
+.week-grid-scroll { overflow-x: auto; padding-bottom: 2px; }
+.statusbar {
+  white-space: nowrap; overflow-x: auto; scrollbar-width: none;
+  font-size: 10.5px; color: var(--faint);
+}
+.statusbar::-webkit-scrollbar { display: none; }
+
+.mini-course.tone-0 { border-left-color: #4E7B74; background: #DEEAE7; }
+.mini-course.tone-1 { border-left-color: #5E7490; background: #E2E8F1; }
+.mini-course.tone-2 { border-left-color: #66689A; background: #E6E7F2; }
+.mini-course.tone-3 { border-left-color: #7D6E80; background: #ECE8EF; }
+.mini-course.tone-4 { border-left-color: #6B826F; background: #E4EDE5; }
+
+.week-head-cell { padding: 11px 6px 12px; }
+.week-head-cell .dow { font-size: 11px; font-weight: 650; letter-spacing: 0.1em; }
+.week-head-cell .dnum { margin-top: 3px; font-family: var(--font-num); font-size: 13px; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
+
+/* —— v2.3：刊头星期降调 / 状态条单行 / 行内细节 —— */
+.statusbar { flex-wrap: nowrap; gap: 0; }
+.today-card .day-head .date .dow {
+  margin-left: 8px; font-family: var(--font-text); font-size: 17px; font-weight: 500;
+  letter-spacing: 0.18em; color: var(--hero-gilt); vertical-align: 7px;
+}
+.tomorrow-card .day-head .date .dow {
+  margin-left: 6px; font-family: var(--font-text); font-size: 13px; font-weight: 500;
+  letter-spacing: 0.16em; color: var(--accent); vertical-align: 4px;
+}
+.course-time .sections { margin-top: 1px; }
+.mini-course .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: 0.01em; }
+.mini-course .n {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; line-height: 1.3;
+}
+
+/* —— v2.4：窄屏课程行改为上下结构，时间不再折行 —— */
+.course-time .range { white-space: nowrap; }
+@media (max-width: 520px) {
+  .course-row { display: block; gap: 0; padding: 16px 0; }
+  .course-time { display: flex; align-items: baseline; gap: 10px; flex-basis: auto; margin-bottom: 7px; }
+  .course-time .range { font-size: 15px; }
+  .course-time .sections { margin-top: 0; }
+}
+@media (max-width: 480px) {
+  .today-card .day-head .date { font-size: 28px; }
+  .today-card .day-head .date .dow { font-size: 14px; vertical-align: 4px; letter-spacing: 0.14em; }
+  .next-class { padding: 12px 20px; }
+  nav button { font-size: 12.5px; padding: 10px 11px 12px; }
+}

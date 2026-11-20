@@ -1,0 +1,52 @@
+/* 考试 */
+.exam-group {
+  font-size: 12px;
+  color: var(--sub);
+  margin: 20px 0 2px;
+}
+.exam-group:first-child {
+  margin-top: 2px;
+}
+.exam-list .exam-row:first-child {
+  border-top: none;
+}
+.exam-row {
+  display: flex;
+  gap: 16px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+}
+.exam-row.done {
+  opacity: 0.55;
+}
+.exam-date {
+  flex: 0 0 88px;
+  font-variant-numeric: tabular-nums;
+}
+.exam-date .md {
+  font-size: 14px;
+  font-weight: 600;
+}
+.exam-date .dow {
+  font-size: 12px;
+  color: var(--sub);
+}
+.exam-main {
+  flex: 1;
+  min-width: 0;
+}
+.exam-name {
+  font-size: 15px;
+  font-weight: 600;
+}
+.exam-when {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent);
+  margin-left: 6px;
+}
+.exam-meta {
+  font-size: 13px;
+  color: var(--sub);
+  margin-top: 2px;
+}

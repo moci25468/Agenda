@@ -1,0 +1,50 @@
+/* 今日课表 */
+.day-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.day-head .date {
+  font-size: 17px;
+  font-weight: 600;
+}
+.course-row {
+  display: flex;
+  gap: 16px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+}
+.course-row:first-of-type {
+  border-top: none;
+}
+.course-time {
+  flex: 0 0 88px;
+  font-variant-numeric: tabular-nums;
+}
+.course-time .range {
+  font-size: 14px;
+  font-weight: 600;
+}
+.course-time .sections {
+  font-size: 12px;
+  color: var(--sub);
+}
+.course-main {
+  flex: 1;
+  min-width: 0;
+}
+.course-name {
+  font-size: 15px;
+  font-weight: 600;
+}
+.course-meta {
+  font-size: 13px;
+  color: var(--sub);
+  margin-top: 2px;
+}
+.course-note {
+  font-size: 12px;
+  color: var(--warn);
+  margin-top: 2px;
+}

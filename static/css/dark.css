@@ -1,0 +1,50 @@
+  /* 深色 = 同一套色相在暗处的反演（01 §2.2）：只覆写 :root 变量与个别无法变量化的规则。
+     JS 契约不变：仍由脚本 el.disabled 启停本块。 */
+  :root {
+    /* macOS 毛玻璃（stylekit macos-vibrancy）：三层深灰 + 松绿，桌面应用密度。
+       层级靠明度差而非描边；分隔线一律 1px 白色 8%~12%。 */
+    --bg: #1c1c1e;            /* deepest：窗口底与侧边栏基色 */
+    --card: #2c2c2e;          /* mid：内容区与卡片 */
+    --fill: #262628;          /* 介于 deepest 与 mid 之间的列表行底 */
+    --fill-strong: #3a3a3c;   /* light-grey：工具栏/悬浮面板/悬停 */
+    --text: rgba(255, 255, 255, 0.92);
+    --sub: rgba(255, 255, 255, 0.62);
+    --faint: rgba(255, 255, 255, 0.42);
+    --muted: rgba(255, 255, 255, 0.62);
+    --line: rgba(255, 255, 255, 0.10);
+    --line-strong: rgba(255, 255, 255, 0.16);
+    --accent: #34c79a;        /* 松绿：唯一强调色（深底提亮一档） */
+    --accent-hover: #4ad3a8;
+    --accent-soft: rgba(52, 199, 154, 0.18);
+    --accent-faint: #7fdfc0;
+    --accent-ink: #0a1f19;
+    --detection: #34c79a;
+    --cinnabar: #34c79a;
+    --cinnabar-soft: rgba(52, 199, 154, 0.18);
+    --gilt: #34c79a;
+    --hero: #2c2c2e;
+    --hero-2: #262628;
+    --hero-text: rgba(255, 255, 255, 0.92);
+    --hero-sub: rgba(255, 255, 255, 0.62);
+    --hero-gilt: #34c79a;
+    --ok: #30d158;   --ok-soft: rgba(48, 209, 88, 0.16);
+    --warn: #ff9f0a; --warn-soft: rgba(255, 159, 10, 0.16);
+    --fail: #ff453a; --fail-soft: rgba(255, 69, 58, 0.16);
+    --shadow-1: none;
+    --shadow-2: none;
+    --shadow-3: 0 20px 48px rgba(0, 0, 0, 0.5);
+  }
+  ::selection { background: color-mix(in srgb, var(--accent) 30%, var(--bg)); color: var(--text); }
+  /* 深色 primary：底 --accent，文字 --accent-ink（松绿底深字） */
+  button.primary, #syncBtn, .msg.user { color: var(--accent-ink); }
+  /* 输入框用 --fill 以区隔卡片底 */
+  input, select, textarea { background: var(--fill); }
+  /* 遮罩与中性 toast：桌面深灰同族 */
+  .sheet, .confirm-layer { background: rgba(0, 0, 0, 0.55); }
+  #toast { background: #2c2c2e; }
+  /* 课程色板深色版：在深灰底上提亮一档，蓝绿青紫土同族 */
+  .mini-course, .mini-course.tone-0 { border-left-color: #7fb0a8; background: #223330; }
+  .mini-course.tone-1 { border-left-color: #8ba0c2; background: #252d3a; }
+  .mini-course.tone-2 { border-left-color: #989cc6; background: #272a3a; }
+  .mini-course.tone-3 { border-left-color: #a89cb4; background: #2c2834; }
+  .mini-course.tone-4 { border-left-color: #8ab29b; background: #222d27; }

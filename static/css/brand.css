@@ -1,0 +1,44 @@
+/* Apple light：登录展示卡「知序」文字标记 + 品牌墨标 */
+.brand-mark .bm-base { fill: #000000; }
+html[data-theme="dark"] .brand-mark .bm-base { fill: #2e312e; }
+.line-field {
+  position: relative;
+  margin-top: 44px;
+  width: min(100%, 430px);
+  height: 288px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--card);
+  overflow: hidden;
+}
+.line-field .lf-tag,
+.line-field .lf-note {
+  position: absolute; left: 22px; right: 22px;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 400;
+  color: var(--sub);
+}
+.line-field .lf-tag { top: 18px; letter-spacing: 0.22em; }
+.line-field .lf-note { bottom: 16px; letter-spacing: 0.06em; }
+.line-field .lf-wordmark {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 18px;
+}
+.line-field .lf-wordmark span {
+  font-family: var(--font-serif);
+  font-size: 76px;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  color: var(--text);
+}
+.line-field .lf-wordmark::after {
+  content: "";
+  width: 30px; height: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+@media (max-width: 720px) {
+  .line-field { display: none; }
+}

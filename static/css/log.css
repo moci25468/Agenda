@@ -1,0 +1,42 @@
+/* 日志 */
+.log-row {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+.log-row:first-of-type {
+  border-top: none;
+}
+.log-ts {
+  flex: 0 0 132px;
+  color: var(--sub);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+.pill {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.pill.ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.pill.fail {
+  background: var(--fail-soft);
+  color: var(--fail);
+}
+.pill.skip {
+  background: var(--bg);
+  color: var(--sub);
+}
+.log-body {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
