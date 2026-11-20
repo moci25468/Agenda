@@ -4238,11 +4238,11 @@
       header h1 .brand-cn { color: var(--sub); letter-spacing: 0.02em; }
       .header-sub { font-size: 13px; letter-spacing: 0; }
       .statusbar {
-        padding: 14px 0;
-        border-top: 1px solid var(--line);
-        border-bottom: 1px solid var(--line);
-        border-radius: 0;
-        background: transparent;
+        margin: 0 0 4px;
+        padding: 11px 16px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-l);
+        background: var(--card);
         color: var(--sub);
         font-size: 12px;
         letter-spacing: 0;
@@ -4763,6 +4763,8 @@
       .settings-nav button.active, .settings-nav button.active:hover {
         background: var(--fill-strong) !important;
         color: var(--text) !important;
+        /* 字重恒定：选中仅靠背景区分，避免切换分区时文字加粗引起尺寸微跳 */
+        font-weight: 500 !important;
       }
 
       /* ================= PC（≥721px）：macOS 系统设置 ================= */
@@ -4785,6 +4787,12 @@
           flex-direction: column;
           align-items: stretch;
           gap: 3px;
+          /* 锁定导航尺寸：切换「外观/账号」等分区时高度/位置恒定，不随内容或选中态变化 */
+          box-sizing: border-box;
+          height: 228px;
+          min-height: 228px;
+          max-height: 228px;
+          flex: 0 0 228px;
           padding: 8px;
           margin: 0;
           border: 0;
@@ -4797,6 +4805,8 @@
         }
         #settingsNav button {
           flex: 0 0 auto;
+          height: 38px;
+          box-sizing: border-box;
           display: flex; align-items: center; gap: 11px;
           text-align: left;
           padding: 9px 11px;
@@ -5219,6 +5229,657 @@
       }
       html[data-theme="dark"] .next-class .nc-ring-bg { stroke: rgba(255, 255, 255, 0.14); }
       html[data-theme="dark"] .next-class .nc-track-dot { border-color: #2c2c2e; }
+
+      /* ===== PC 端：仅导航按钮移到左侧（仅 ≥1000px 生效），移动端保持顶部 ===== */
+      @media (min-width: 1000px) {
+        /* 两列：左导航 232px + 右侧主内容；header 跨整行留在顶部 */
+        #app {
+          display: grid;
+          grid-template-columns: 232px minmax(0, 1fr);
+          column-gap: 30px;
+          align-items: start;
+        }
+        /* 品牌栏保持在顶部，横跨两列，排版不变 */
+        #app > header {
+          grid-column: 1 / -1;
+          grid-row: 1;
+        }
+        /* 左侧导航：竖向排列、吸顶；跨满下方所有内容行 */
+        #app > nav {
+          grid-column: 1;
+          grid-row: 2 / span 1000;
+          position: sticky;
+          top: 16px;
+          align-self: start;
+          flex-direction: column;
+          align-items: stretch;
+          margin: 0;
+          padding: 8px;
+          border-radius: 18px;
+        }
+        #app > nav button {
+          border-radius: 12px;
+          text-align: left;
+          justify-content: flex-start;
+          padding-left: 15px;
+        }
+        /* 右侧主内容（状态栏 + 各 section） */
+        #app > .statusbar,
+        #app > section {
+          grid-column: 2;
+          min-width: 0;
+        }
+      }
+
+      /* ===== 今日/明日课程：垂直时间轴 + 进行中状态 + 点击展开详情 ===== */
+      .timeline-list .course-row {
+        position: relative;
+        padding-left: 30px;
+      }
+      /* 竖线（首末行按类修剪，避免悬空） */
+      .timeline-list .course-row::before {
+        content: "";
+        position: absolute;
+        left: 9px;
+        top: 0;
+        bottom: 0;
+        width: 2px;
+        border-radius: 2px;
+        background: var(--line);
+      }
+      .timeline-list .course-row.tl-first::before { top: 34px; }
+      .timeline-list .course-row.tl-last::before { bottom: calc(100% - 34px); }
+      /* 节点圆点 */
+      .timeline-list .course-row::after {
+        content: "";
+        position: absolute;
+        left: 5px;
+        top: 29px;
+        width: 10px;
+        height: 10px;
+        box-sizing: border-box;
+        border: 2px solid var(--line);
+        border-radius: 50%;
+        background: var(--card);
+        z-index: 1;
+        transition: border-color 0.2s ease-out, background 0.2s ease-out, box-shadow 0.2s ease-out;
+      }
+      /* 进行中：实心 + 光环；已结束：淡化 */
+      .timeline-list .course-row.is-ongoing::after {
+        border-color: var(--accent);
+        background: var(--accent);
+        box-shadow: 0 0 0 4px var(--accent-soft);
+      }
+      .timeline-list .course-row.is-ongoing .course-name { color: var(--accent); }
+      .timeline-list .course-row.is-done { opacity: 0.5; }
+      .timeline-list .course-row.is-done::after { background: var(--line); }
+      /* 下一节课卡片联动高亮 */
+      .timeline-list .course-row.is-next::after {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 4px var(--accent-soft);
+      }
+      .next-class.is-linked { border-color: var(--accent); }
+      /* 课间空档 */
+      .course-gap {
+        position: relative;
+        padding: 5px 0 5px 30px;
+      }
+      .course-gap::before {
+        content: "";
+        position: absolute;
+        left: 9px;
+        top: 0;
+        bottom: 0;
+        width: 2px;
+        border-radius: 2px;
+        background: var(--line);
+      }
+      .course-gap span {
+        display: inline-block;
+        padding: 2px 9px;
+        border: 1px dashed var(--line);
+        border-radius: 999px;
+        color: var(--sub);
+        font-family: var(--font-mono);
+        font-size: 11px;
+      }
+      /* 点击展开详情 */
+      .course-row.course-clickable { cursor: pointer; }
+      .course-name .row-chevron {
+        display: inline-block;
+        margin-left: 7px;
+        color: var(--sub);
+        font-size: 13px;
+        transition: transform 0.2s ease-out;
+      }
+      .course-row.expanded .course-name .row-chevron { transform: rotate(90deg); }
+      .course-extra {
+        margin-top: 10px;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--fill);
+      }
+      .course-extra .ce-line {
+        color: var(--sub);
+        font-size: 12px;
+        line-height: 1.7;
+      }
+      .course-extra .ce-line b { color: var(--text); font-weight: 550; }
+      .course-extra .ce-week {
+        margin-top: 8px;
+        color: var(--accent);
+        font-size: 11px;
+      }
+      /* 展开详情：锁定为父容器宽度 + 长内容强制换行，避免移动端右侧缩短/文字溢出被切 */
+      .course-extra { width: 100%; max-width: 100%; box-sizing: border-box; }
+      .course-extra .ce-line { overflow-wrap: anywhere; word-break: break-word; white-space: normal; }
+      /* 本周日程：按天分组 */
+      .day-group { margin-top: 16px; }
+      .day-group:first-child { margin-top: 0; }
+      .day-group-head {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        margin-bottom: 4px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--line);
+      }
+      .day-group-head .dg-date {
+        color: var(--text);
+        font-family: var(--font-serif);
+        font-size: 17px;
+        font-weight: 400;
+      }
+      .day-group-head .dg-dow { color: var(--sub); font-size: 12px; }
+      .day-group-head .dg-count {
+        margin-left: auto;
+        color: var(--sub);
+        font-family: var(--font-mono);
+        font-size: 11px;
+      }
+      .day-group.today .day-group-head .dg-date,
+      .day-group.today .day-group-head .dg-dow { color: var(--accent); }
+
+      /* 考试：临近 / 今天状态醒目（左侧色条 + 淡底），与今日页状态语言一致 */
+      .exam-list .exam-row.exam-soon,
+      .exam-list .exam-row.exam-today {
+        padding-left: 12px;
+        border-left: 3px solid var(--warn);
+        border-radius: 0 10px 10px 0;
+        background: color-mix(in srgb, var(--warn) 7%, transparent);
+      }
+      .exam-list .exam-row.exam-today {
+        border-left-color: var(--fail);
+        background: color-mix(in srgb, var(--fail) 8%, transparent);
+      }
+      .exam-list .exam-row.exam-soon .exam-when { color: var(--warn); }
+      .exam-list .exam-row.exam-today .exam-when { color: var(--fail); }
+      .exam-countdown.cd-cn b { font-size: 20px; }
+
+      /* 周课表：周末列弱化（保留课程可读性，主要淡化表头与空格）；今日列表头标「今天」 */
+      .week-head-cell.weekend { opacity: 0.58; }
+      .week-cell.weekend.free { opacity: 0.5; }
+      .week-head-cell.today .dow::after {
+        content: "今天";
+        margin-left: 5px;
+        padding: 1px 5px;
+        border-radius: 999px;
+        background: color-mix(in srgb, rgba(255, 255, 255, 0.22), transparent);
+        font-size: 9px;
+        font-weight: 500;
+      }
+      .day-card.weekend { opacity: 0.72; }
+
+      /* 本周概览条：课程/日程/考试数 + 最近考试倒计时 */
+      .week-overview {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(0, 1.4fr);
+        gap: 12px;
+        margin: 0 0 18px;
+        padding: 16px 18px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-l);
+        background: var(--card);
+        box-shadow: var(--shadow);
+      }
+      .week-overview:empty { display: none; }
+      .ov-cell { position: relative; padding-left: 14px; border-left: 2px solid var(--fill); }
+      .ov-cell:first-child { border-left-color: var(--accent); }
+      .ov-val { font-family: var(--font-serif); font-size: 26px; line-height: 1; }
+      .ov-val small { margin-left: 3px; color: var(--sub); font-size: 13px; }
+      .ov-label { margin-top: 5px; color: var(--sub); font-size: 12px; }
+      .ov-exam {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding-left: 14px;
+        border-left: 2px solid var(--warn);
+      }
+      .ov-exam .ov-cd { flex: 0 0 auto; text-align: center; }
+      .ov-exam .ov-cd b { display: block; color: var(--warn); font: 650 26px/1 var(--font-num, var(--font-mono)); }
+      .ov-exam .ov-cd span { display: block; margin-top: 3px; color: var(--sub); font-size: 9px; }
+      .ov-exam .ov-en { font-size: 13px; font-weight: 600; line-height: 1.5; }
+      .ov-exam .ov-em { margin-top: 4px; color: var(--sub); font-size: 11px; line-height: 1.5; }
+      html[data-theme="dark"] .ov-cell { border-left-color: #3a3a3c; }
+      html[data-theme="dark"] .ov-cell:first-child { border-left-color: var(--accent); }
+      html[data-theme="dark"] .ov-exam { border-left-color: var(--warn); }
+
+      /* 今日概览 Bento：下一节课大卡（跨 2×2）+ 统计小卡 + 明日引导 */
+      .today-bento {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-auto-rows: minmax(0, auto);
+        gap: 14px;
+        margin: 4px 0 8px;
+      }
+      .today-bento .next-class {
+        grid-column: span 2;
+        grid-row: span 2;
+        width: 100%;
+        margin: 0;
+        min-height: 172px;
+        padding: 20px 22px;
+        align-self: stretch;
+      }
+      .today-bento .next-class .nc-name { font-size: 24px; }
+      /* 空态大卡：完成徽章 + 副信息，避免 2×2 大卡留白 */
+      .today-bento .next-class .nc-done {
+        flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 6px; width: 76px; height: 76px; border-radius: 50%;
+        color: var(--accent); background: var(--accent-soft);
+      }
+      .today-bento .next-class .nc-done-check { font-size: 30px; line-height: 1; font-weight: 650; }
+      .today-bento .next-class .nc-done-label { font-size: 10px; letter-spacing: 0.08em; opacity: 0.85; }
+      html[data-theme="dark"] .today-bento .next-class .nc-done { background: rgba(52, 199, 154, 0.14); }
+      .today-bento .ov-cell {
+        min-height: 74px; display: flex; flex-direction: column; justify-content: center;
+        padding: 12px 16px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-l);
+        background: var(--card);
+      }
+      /* 覆盖周概览条继承来的左侧强调竖线，让四张小卡四边统一为圆角边框 */
+      .today-bento .ov-cell:first-child,
+      html[data-theme="dark"] .today-bento .ov-cell:first-child { border-left-color: var(--line); }
+      .today-bento .ov-sub {
+        margin-top: 3px; color: var(--faint); font-size: 10.5px; line-height: 1.35;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .today-bento .tb-tomorrow {
+        grid-column: 1 / -1;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 60px;
+        padding: 12px 16px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-l);
+        background: var(--card);
+        text-align: left;
+      }
+      .today-bento .tb-tomorrow:hover { border-color: var(--accent); background: var(--accent-soft); }
+      .tb-tomorrow .tb-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--accent); }
+      .tb-tomorrow .tb-txt { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+      .tb-tomorrow .tb-txt b { font-size: 14px; font-weight: 600; }
+      .tb-tomorrow .tb-txt span { color: var(--sub); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .tb-tomorrow .tb-arrow { margin-left: auto; color: var(--sub); font-size: 16px; }
+      html[data-theme="dark"] .today-bento .tb-tomorrow:hover { border-color: var(--accent); }
+      @media (max-width: 900px) {
+        .today-bento .next-class { grid-column: span 4; grid-row: auto; }
+      }
+      @media (max-width: 520px) {
+        /* 移动端精简：教学周与日期头的「第 N 教学周」重复，隐藏；余下小卡自适应均分一行 */
+        .today-bento { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; margin: 2px 0 6px; }
+        .today-bento .tb-week { display: none; }
+        .today-bento .ov-cell { min-height: 58px; padding: 10px 12px; }
+        .today-bento .ov-val { font-size: 22px; }
+        .today-bento .ov-sub { font-size: 10px; }
+        /* 大卡压缩：课已结束时不再占据过高空间 */
+        .today-bento .next-class {
+          grid-column: 1 / -1; grid-row: auto;
+          min-height: 0; padding: 14px 16px;
+        }
+        .today-bento .next-class .nc-name { font-size: 19px; }
+        .today-bento .next-class .nc-done { width: 52px; height: 52px; }
+        .today-bento .next-class .nc-done-check { font-size: 22px; }
+        .today-bento .next-class .nc-done-label { font-size: 9px; }
+        .today-bento .next-class .nc-ring { width: 56px; height: 56px; }
+        .today-bento .next-class .nc-ring-center b { font-size: 17px; }
+        .today-bento .tb-tomorrow { grid-column: 1 / -1; min-height: 48px; padding: 10px 14px; }
+      }
+      @media (max-width: 900px) {
+        .week-overview { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        .ov-exam { grid-column: 1 / -1; border-left-width: 2px; }
+      }
+      @media (max-width: 520px) {
+        .week-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 10px; padding: 14px; }
+        .ov-val { font-size: 23px; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .timeline-list .course-row::after,
+        .course-name .row-chevron { transition: none; }
+      }
+
+      /* ===== 课表来源页 · Apple 风格视觉增强（仅视觉，不改 DOM/交互契约） =====
+         参考 StyleKit apple-style：大量留白 / 精致圆角 / 微妙阴影 / 克制配色 + 蓝色点缀 /
+         清晰层级 / 交互反馈。全部映射到项目主题变量，深浅主题自适应。 */
+      #tab-source > .card { box-shadow: var(--shadow); }
+      #tab-source h2 { letter-spacing: -0.01em; }
+      /* 顶部引导行：图标 + 主数据源分段控件，卡片化 */
+      #tab-source .source-primary {
+        gap: 12px; padding: 14px 16px; margin-top: 16px;
+        border-radius: var(--radius-l);
+      }
+      #tab-source .source-primary .sp-label {
+        display: inline-flex; align-items: center; gap: 7px;
+        font-size: 12.5px; font-weight: 600; color: var(--text);
+      }
+      #tab-source .source-primary .sp-label::before {
+        content: ""; width: 7px; height: 7px; border-radius: 50%;
+        background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+      #tab-source .source-primary .seg {
+        padding: 3px; border-radius: 11px;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+      }
+      #tab-source .source-primary .seg button {
+        padding: 6px 14px; border-radius: 8px; font-weight: 500;
+        transition: background-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+      }
+      #tab-source .source-primary .seg button:hover:not(.active) { color: var(--text); background: var(--fill); }
+      #tab-source .source-primary .seg button.active {
+        color: var(--accent-ink, #fff);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+      }
+      /* 两张来源卡片：等高对齐、统一骨架、精致圆角 + 微妙阴影 + hover 反馈 */
+      #tab-source .source-cards { align-items: stretch; gap: 16px; margin-top: 16px; }
+      #tab-source .source-card {
+        position: relative; padding: 20px;
+        display: flex; flex-direction: column;
+        border-radius: 18px; overflow: hidden;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+        transition: box-shadow 0.22s ease, transform 0.22s ease;
+      }
+      /* 顶部品牌色条：门户=绿 / 正方=蓝，作为「一套」的统一视觉语言 */
+      #tab-source .source-card::after {
+        content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+      }
+      #sourcePortalCard::after { background: linear-gradient(90deg, #34c759, #30d158); }
+      #sourceZfCard::after { background: linear-gradient(90deg, #0071e3, #0a84ff); }
+      /* 主操作区沉底：两卡底部按钮始终对齐 */
+      #tab-source .source-card > .form-actions:last-of-type { margin-top: auto; padding-top: 14px; }
+      #tab-source .source-card:hover {
+        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.09);
+        transform: translateY(-2px);
+      }
+      html[data-theme="dark"] #tab-source .source-card { box-shadow: none; }
+      html[data-theme="dark"] #tab-source .source-card:hover {
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+      }
+      /* 卡片头：图标徽章 + 标题副标 + 状态胶囊 */
+      #tab-source .source-card-head { align-items: flex-start; gap: 11px; margin-bottom: 14px; padding-right: 2px; }
+      #tab-source .source-card-head::before {
+        content: ""; flex: 0 0 auto; order: -1;
+        width: 38px; height: 38px; border-radius: 11px;
+        display: inline-block; vertical-align: middle;
+        background-repeat: no-repeat; background-position: center; background-size: 23px 23px;
+      }
+      #sourcePortalCard .source-card-head::before {
+        background-color: var(--accent-soft);
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%2334c759' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='13' rx='2'/%3E%3Cline x1='8' y1='21' x2='16' y2='21'/%3E%3Cline x1='12' y1='17' x2='12' y2='21'/%3E%3C/svg%3E");
+      }
+      #sourceZfCard .source-card-head::before {
+        background-color: var(--accent-soft);
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%230071e3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 19.5A2.5 2.5 0 0 1 6.5 17H20'/%3E%3Cpath d='M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z'/%3E%3C/svg%3E");
+      }
+      /* 图标徽章后：标题块（主标题 + 副标）放左侧 */
+      #tab-source .source-card-head .sch-text {
+        flex: 1; min-width: 0; margin-right: auto;
+        display: flex; flex-direction: column; gap: 3px;
+      }
+      #tab-source .source-card-head .sch-text strong {
+        font-size: 16px; font-weight: 650; letter-spacing: -0.01em; line-height: 1.25;
+      }
+      #tab-source .source-card-head .sch-text small {
+        color: var(--faint); font-size: 11px; font-weight: 500; line-height: 1.3;
+      }
+      /* 状态胶囊：已配置=淡绿点，未配置=淡灰点 */
+      #tab-source .source-card-head .badge {
+        flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px;
+        padding: 4px 10px; font-size: 11px; font-weight: 600;
+        border-radius: 999px; border: 1px solid var(--line); background: var(--fill);
+      }
+      #tab-source .source-card-head .badge::before {
+        content: ""; width: 6px; height: 6px; border-radius: 50%;
+        background: var(--faint);
+      }
+      #tab-source .source-card-head .badge.real {
+        color: #1a8a4a; border-color: rgba(52, 199, 89, 0.35);
+        background: rgba(52, 199, 89, 0.10);
+      }
+      html[data-theme="dark"] #tab-source .source-card-head .badge.real { color: #34c759; }
+      #tab-source .source-card-head .badge.real::before { background: #34c759; }
+      /* 说明文字：更舒展的行高与层次 */
+      #tab-source .source-card > .hint { line-height: 1.75; }
+      #tab-source .section-divider { background: var(--line); opacity: 0.7; }
+      /* 输入框聚焦：Apple 蓝光圈 */
+      #tab-source textarea:focus, #tab-source input:focus, #tab-source select:focus {
+        outline: none; border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+      /* 主按钮：更精致的圆角与阴影，保持主题色 */
+      #tab-source .primary {
+        box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 28%, transparent);
+      }
+
+      /* ============================================================
+         今日页 · 分块卡片化（一模块一卡，卡内无直线）
+         StyleKit bento-grid。只改视觉，DOM / ID / 事件契约全部保留。
+         间距纪律：模块之间只有一个 gap，卡片内边距四边等宽，
+         所有卡片同一种圆角与阴影。深浅主题全走 var()。
+         ============================================================ */
+      #tab-today {
+        --td-gap: 14px;   /* 模块之间 / 卡片之间的唯一间距 */
+        --td-pad: 18px;   /* 每张卡片内部的四边等宽留白 */
+        --td-r: 18px;     /* 每张卡片的统一圆角 */
+      }
+      /* 今日：外层退场为透明布局容器 */
+      #tab-today > .today-card {
+        display: grid;
+        gap: var(--td-gap);
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+        overflow: visible;
+      }
+      /* 日期标题：裸标题行，不做卡、不画直线 */
+      #tab-today > .today-card > .day-head {
+        align-items: flex-end;
+        margin: 2px 0 0;
+        padding: 2px 2px 0;
+        border: 0;
+        background: transparent;
+      }
+      #tab-today > .today-card > .day-head .date {
+        font-size: clamp(30px, 5vw, 40px);
+        line-height: 1.1;
+      }
+      /* Bento 网格：与模块间距同值，不再出现第二套 12px */
+      #tab-today .today-bento { gap: var(--td-gap); margin: 0; }
+      /* 统一卡片骨架：大卡 / 小卡 / 明日引导共用同一组边框·圆角·内边距 */
+      #tab-today .today-bento .next-class,
+      #tab-today .today-bento .ov-cell,
+      #tab-today .today-bento .tb-tomorrow,
+      #tab-today .today-card > #todayList,
+      #tab-today > .tomorrow-card #tomorrowList {
+        border: 1px solid var(--line);
+        border-radius: var(--td-r);
+        background: var(--card);
+        box-shadow: var(--shadow-1);
+      }
+      /* 下一节课大卡：去掉内嵌书脊直线 */
+      #tab-today .today-bento .next-class {
+        margin: 0;
+        padding: var(--td-pad);
+        transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+      }
+      #tab-today .today-bento .next-class:hover {
+        border-color: var(--accent);
+        transform: translateY(-2px);
+      }
+      /* 统计小卡：一卡一事实 = 图标标签 + 大数 + 一行注释 */
+      #tab-today .today-bento .ov-cell {
+        min-height: 104px;
+        padding: var(--td-pad);
+        justify-content: flex-start;
+        gap: 0;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+      }
+      #tab-today .today-bento .ov-cell:hover {
+        border-color: var(--accent);
+        box-shadow: var(--shadow-2);
+        transform: translateY(-2px);
+      }
+      #tab-today .today-bento .ov-cell > .ov-val,
+      #tab-today .today-bento .ov-cell > .ov-label,
+      #tab-today .today-bento .ov-cell > .ov-sub { width: 100%; }
+      /* 卡内顺序：标签(带图标) → 大数 → 注释，纯 order 调整不改 DOM */
+      #tab-today .today-bento .ov-cell > .ov-label {
+        order: 0;
+        position: relative;
+        display: flex;
+        align-items: center;
+        min-height: 24px;
+        margin: 0 0 12px;
+        padding-left: 32px;
+        color: var(--sub);
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0;
+      }
+      /* 图标底衬：淡强调色圆角小方块，对齐参考图的图标胶囊 */
+      #tab-today .today-bento .ov-cell > .ov-label::before {
+        content: "";
+        position: absolute;
+        left: 0; top: 50%;
+        transform: translateY(-50%);
+        width: 24px; height: 24px;
+        border-radius: 8px;
+        background: var(--accent-soft);
+      }
+      /* 图标本体：mask 上色，深浅主题都跟强调色走 */
+      #tab-today .today-bento .ov-cell > .ov-label::after {
+        content: "";
+        position: absolute;
+        left: 4px; top: 50%;
+        transform: translateY(-50%);
+        width: 16px; height: 16px;
+        background: var(--accent);
+        -webkit-mask: var(--mi) center / contain no-repeat;
+        mask: var(--mi) center / contain no-repeat;
+      }
+      /* 每类卡片一枚线性图标 */
+      #tab-today .today-bento .tb-week .ov-label {
+        --mi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='17' rx='2'/%3E%3Cpath d='M8 2v4M16 2v4M3 9h18'/%3E%3C/svg%3E");
+      }
+      #tab-today .today-bento .tb-weather .ov-label {
+        --mi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='4'/%3E%3Cpath d='M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4'/%3E%3C/svg%3E");
+      }
+      #tab-today .today-bento .tb-courses .ov-label {
+        --mi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 19.5A2.5 2.5 0 0 1 6.5 17H20'/%3E%3Cpath d='M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z'/%3E%3C/svg%3E");
+      }
+      #tab-today .today-bento .tb-events .ov-label {
+        --mi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 6h11M9 12h11M9 18h11'/%3E%3Cpath d='M3 6l1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17'/%3E%3C/svg%3E");
+      }
+      #tab-today .today-bento .ov-cell > .ov-val {
+        order: 1;
+        font-family: var(--font-num);
+        font-size: 30px;
+        font-weight: 650;
+        line-height: 1;
+        letter-spacing: -0.02em;
+        font-variant-numeric: tabular-nums;
+        color: var(--text);
+      }
+      #tab-today .today-bento .ov-cell > .ov-val small {
+        margin-left: 3px;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--sub);
+      }
+      #tab-today .today-bento .ov-cell > .ov-sub {
+        order: 2;
+        margin-top: 6px;
+      }
+      /* 明日引导：整行一张卡，与模块间距同值 */
+      #tab-today .today-bento .tb-tomorrow {
+        min-height: 58px;
+        padding: var(--td-pad);
+        transition: border-color 0.2s ease;
+      }
+      #tab-today .today-bento .tb-tomorrow:hover { border-color: var(--accent); }
+      /* 课程/日程列表：各自一张卡；每节课是卡内圆角小块 */
+      #tab-today .today-card > #todayList,
+      #tab-today > .tomorrow-card #tomorrowList {
+        margin: 0;
+        padding: var(--td-pad);
+      }
+      #tab-today .timeline-list .course-row {
+        gap: 14px;
+        margin: 0 0 10px;
+        padding: 13px 14px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--fill);
+        transition: border-color 0.2s ease, background 0.2s ease;
+      }
+      #tab-today .timeline-list .course-row:last-child { margin-bottom: 0; }
+      #tab-today .timeline-list .course-row::before,
+      #tab-today .timeline-list .course-row::after { display: none; }
+      #tab-today .timeline-list .course-row:hover { border-color: var(--accent); }
+      #tab-today .timeline-list .course-row.is-ongoing {
+        border-color: var(--accent);
+        background: var(--accent-soft);
+      }
+      #tab-today .timeline-list .course-row.is-done { opacity: 0.55; }
+      #tab-today .timeline-list .course-gap { padding: 0; margin: 2px 0; }
+      #tab-today .timeline-list .course-gap::before { display: none; }
+      /* 明日：外层也退场为透明容器，标题裸行 + 内容一张卡，杜绝卡中卡 */
+      #tab-today > .tomorrow-card {
+        display: grid;
+        gap: var(--td-gap);
+        margin: var(--td-gap) 0 0;
+        padding: 0;
+        background: transparent;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+      }
+      #tab-today > .tomorrow-card > .day-head {
+        align-items: flex-end;
+        margin: 0;
+        padding: 0 2px;
+        border: 0;
+        background: transparent;
+      }
+      #tab-today .today-card > #todayList > .empty { padding: 24px 16px; }
+      @media (max-width: 520px) {
+        #tab-today { --td-gap: 12px; --td-pad: 15px; }
+        #tab-today .today-bento .ov-cell { min-height: 92px; }
+        #tab-today .today-bento .ov-cell > .ov-label { margin-bottom: 9px; }
+        #tab-today .today-bento .ov-cell > .ov-val { font-size: 26px; }
+        #tab-today > .today-card > .day-head .date { font-size: 30px; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #tab-today .today-bento .ov-cell,
+        #tab-today .today-bento .next-class { transition: none; }
+        #tab-today .today-bento .ov-cell:hover,
+        #tab-today .today-bento .next-class:hover { transform: none; }
+      }
     </style>
     <script>
       // 主题在页面渲染前尽早应用，避免浅色闪一下再变深色；设置页随后同步按钮状态
@@ -5360,8 +6021,20 @@
               <span id="todayCount"></span>
             </div>
           </div>
-          <button type="button" id="nextClassBar" class="next-class hidden" aria-label="下一节课，点击查看周课表"></button>
-          <div id="todayList"></div>
+          <!-- 今日概览 Bento：下一节课大卡 + 教学周/天气/课程/日程统计 + 明日引导 -->
+          <div class="today-bento" id="todayBento">
+            <button type="button" id="nextClassBar" class="next-class hidden" aria-label="下一节课，点击查看周课表"></button>
+            <div class="ov-cell tb-week"><div class="ov-val" id="tbWeekVal">—<small>周</small></div><div class="ov-label">当前教学周</div><div class="ov-sub" id="tbWeekSub"></div></div>
+            <div class="ov-cell tb-weather hidden" id="tbWeatherCell"><div class="ov-val" id="tbWeatherVal">—<small>℃</small></div><div class="ov-label" id="tbWeatherLabel">今日天气</div><div class="ov-sub" id="tbWeatherSub"></div></div>
+            <div class="ov-cell tb-courses"><div class="ov-val" id="tbCourseVal">0<small>门</small></div><div class="ov-label">今日课程</div><div class="ov-sub" id="tbCourseSub"></div></div>
+            <div class="ov-cell tb-events"><div class="ov-val" id="tbEventVal">0<small>项</small></div><div class="ov-label">今日日程</div><div class="ov-sub" id="tbEventSub"></div></div>
+            <button type="button" class="tb-tomorrow hidden" id="tbTomorrow">
+              <span class="tb-dot"></span>
+              <span class="tb-txt"><b id="tbTomorrowTitle">明日安排</b><span id="tbTomorrowSub"></span></span>
+              <span class="tb-arrow">›</span>
+            </button>
+          </div>
+          <div id="todayList" class="timeline-list"></div>
         </div>
         <!-- 今日无安排时展示，方便规划明日 -->
         <div class="card tomorrow-card hidden" id="tomorrowBlock">
@@ -5372,7 +6045,7 @@
             </div>
             <button class="small" id="addTomorrowEventBtn">添加明日日程</button>
           </div>
-          <div id="tomorrowList"></div>
+          <div id="tomorrowList" class="timeline-list"></div>
         </div>
         <!-- 个人日程与考试统一在「日程」页查看（本周日程 / 考试安排），今日页不再重复列 -->
       </section>
@@ -5399,6 +6072,8 @@
           <input type="date" id="weekJumpDate" />
           <button class="small" id="weekJumpGo">转到这一周</button>
         </div>
+        <!-- 本周概览：课程/日程/考试数量 + 最近考试倒计时（数据就绪后填充） -->
+        <div class="week-overview" id="weekOverview"></div>
         <div class="week-grid-scroll" id="weekGridScroll">
           <div class="week-grid" id="weekGrid"></div>
           <!-- 手机端按天分组的竖列表，替代 7 列横滚（与滑动翻周手势不再冲突） -->
@@ -5508,7 +6183,7 @@
             <!-- 门户卡片 -->
             <div class="source-card" id="sourcePortalCard">
               <div class="source-card-head">
-                <strong>融合门户</strong>
+                <span class="sch-text"><strong>融合门户</strong><small>扫码登录 · 反映调课</small></span>
                 <span class="badge" id="portalBadge">未配置</span>
               </div>
               <p class="hint">扫码登录门户，自动发现并接入课表接口，无需抓包、无需填 Cookie。门户只提供课表数据，但能反映调课后的课表。</p>
@@ -5533,7 +6208,7 @@
             <!-- 正方卡片 -->
             <div class="source-card" id="sourceZfCard">
               <div class="source-card-head">
-                <strong>正方教务（推荐 · 学号+密码）</strong>
+                <span class="sch-text"><strong>正方教务</strong><small>推荐 · 学号+密码</small></span>
                 <span class="badge" id="zfBadge">未配置</span>
               </div>
               <p class="hint">填学号+密码即可，后端自动模拟登录正方，无需 Cookie。正方提供课表与考试安排，带任课教师；课表是排课数据，不包含临时调课。</p>
@@ -6459,14 +7134,160 @@
       }
 
       function courseRow(c) {
-        return `<div class="course-row">
+        const weeks = Array.isArray(c.weeks) && c.weeks.length
+          ? (c.weeks.length > 1 ? `第 ${c.weeks[0]}–${c.weeks[c.weeks.length - 1]} 周（共 ${c.weeks.length} 周）` : `第 ${c.weeks[0]} 周`)
+          : "整学期";
+        const detail = [
+          `<b>节次</b> 第 ${c.start}–${c.end} 节`,
+          `<b>周次</b> ${esc(weeks)}`,
+          c.teacher ? `<b>教师</b> ${esc(c.teacher)}` : "",
+          c.room ? `<b>教室</b> ${esc(c.room)}` : "",
+          c.campus ? `<b>校区</b> ${esc(c.campus)}` : "",
+        ].filter(Boolean).join("　·　");
+        return `<div class="course-row course-clickable" data-name="${esc(c.name)}" data-start="${esc(c.start_time || "")}" data-end="${esc(c.end_time || "")}">
     <div class="course-time"><div class="range">${esc(c.start_time)}–${esc(c.end_time)}</div><div class="sections">第 ${c.start}–${c.end} 节</div></div>
     <div class="course-main">
-      <div class="course-name">${esc(c.name)}</div>
+      <div class="course-name">${esc(c.name)}<span class="row-chevron" aria-hidden="true">›</span></div>
       <div class="course-meta">${esc(c.room || "教室待定")}${c.teacher ? " · " + esc(c.teacher) : ""}${c.campus ? " · " + esc(c.campus) : ""}</div>
       ${c.note ? `<div class="course-note">${esc(c.note)}</div>` : ""}
+      <div class="course-extra hidden"><div class="ce-line">${detail}</div><button type="button" class="small ce-week" data-act="go-week">在周课表中查看 →</button></div>
     </div>
   </div>`;
+      }
+
+      // 把排序后的今日安排拼成时间轴 HTML：相邻安排间隔 ≥15 分钟时插入「课间休息」节点
+      function composeTimeline(items, gaps = true) {
+        const toMin = (t) => {
+          if (!t || !/^\d{1,2}:\d{2}$/.test(t)) return null;
+          const [h, m] = t.split(":").map(Number);
+          return h * 60 + m;
+        };
+        const parts = [];
+        let prevEnd = null;
+        items.forEach((it) => {
+          const startMin = toMin(it.start);
+          const endMin = toMin(it.end);
+          const gap = prevEnd !== null && startMin !== null ? startMin - prevEnd : 0;
+          if (gaps && gap >= 15) {
+            const label = gap >= 60
+              ? (prevEnd < 12 * 60 && startMin < 15 * 60 ? "午间空闲" : "空闲")
+              : "课间休息";
+            const timeText = gap >= 60
+              ? (gap % 60 === 0 ? `${gap / 60} 小时` : `${Math.floor(gap / 60)} 小时 ${gap % 60} 分`)
+              : `${gap} 分钟`;
+            parts.push(`<div class="course-gap"><span>${label} ${timeText}</span></div>`);
+          }
+          parts.push(it.html);
+          prevEnd = endMin;
+        });
+        return parts.join("");
+      }
+
+      // 给时间轴首末行打标，修剪竖线避免上下悬空
+      function markTimelineEdges(root) {
+        const rows = root.querySelectorAll(".course-row");
+        rows.forEach((r) => r.classList.remove("tl-first", "tl-last"));
+        if (rows.length) {
+          rows[0].classList.add("tl-first");
+          rows[rows.length - 1].classList.add("tl-last");
+        }
+      }
+
+      // 今日列表按当前时间标记「进行中 / 已结束」
+      function applyTodayStates() {
+        const root = $("#todayList");
+        const now = new Date();
+        const hm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+        root.querySelectorAll(".course-row[data-start]").forEach((row) => {
+          row.classList.remove("is-ongoing", "is-done");
+          const s = row.dataset.start;
+          const e = row.dataset.end;
+          if (!s || !e) return;
+          if (hm >= e) row.classList.add("is-done");
+          else if (hm >= s) row.classList.add("is-ongoing");
+        });
+        markTimelineEdges(root);
+      }
+
+      // 今日概览 Bento：教学周 / 天气 / 课程数 / 日程数 + 明日引导
+      function renderTodayBento() {
+        const wd = weekData;
+        if (!wd) return;
+        const setVal = (id, num, unit) => {
+          const el = $(id);
+          if (el) el.innerHTML = `${num}<small>${unit}</small>`;
+        };
+        const setSub = (id, text) => {
+          const el = $(id);
+          if (el) el.textContent = text || "";
+        };
+        // 教学周：显示学期进度（当前周 / 总周）
+        setVal("#tbWeekVal", wd.current_week > 0 ? wd.current_week : "—", "周");
+        const totalWeeks = status?.total_weeks || wd.total_weeks || 0;
+        setSub("#tbWeekSub", wd.current_week > 0 && totalWeeks
+          ? `共 ${totalWeeks} 周 · 已过 ${Math.round((wd.current_week / totalWeeks) * 100)}%`
+          : wd.current_week > 0 ? "学期进行中" : "假期");
+        // 今日课程 / 日程数（与 loadToday 的一级统计口径一致）
+        const courses = wd.today_courses || [];
+        const events = wd.today_events || [];
+        const exams = wd.today_exams || [];
+        setVal("#tbCourseVal", courses.length, "门");
+        setSub("#tbCourseSub", courses.length
+          ? courses.map((c) => c.start_time).filter(Boolean).sort().slice(0, 3).join(" · ") + " 开课"
+          : "今天没有课");
+        setVal("#tbEventVal", events.length + exams.length, "项");
+        const evBits = [];
+        if (events.length) evBits.push(`${events.length} 项日程`);
+        if (exams.length) evBits.push(`${exams.length} 场考试`);
+        setSub("#tbEventSub", evBits.length ? evBits.join(" · ") : "暂无安排");
+        // 天气：取当前时段的逐小时天气，未配置/未取到则隐藏该卡
+        const now = new Date();
+        const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+        const w = weatherAt(wd.today, hhmm);
+        const wCell = $("#tbWeatherCell");
+        if (wCell) {
+          if (w && w.temp != null) {
+            setVal("#tbWeatherVal", Math.round(w.temp), "℃");
+            const wl = $("#tbWeatherLabel");
+            if (wl) wl.textContent = "今日天气";
+            setSub("#tbWeatherSub", w.text || "实时天气");
+            wCell.classList.remove("hidden");
+          } else {
+            wCell.classList.add("hidden");
+            setSub("#tbWeatherSub", "");
+          }
+        }
+        // 明日引导：统计明日课程/日程/考试，突出最近一场考试
+        const tmCourses = wd.tomorrow_courses || [];
+        const tmEvents = wd.tomorrow_events || [];
+        const tmExams = wd.tomorrow_exams || [];
+        const tmTotal = tmCourses.length + tmEvents.length + tmExams.length;
+        const tmBtn = $("#tbTomorrow");
+        if (!tmBtn) return;
+        if (!tmTotal) {
+          tmBtn.classList.add("hidden");
+          return;
+        }
+        const parts = [];
+        if (tmCourses.length) parts.push(`${tmCourses.length} 门课`);
+        if (tmEvents.length) parts.push(`${tmEvents.length} 项日程`);
+        if (tmExams.length) parts.push(`${tmExams.length} 场考试`);
+        const title = $("#tbTomorrowTitle");
+        const sub = $("#tbTomorrowSub");
+        if (title) title.textContent = `明日有 ${parts.join(" · ")}`;
+        if (sub) sub.textContent = tmExams.length && tmExams[0].name ? tmExams[0].name : "点击查看完整安排";
+        tmBtn.classList.remove("hidden");
+      }
+
+      // 顶部「下一节课」与下方对应课程行联动高亮
+      function setNextHighlight(pick) {
+        const root = $("#todayList");
+        root.querySelectorAll(".course-row").forEach((r) => r.classList.remove("is-next"));
+        if (!pick) return;
+        const row = Array.from(root.querySelectorAll(".course-row[data-name]")).find(
+          (r) => r.dataset.name === pick.name && (!pick.start_time || r.dataset.start === pick.start_time),
+        );
+        if (row) row.classList.add("is-next");
       }
 
       function eventTimeText(e) {
@@ -6475,12 +7296,14 @@
         return "全天";
       }
 
-      function eventRow(e, withDate = false) {
+      function eventRow(e, withDate = false, grouped = false) {
         const time = withDate
-          ? `<div class="range">${esc(e.date.slice(5).replace("-", "/"))}</div><div class="sections">${esc(eventTimeText(e))}</div>`
+          ? grouped
+            ? `<div class="range">${esc(eventTimeText(e))}</div><div class="sections">日程</div>`
+            : `<div class="range">${esc(e.date.slice(5).replace("-", "/"))}</div><div class="sections">${esc(eventTimeText(e))}</div>`
           : `<div class="range">${esc(eventTimeText(e))}</div><div class="sections">日程</div>`;
         const meta = [e.location, e.note].filter(Boolean).map(esc).join(" · ");
-        return `<div class="course-row event-row${e.finished ? " done" : ""}" data-id="${esc(e.id)}">
+        return `<div class="course-row event-row${e.finished ? " done" : ""}" data-id="${esc(e.id)}" data-start="${esc(e.start || "")}" data-end="${esc(e.end || "")}">
     <div class="course-time">${time}</div>
     <div class="course-main">
       <div class="course-name">${esc(e.title)}${withDate ? "" : '<span class="event-tag">日程</span>'}</div>
@@ -6537,7 +7360,22 @@
         const current = courses.find((c) => c.start_time <= hm && hm < c.end_time);
         const pick = current || courses.find((c) => c.start_time > hm);
         if (!pick) {
-          bar.innerHTML = `<div class="nc-main"><div class="nc-kicker">${courses.length ? "今日课程已结束" : "今日无课"}</div><div class="nc-name">${courses.length ? "今天的课都上完了" : "今天没有课程安排"}</div></div><div class="nc-arrow">›</div>`;
+          const finished = courses.length > 0;
+          const first = finished ? courses[0] : null;
+          const last = finished ? courses[courses.length - 1] : null;
+          const span = finished && first.start_time && last.end_time
+            ? `${first.start_time}–${last.end_time}` : "";
+          const nodeCount = finished ? courses.reduce((n, c) => n + Math.max(1, (c.end || c.start || 0) - (c.start || 1) + 1), 0) : 0;
+          const sub = finished
+            ? [ `${courses.length} 门课`, span && `首末课 ${span}`, nodeCount && `共 ${nodeCount} 节` ].filter(Boolean).join(" · ")
+            : "好好休息，或添加一条日程";
+          bar.innerHTML = `<div class="nc-main">
+        <div class="nc-kicker">${finished ? "今日课程已结束" : "今日无课"}</div>
+        <div class="nc-name">${finished ? "今天的课都上完了" : "今天没有课程安排"}</div>
+        <div class="nc-meta">${esc(sub)}</div>
+      </div>
+      <div class="nc-done" aria-hidden="true"><span class="nc-done-check">✓</span><span class="nc-done-label">已完成</span></div>
+      <div class="nc-arrow">›</div>`;
         } else {
           const left = Math.max(0, (current ? toMin(pick.end_time) : toMin(pick.start_time)) - nowMin);
           const meta = [pick.room || "教室待定", pick.campus || ""].filter(Boolean).join(" · ");
@@ -6569,6 +7407,9 @@
       </div>`;
         }
         bar.classList.remove("hidden");
+        // 定时刷新时同步下方时间轴状态与联动高亮
+        applyTodayStates();
+        setNextHighlight(pick);
       }
 
       async function loadToday() {
@@ -6588,9 +7429,9 @@
         const exams = weekData.today_exams || [];
         // 课程、日程与当天考试按开始时间混排；全天安排排最前
         const items = [
-          ...events.map((e) => ({ sort: e.start || "00:00", html: eventRow(e) })),
-          ...exams.map((e) => ({ sort: e.start || "00:00", html: agendaExamRow(e) })),
-          ...courses.map((c) => ({ sort: c.start_time || "99:99", html: courseRow(c) })),
+          ...events.map((e) => ({ sort: e.start || "00:00", start: e.start, end: e.end, html: eventRow(e) })),
+          ...exams.map((e) => ({ sort: e.start || "00:00", start: e.start, end: e.end, html: agendaExamRow(e) })),
+          ...courses.map((c) => ({ sort: c.start_time || "99:99", start: c.start_time, end: c.end_time, html: courseRow(c) })),
         ].sort((a, b) => a.sort.localeCompare(b.sort));
         const countText = [
           courses.length ? `${courses.length} 门课程` : "",
@@ -6603,7 +7444,8 @@
           (weekData.tomorrow_events || []).length +
           (weekData.tomorrow_exams || []).length > 0;
         if (items.length) {
-          $("#todayList").innerHTML = items.map((x) => x.html).join("");
+          $("#todayList").innerHTML = composeTimeline(items);
+          applyTodayStates();
         } else {
           $("#todayList").innerHTML =
             `<div class="empty"><div class="empty-title">今天没有课程和日程</div><div class="empty-sub">可以安心安排自己的时间；要提前规划，可在下方「明日安排」里添加日程。</div></div>`;
@@ -6615,6 +7457,7 @@
         // 今日页同时承载个人日程与未考完的考试
         await loadEvents().catch(() => {});
         renderNextClass();
+        renderTodayBento();
       }
 
       // 今日无安排时，在下方展示「明日安排」模块，方便提前规划
@@ -6626,15 +7469,19 @@
         const d = new Date(weekData.tomorrow + "T00:00:00");
         const dow = WEEKDAY[d.getDay() === 0 ? 6 : d.getDay() - 1];
         const items = [
-          ...tmEvents.map((e) => ({ sort: e.start || "00:00", html: eventRow(e) })),
-          ...tmExams.map((e) => ({ sort: e.start || "00:00", html: agendaExamRow(e) })),
-          ...tmCourses.map((c) => ({ sort: c.start_time || "99:99", html: courseRow(c) })),
+          ...tmEvents.map((e) => ({ sort: e.start || "00:00", start: e.start, end: e.end, html: eventRow(e) })),
+          ...tmExams.map((e) => ({ sort: e.start || "00:00", start: e.start, end: e.end, html: agendaExamRow(e) })),
+          ...tmCourses.map((c) => ({ sort: c.start_time || "99:99", start: c.start_time, end: c.end_time, html: courseRow(c) })),
         ].sort((a, b) => a.sort.localeCompare(b.sort));
         $("#tomorrowDate").innerHTML =
           `${d.getMonth() + 1} 月 ${d.getDate()} 日 <span class="dow">${dow}</span>`;
-        $("#tomorrowList").innerHTML = items.length
-          ? items.map((x) => x.html).join("")
-          : `<div class="empty-sub center">明天暂时没有课程和日程，点击下方按钮提前安排。</div>`;
+        if (items.length) {
+          const list = $("#tomorrowList");
+          list.innerHTML = composeTimeline(items);
+          markTimelineEdges(list);
+        } else {
+          $("#tomorrowList").innerHTML = `<div class="empty-sub center">明天暂时没有课程和日程，点击下方按钮提前安排。</div>`;
+        }
         block.classList.remove("hidden");
       }
 
@@ -6687,10 +7534,77 @@
             `${a.date} ${a.start || "00:00"}`.localeCompare(
               `${b.date} ${b.start || "00:00"}`));
         $("#weekEventSub").textContent = list.length ? `${list.length} 项日程` : "";
-        box.innerHTML = list.length
-          ? list.map((x) => eventRow(x, true)).join("")
-          : `<div class="empty"><div class="empty-title">这一周还没有个人日程</div><div class="empty-sub">点没课时段里的「加日程」，或用右上角「添加日程」快速安排本周任务。</div></div>`;
+        if (list.length) {
+          // 按日期分组，每天一个小标题 + 一条时间轴（与今日页风格统一）
+          const byDay = new Map();
+          list.forEach((x) => {
+            if (!byDay.has(x.date)) byDay.set(x.date, []);
+            byDay.get(x.date).push(x);
+          });
+          const parts = [];
+          byDay.forEach((dayList, iso) => {
+            const d = new Date(iso + "T00:00:00");
+            const md = `${d.getMonth() + 1}/${d.getDate()}`;
+            const dow = WEEKDAY[d.getDay() === 0 ? 6 : d.getDay() - 1];
+            const isToday = iso === weekData?.today;
+            const items = dayList.map((x) => ({
+              sort: x.start || "00:00",
+              start: x.start,
+              end: x.end,
+              html: eventRow(x, true, true),
+            }));
+            const dayBox = document.createElement("div");
+            dayBox.innerHTML = composeTimeline(items, false);
+            markTimelineEdges(dayBox);
+            parts.push(
+              `<div class="day-group${isToday ? " today" : ""}"><div class="day-group-head"><span class="dg-date">${md}</span><span class="dg-dow">${dow}${isToday ? " · 今天" : ""}</span><span class="dg-count">${dayList.length} 项</span></div><div class="timeline-list">${dayBox.innerHTML}</div></div>`,
+            );
+          });
+          box.innerHTML = parts.join("");
+        } else {
+          box.innerHTML = `<div class="empty"><div class="empty-title">这一周还没有个人日程</div><div class="empty-sub">点没课时段里的「加日程」，或用右上角「添加日程」快速安排本周任务。</div></div>`;
+        }
+        renderWeekOverview();
       }
+      // 本周概览：课程 / 日程 / 考试数量 + 最近一场考试倒计时
+      // 三处数据（weekRender / eventsCache / examData）就绪时各自刷新，取已缓存的并集
+      function renderWeekOverview() {
+        const box = $("#weekOverview");
+        if (!box) return;
+        const wr = weekRender;
+        if (!wr || !Array.isArray(wr.dates) || !wr.dates.length) return;
+        const inWeek = new Set(wr.dates);
+        const courseCount = Array.isArray(wr.courses) ? wr.courses.length : 0;
+        const eventCount = (eventsCache || []).filter((e) => e.date && inWeek.has(e.date)).length;
+        const allExams = examData?.exams || [];
+        const weekExams = allExams.filter((e) => e.date && inWeek.has(e.date));
+        const upcoming = (examData?.upcoming || []).filter((e) => !e.finished);
+        const next = upcoming.length ? upcoming[0] : null;
+        let examHtml = "";
+        if (next && examData?.today) {
+          const days = Math.round(
+            (new Date(next.date + "T00:00:00") - new Date(examData.today + "T00:00:00")) / 86400000,
+          );
+          if (days >= 0) {
+            const md = next.date.slice(5).replace("-", "/");
+            const time = next.start ? `${next.start}–${next.end || ""}` : (next.display_time || next.time || "");
+            const meta = [md + (time ? " " + time : ""), next.room || "考场待定"].filter(Boolean).join(" · ");
+            const cdLabel = days === 0 ? "今天" : days === 1 ? "明天" : "天后";
+            const cdNum = days === 0 ? "今" : days === 1 ? "明" : days;
+            examHtml = `<div class="ov-exam">
+              <div class="ov-cd"><b>${cdNum}</b><span>${cdLabel}${days > 1 ? "考试" : ""}</span></div>
+              <div><div class="ov-en">${esc(next.name || "考试")}</div><div class="ov-em">${esc(meta)}</div></div>
+            </div>`;
+          }
+        }
+        box.innerHTML =
+          `<div class="ov-cell"><div class="ov-val">${courseCount}<small>节</small></div><div class="ov-label">本周课程</div></div>` +
+          `<div class="ov-cell"><div class="ov-val">${eventCount}<small>项</small></div><div class="ov-label">本周日程</div></div>` +
+          `<div class="ov-cell"><div class="ov-val">${weekExams.length}<small>场</small></div><div class="ov-label">本周考试</div></div>` +
+          `<div class="ov-cell"><div class="ov-val">${upcoming.length}<small>场</small></div><div class="ov-label">待考</div></div>` +
+          examHtml;
+      }
+
       let eventsCache = [];
       async function loadEvents() {
         // 今日页已不再单列日程卡片；这里只维护缓存，供「日程」页的本周日程列表渲染
@@ -6828,8 +7742,9 @@
         } finally {
           weatherLoading = false;
         }
-        // 天气比课表晚到时补画一次当前周
+        // 天气比课表晚到时补画一次当前周与今日概览
         if (weekRender && viewWeek === weekRender.current_week) renderWeek(weekRender);
+        if (weekData) renderTodayBento();
       }
 
       // 切回页面时，如果天气已过 30 分钟就换一次（手机上常见长时间驻留后台）
@@ -6908,12 +7823,12 @@
         <button type="button" class="wc-free" data-wc-rooms data-date="${iso}" data-start="${b.s}" data-end="${b.e}" title="这个时段没课，查空教室自习">查空教室<span>⌕</span></button>
         <button type="button" class="wc-free wc-event" data-wc-event data-date="${iso}" data-start="${b.s}" data-end="${b.e}" title="给这个空闲时段添加一条日程">加日程<span>＋</span></button>
       </div>`;
-          return `<div class="week-cell${list.length ? "" : " free"}${isToday ? " today" : ""}">${content}</div>`;
+          return `<div class="week-cell${list.length ? "" : " free"}${isToday ? " today" : ""}${day >= 6 ? " weekend" : ""}">${content}</div>`;
         };
         const heads = data.dates
           .map((iso, i) => {
             const d = new Date(iso + "T00:00:00");
-            return `<div class="week-head-cell${iso === data.today ? " today" : ""}">
+            return `<div class="week-head-cell${iso === data.today ? " today" : ""}${i >= 5 ? " weekend" : ""}">
         <div class="dow">${WEEKDAY[i]}</div><div class="dnum">${d.getMonth() + 1}/${d.getDate()}</div>
       </div>`;
           })
@@ -6941,7 +7856,7 @@
         ${cell}
       </div>`;
           }).join("");
-          return `<div class="day-card${iso === data.today ? " today" : ""}" data-day="${iso}">
+          return `<div class="day-card${iso === data.today ? " today" : ""}${i >= 5 ? " weekend" : ""}" data-day="${iso}">
         <div class="day-card-head"><span class="day-name">${WEEKDAY[i]}</span>
           <span class="day-date">${d.getMonth() + 1}/${d.getDate()}</span>
           ${iso === data.today ? '<span class="day-today">今天</span>' : ""}</div>
@@ -6951,6 +7866,7 @@
         const daysBox = $("#weekDays");
         if (daysBox) daysBox.innerHTML = daysHtml;
         renderWeekEvents();
+        renderWeekOverview();
       }
 
       let weekLoadSeq = 0;
@@ -7686,17 +8602,27 @@
         const dow = WEEKDAY[d.getDay() === 0 ? 6 : d.getDay() - 1];
         let when = "";
         let countdown = "";
+        let stateClass = "";
         if (!e.finished && examData?.today) {
           const days = Math.round(
             (new Date(e.date + "T00:00:00") -
               new Date(examData.today + "T00:00:00")) /
               86400000,
           );
-          if (days === 0) when = "今天";
-          else if (days === 1) when = "明天";
-          else if (days > 1) {
+          const cd = (num, label, urgent) =>
+            `<div class="exam-countdown${urgent ? " urgent" : ""}${/[\u4e00-\u9fa5]/.test(String(num)) ? " cd-cn" : ""}"><b>${num}</b><span>${label}</span></div>`;
+          if (days === 0) {
+            when = "今天";
+            stateClass = " exam-today";
+            countdown = cd("今", "今天考试", true);
+          } else if (days === 1) {
+            when = "明天";
+            stateClass = " exam-soon";
+            countdown = cd("明", "明天考试", true);
+          } else if (days > 1) {
             when = `${days} 天后`;
-            countdown = `<div class="exam-countdown${days <= 3 ? " urgent" : ""}"><b>${days}</b><span>天后考试</span></div>`;
+            stateClass = days <= 3 ? " exam-soon" : "";
+            countdown = cd(days, "天后考试", days <= 3);
           }
         }
         const time =
@@ -7706,7 +8632,7 @@
           .map(esc)
           .join(" · ");
         const extra = [e.campus, e.note].filter(Boolean).map(esc).join(" · ");
-        return `<div class="exam-row${e.finished ? " done" : ""}">
+        return `<div class="exam-row${e.finished ? " done" : ""}${stateClass}">
     <div class="exam-date"><div class="md">${md}</div><div class="dow">${dow}</div></div>
     <div class="exam-main">
       <div class="exam-name">${esc(e.name)}${when ? `<span class="exam-when">${when}</span>` : ""}</div>
@@ -7732,6 +8658,7 @@
           $("#examHint").textContent = examData.supported
             ? "考试数据来自正方教务，随每次同步更新；点「编辑考试」可手动添加或调整，临时调考以教务系统为准。"
             : "";
+          renderWeekOverview();
           return;
         }
         sub.textContent = [
@@ -7750,6 +8677,7 @@
         $("#examHint").textContent = examData.is_demo
           ? "当前为演示考试数据，接入正方教务后自动替换；点「编辑考试」可手动添加或调整。"
           : "考试数据来自正方教务，随每次同步更新；点「编辑考试」可手动添加或调整，临时调考以教务系统为准。";
+        renderWeekOverview();
       }
 
       /* ---------- AI ---------- */
@@ -9519,6 +10447,31 @@
         loadWeek(Math.max(weekRender?.current_week || status?.week || 1, 1));
       });
       $("#nextClassBar").addEventListener("click", () => switchTab("week"));
+      $("#tbTomorrow").addEventListener("click", () => {
+        const block = $("#tomorrowBlock");
+        if (!block || block.classList.contains("hidden")) return;
+        block.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+      // 时间轴课程行：点击展开/收起详情；点「在周课表中查看」直达周视图
+      function bindTimelineClicks(listSel) {
+        $(listSel).addEventListener("click", (e) => {
+          const goWeek = e.target.closest('button[data-act="go-week"]');
+          if (goWeek) {
+            e.stopPropagation();
+            switchTab("week");
+            return;
+          }
+          const row = e.target.closest(".course-row.course-clickable");
+          if (!row) return;
+          const extra = row.querySelector(".course-extra");
+          if (!extra) return;
+          const willOpen = extra.classList.contains("hidden");
+          extra.classList.toggle("hidden", !willOpen);
+          row.classList.toggle("expanded", willOpen);
+        });
+      }
+      bindTimelineClicks("#todayList");
+      bindTimelineClicks("#tomorrowList");
       setInterval(() => {
         // 页面不可见时不做无意义的重建（移动端长期驻留后台的省电优化）
         if (document.hidden) return;
