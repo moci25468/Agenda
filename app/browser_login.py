@@ -50,7 +50,9 @@ _SKIP_HEADERS = {
     "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform", "upgrade-insecure-requests",
 }
 
-_lock = threading.Lock()
+# 必须可重入：start() 在持锁块内会调用 _set()（内部再次加锁），
+# 普通 Lock 会自我死锁（2026-11-19 线上事故：点击一键扫码登录把事件循环卡死，全站无响应）
+_lock = threading.RLock()
 _stop_event: threading.Event | None = None
 _force_event = threading.Event()   # 用户点「我已登录，立即抓取」时置位
 _thread: threading.Thread | None = None

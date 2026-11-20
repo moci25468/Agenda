@@ -20,7 +20,7 @@ from app.ai import (build_context, _request_headers, _sse_delta, SYSTEM_PROMPT,
 from app.providers.httpjson import courses_from_payload
 from app.browser_login import (
     build_candidate, pick_best, _headers_for_config, _parse_body, _public_candidates,
-    get_status, _mask_url,
+    get_status, _mask_url, _lock as _bl_lock,
 )
 from app.curl_import import analyze_payload, diagnose_url, parse_payload_text
 from app.providers.httpjson import check_auth_expired, PortalProvider, _to_day
@@ -1396,6 +1396,10 @@ check("一键登录.状态不泄露 Cookie", "SESSION" not in str(_public_candid
 masked = _mask_url("https://portal.qut.edu.cn/api/kb?token=abc123&week=9")
 check("一键登录.URL 票据脱敏", "token=***" in masked and "week=9" in masked, masked)
 check("一键登录.初始状态", get_status()["status"] == "idle")
+# 回归 2026-11-19 线上事故：start() 在 with _lock 块内调用 _set()（内部再加锁），
+# 普通 threading.Lock 不可重入 → 事件循环自我死锁、全站无响应。锁必须可重入。
+check("一键登录.状态锁可重入", isinstance(_bl_lock, type(threading.RLock())),
+      type(_bl_lock).__name__)
 
 # 11d. App 化预埋：共用解析函数与可插拔模型请求头
 cs = courses_from_payload(

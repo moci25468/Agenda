@@ -165,6 +165,23 @@ class ZhengfangProvider(TimetableProvider):
         self.last_detected_term: tuple[str, str] | None = None
         if not self.base:
             raise ValueError("未配置正方教务地址（设置 → 课表来源 → 正方教务，填入学号密码）")
+        # 与门户/AI/推送统一走出站安全校验：正方地址也是用户可填配置，
+        # 避免被利用打 SSRF（本机/内网/云元数据）。教务系统常见 http 内网部署，允许 http。
+        from ..netguard import assert_safe_outbound_url
+        from ..netguard import UnsafeURLError as _UnsafeURLError
+        from ipaddress import ip_address
+
+        assert_safe_outbound_url(self.base, allow_http=True)
+        # netguard 默认模式放行回环/私网（兼容本地 Ollama/Bark 等合法用法），
+        # 但正方教务地址没有任何合法回环用途——这里显式强制封死回环与链路本地
+        host = (self.base.split("://", 1)[1] if "://" in self.base else self.base).split("/", 1)[0].split(":")[0].strip("[]").lower()
+        try:
+            ip = ip_address(host)
+        except ValueError:
+            pass  # 域名走 netguard 已完成的校验
+        else:
+            if ip.is_loopback or ip.is_link_local:
+                raise _UnsafeURLError("正方教务地址不允许指向本机/回环地址")
 
     @asynccontextmanager
     async def _session(self):

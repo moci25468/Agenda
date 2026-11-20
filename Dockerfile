@@ -13,6 +13,7 @@ COPY requirements.txt .
 # 这里不再用 || true 吞掉错误——浏览器装不上就让构建失败，而不是运行时才暴露。
 RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources && \
     apt-get update && \
+    apt-get install -y --no-install-recommends libatomic1 && \
     pip install --no-cache-dir --default-timeout=120 -r requirements.txt && \
     playwright install --with-deps chromium-headless-shell && \
     rm -rf /root/.cache/ms-playwright/*.zip /var/lib/apt/lists/*
