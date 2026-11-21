@@ -2,8 +2,8 @@
 
 多用户下每位用户一份完整 config（存在 user_config 表），无用户上下文时读全局模板。
 provider 同时支持「门户(portal)」与「正方教务(zhengfang)」两套独立凭证，由
-provider.primary 决定课表主数据源：auto = 正方优先（配了正方就用正方，没配才用门户），
-门户可显式设为 primary=portal（调课场景以门户为准）。考试始终优先从正方拉取。
+provider.primary 决定课表主数据源：auto = 门户优先（配了门户就用门户，没配才用正方），
+正方可显式设为 primary=zhengfang。考试始终优先从正方拉取。
 """
 from __future__ import annotations
 
@@ -21,7 +21,6 @@ MASK = "********"
 # 注意：portal.url / portal.body 常含 ticket、token、code 等一次性票据，也必须脱敏；
 # 企业微信 Webhook 整条 URL 自带机器人 key，同样不能明文回传。
 MASK_PATHS = [
-    ("ai", "api_key"), ("ai", "headers"),
     ("push", "bark_key"), ("push", "wecom_webhook"),
     ("security", "token"),
     ("provider", "zhengfang", "password"),
@@ -36,7 +35,7 @@ DEFAULT_CONFIG = {
     "school": "青岛理工大学",
     "semester_start": "2026-08-31",   # 开学日期（第 1 周周一），门户校历 2026-2027-1 实测
     "total_weeks": 30,
-    "sync_time": "12:00",             # 每日同步时间（Asia/Shanghai）
+    "sync_time": "12:00",             # 已废弃：同步时刻由服务器按人数自动分配，仅保留兼容
     "push_next_day": True,            # 同步后推送次日课表
     "alert_on_fail": True,            # 凭证过期等同步失败时主动推送告警
     "section_times": {},              # 覆盖默认节次开始时间，如 {"1": "08:30"}
@@ -50,7 +49,7 @@ DEFAULT_CONFIG = {
     # 数据源：门户与正方并存，primary 决定课表主来源
     "provider": {
         "type": "mock",               # 展示用：portal / zhengfang / mock
-        "primary": "auto",            # auto | portal | zhengfang（auto=正方优先）
+        "primary": "auto",            # auto | portal | zhengfang（auto=门户优先）
         "zhengfang": {                # 正方教务（jwglxt）
             "base": "https://jxgl.qut.edu.cn/jwglxt",
             "username": "",
@@ -94,15 +93,7 @@ DEFAULT_CONFIG = {
     },
     "rooms": {
         "default_campus": "",       # 空教室默认校区（正方 xqh_id），查询时自动带入
-        "default_campus_name": "",  # 校区名称，供 AI 上下文与展示使用
-    },
-    "ai": {
-        "enabled": False,
-        "show_in_nav": True,      # 是否在主页导航显示 AI 助手分块；关闭后主页只留其余分块
-        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "api_key": "",
-        "model": "qwen-plus",
-        "headers": "",            # 自定义请求头（JSON），如网关要求 X-API-Key
+        "default_campus_name": "",  # 校区名称，供展示使用
     },
     "security": {
         "enabled": False,         # 默认关闭，不影响本地页面与现有用法
@@ -231,9 +222,9 @@ def portal_configured(cfg: dict) -> bool:
 def resolve_course_source(cfg: dict) -> str:
     """按 primary 决定课表主数据源：portal / zhengfang / mock。
 
-    auto：正方优先（正方是教务排课数据的源头，带任课教师与考试；门户的课表接口
-    不返回教师字段），只在没配正方时才用门户；两者都没有回退 mock。
-    想以门户为准（例如要看调课后的课表）时，显式把 primary 设为 portal。
+    auto：门户优先（门户反映老师临时调课，课表更贴近实际上课），只在没配门户时
+    才用正方；两者都没有回退 mock。想看教务排课原始数据时，显式把 primary 设为
+    zhengfang。考试不受此选择影响，始终优先从正方拉取。
     """
     p = cfg.get("provider", {})
     ptype = p.get("type") or "mock"
@@ -248,10 +239,10 @@ def resolve_course_source(cfg: dict) -> str:
         return "zhengfang"
     if primary == "portal" and portal_ok:
         return "portal"
-    if zf_ok:
-        return "zhengfang"
     if portal_ok:
         return "portal"
+    if zf_ok:
+        return "zhengfang"
     # 既没配正方也没配门户：显式选了 mock 才用演示数据，否则也是 mock 兜底
     return "mock"
 

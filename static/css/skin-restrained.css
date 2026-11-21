@@ -111,8 +111,7 @@ nav button.active {
 .tomorrow-card {
   padding: 20px 23px;
 }
-.card h2::before,
-.chat-head h2::before {
+.card h2::before {
   display: none;
 }
 .card h2 {
@@ -202,17 +201,6 @@ nav button.active {
 .mini-course .r {
   color: var(--sub);
 }
-.chat-box {
-  height: 580px;
-  min-height: 0;
-  padding: 0;
-}
-.msg {
-  animation: none;
-}
-.msg.thinking {
-  animation: thinking 1.4s ease-in-out infinite;
-}
 .auth-card {
   max-width: 400px;
   padding: 30px;
@@ -271,11 +259,6 @@ nav button.active {
   }
   .course-time {
     flex-basis: 100px;
-  }
-  .chat-box {
-    height: calc(100vh - 250px);
-    height: calc(100dvh - 250px);
-    min-height: 480px;
   }
 }
 @media (max-width: 480px) {

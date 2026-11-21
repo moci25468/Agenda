@@ -18,6 +18,31 @@ from .base import AuthExpiredError, TimetableProvider
 WEEKDAY_MAP = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "日": 7, "天": 7}
 
 
+def merge_cookie_header(existing: str, updates: dict) -> str:
+    """把响应里新下发的 Cookie 合并进现有的 Cookie 请求头（同名覆盖，保持原顺序）。"""
+    pairs: dict[str, str] = {}
+    order: list[str] = []
+    for part in (existing or "").split(";"):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        k, v = part.split("=", 1)
+        k = k.strip()
+        if k not in pairs:
+            order.append(k)
+        pairs[k] = v.strip()
+    changed = False
+    for k, v in updates.items():
+        if pairs.get(k) != v:
+            if k not in pairs:
+                order.append(k)
+            pairs[k] = v
+            changed = True
+    if not changed:
+        return existing
+    return "; ".join(f"{k}={pairs[k]}" for k in order)
+
+
 def _dig(obj, path: str):
     """按点路径取 JSON 节点，如 'data.courses'、'time.0'、'time.-1'。"""
     cur = obj
@@ -169,6 +194,45 @@ class HttpJsonProvider(TimetableProvider):
         except json.JSONDecodeError:
             raise ValueError(f"headers/body 配置不是合法 JSON: {str(text)[:60]}")
 
+    def _remember_refreshed_cookies(self, response) -> None:
+        """门户网关会在响应里滚动下发新 Cookie（滑动续期）。
+
+        把这部分写回配置，静态快照就能跟着网关一起续命；失败一律静默，
+        绝不能因为写配置出错而影响取数。
+        """
+        if self.name != "portal":
+            return
+        updates: dict[str, str] = {}
+        try:
+            for raw in response.headers.get_list("set-cookie"):
+                name, _, rest = raw.partition("=")
+                name = name.strip()
+                value = rest.split(";", 1)[0].strip()
+                if name and value:
+                    updates[name] = value
+        except Exception:  # noqa: BLE001
+            return
+        if not updates:
+            return
+        key = next((k for k in self.headers if str(k).lower() == "cookie"), None)
+        if key is None:
+            return
+        merged = merge_cookie_header(self.headers.get(key) or "", updates)
+        if merged == (self.headers.get(key) or ""):
+            return
+        try:
+            from ..config import load_config, save_config
+            cfg = load_config()
+            portal = cfg.setdefault("provider", {}).setdefault("portal", {})
+            headers = dict(portal.get("headers") or {})
+            pkey = next((k for k in headers if str(k).lower() == "cookie"), "Cookie")
+            headers[pkey] = merged
+            portal["headers"] = headers
+            save_config(cfg)
+            self.headers[key] = merged
+        except Exception:  # noqa: BLE001
+            pass
+
     async def fetch_raw(self):
         """请求接口并返回原始 JSON（含登录态检查），供导入预览与字段猜测。"""
         async with httpx.AsyncClient(timeout=30, follow_redirects=True, trust_env=False) as client:
@@ -176,6 +240,7 @@ class HttpJsonProvider(TimetableProvider):
                 r = await client.post(self.url, headers=self.headers, json=self.body)
             else:
                 r = await client.get(self.url, headers=self.headers)
+            self._remember_refreshed_cookies(r)
             check_auth_expired(r)
             r.raise_for_status()
             try:

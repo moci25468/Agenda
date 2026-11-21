@@ -36,7 +36,7 @@
   }
   ::selection { background: color-mix(in srgb, var(--accent) 30%, var(--bg)); color: var(--text); }
   /* 深色 primary：底 --accent，文字 --accent-ink（松绿底深字） */
-  button.primary, #syncBtn, .msg.user { color: var(--accent-ink); }
+  button.primary, #syncBtn { color: var(--accent-ink); }
   /* 输入框用 --fill 以区隔卡片底 */
   input, select, textarea { background: var(--fill); }
   /* 遮罩与中性 toast：桌面深灰同族 */

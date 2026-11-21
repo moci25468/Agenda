@@ -4,39 +4,37 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#f5f5f7" id="themeColorMeta" />
-    <meta name="description" content="Agenda 知序 — 青岛理工大学日程、课表、考试与校园问答。" />
+    <meta name="description" content="Agenda 知序 — 青岛理工大学日程、课表与考试助手。" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Agenda" />
     <title>Agenda · 知序</title>
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="apple-touch-icon" href="/static/icons/icon-180.png" />
+    <link rel="apple-touch-icon" href="/static/icons/icon-180.png?v=2.0.0" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%232A4358'/%3E%3Cstop offset='1' stop-color='%2318242F'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='url(%23g)'/%3E%3Cpath d='M18 25h28M18 34h28M18 43h14' stroke='%23F5F8FB' stroke-width='4.4' stroke-linecap='round'/%3E%3Ccircle cx='45' cy='43' r='4.2' fill='%237FA8C9'/%3E%3C/svg%3E" />
 
     <!-- 样式分块：按页面/职责拆分，加载顺序与原内联 style 块一致，保证层叠结果不变 -->
-    <link rel="stylesheet" href="/static/css/base.css" />
-    <link rel="stylesheet" href="/static/css/today.css" />
-    <link rel="stylesheet" href="/static/css/schedule.css" />
-    <link rel="stylesheet" href="/static/css/exam.css" />
-    <link rel="stylesheet" href="/static/css/week.css" />
-    <link rel="stylesheet" href="/static/css/ai.css" />
-    <link rel="stylesheet" href="/static/css/log.css" />
-    <link rel="stylesheet" href="/static/css/settings.css" />
-    <link rel="stylesheet" href="/static/css/source.css" />
-    <link rel="stylesheet" href="/static/css/admin.css" />
-    <link rel="stylesheet" href="/static/css/edit.css" />
-    <link rel="stylesheet" href="/static/css/skin-paper.css" />
-    <link rel="stylesheet" href="/static/css/skin-restrained.css" />
-    <link rel="stylesheet" href="/static/css/skin-fresh.css" />
-    <link rel="stylesheet" href="/static/css/skin-cool.css" />
-    <link rel="stylesheet" id="darkThemeCss" href="/static/css/dark.css" />
-    <link rel="stylesheet" href="/static/css/brand.css" />
-    <link rel="stylesheet" href="/static/css/interaction.css" />
-    <link rel="stylesheet" href="/static/css/motion.css" />
-    <link rel="stylesheet" href="/static/css/attachment.css" />
-    <link rel="stylesheet" href="/static/css/native.css" />
-    <link rel="stylesheet" href="/static/css/cards.css" />
+    <link rel="stylesheet" href="/static/css/base.css?v=2.0.0" />
+    <link rel="stylesheet" href="/static/css/today.css?v=2.0.0" />
+    <link rel="stylesheet" href="/static/css/schedule.css?v=2.0.0" />
+    <link rel="stylesheet" href="/static/css/exam.css?v=2.0.0" />
+    <link rel="stylesheet" href="/static/css/week.css?v=2.0.0" />
+    <link rel="stylesheet" href="/static/css/log.css?v=2.0.0" />
+    <link rel="stylesheet" href="/static/css/settings.css?v=2.0.0" />
+    <link rel="stylesheet" href="/static/css/source.css?v=2.0.0" />
+    <link rel="stylesheet" href="/static/css/admin.css?v=2.0.0" />
+    <link rel="stylesheet" href="/static/css/edit.css?v=2.0.0" />
+    <link rel="stylesheet" href="/static/css/skin-paper.css?v=2.0.0" />
+    <link rel="stylesheet" href="/static/css/skin-restrained.css?v=2.0.0" />
+    <link rel="stylesheet" href="/static/css/skin-fresh.css?v=2.0.0" />
+    <link rel="stylesheet" href="/static/css/skin-cool.css?v=2.0.0" />
+    <link rel="stylesheet" id="darkThemeCss" href="/static/css/dark.css?v=2.0.0" />
+    <link rel="stylesheet" href="/static/css/brand.css?v=2.0.0" />
+    <link rel="stylesheet" href="/static/css/interaction.css?v=2.0.0" />
+    <link rel="stylesheet" href="/static/css/motion.css?v=2.0.0" />
+    <link rel="stylesheet" href="/static/css/native.css?v=2.0.0" />
+    <link rel="stylesheet" href="/static/css/cards.css?v=2.0.0" />
     <script>
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", () => {
@@ -101,7 +99,7 @@
           <dl class="auth-features">
             <div><dt>日程</dt><dd>课程、考试与个人安排</dd></div>
             <div><dt>提醒</dt><dd>每日同步与次日安排推送</dd></div>
-            <div><dt>问答</dt><dd>AI 查询日程，一句话添加</dd></div>
+            <div><dt>空教室</dt><dd>按课表空闲节次找自习教室</dd></div>
           </dl>
         </section>
         <div class="auth-card">
@@ -158,8 +156,7 @@
       <nav id="nav" role="tablist" aria-label="主导航">
         <button data-tab="today" class="active" role="tab" aria-selected="true" aria-controls="tab-today"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 9.5h17M8 3v4M16 3v4M8.5 14l2.2 2.2 4.3-4.4"/></svg>今日</button>
         <button data-tab="week" role="tab" aria-selected="false" aria-controls="tab-week"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M10 4v16"/></svg>日程</button>
-        <button data-tab="ai" role="tab" aria-selected="false" aria-controls="tab-ai"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5c.7 3.8 2.7 5.8 6.5 6.5-3.8.7-5.8 2.7-6.5 6.5-.7-3.8-2.7-5.8-6.5-6.5 3.8-.7 5.8-2.7 6.5-6.5z"/><path d="M18.5 15.5c.3 1.7 1.2 2.6 2.9 2.9-1.7.3-2.6 1.2-2.9 2.9-.3-1.7-1.2-2.6-2.9-2.9 1.7-.3 2.6-1.2 2.9-2.9z"/></svg>AI 助手</button>
-        <button data-tab="source" role="tab" aria-selected="false" aria-controls="tab-source"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 14.5l5-5M8.5 11.5l-2.2 2.2a3.6 3.6 0 0 0 5.1 5.1l2.1-2.2M15.5 12.5l2.2-2.2a3.6 3.6 0 0 0-5.1-5.1l-2.1 2.2"/></svg>课表来源</button>
+                <button data-tab="source" role="tab" aria-selected="false" aria-controls="tab-source"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 14.5l5-5M8.5 11.5l-2.2 2.2a3.6 3.6 0 0 0 5.1 5.1l2.1-2.2M15.5 12.5l2.2-2.2a3.6 3.6 0 0 0-5.1-5.1l-2.1 2.2"/></svg>课表来源</button>
         <button data-tab="admin" id="adminNavBtn" class="hidden" role="tab" aria-selected="false" aria-controls="tab-admin"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="3"/><path d="M3.5 19.5c.6-3 2.7-4.5 5.5-4.5s4.9 1.5 5.5 4.5M16 5.7a2.8 2.8 0 0 1 0 5.6M17 15.2c2 .5 3.2 1.9 3.6 4.3"/></svg>用户管理</button>
         <button data-tab="settings" role="tab" aria-selected="false" aria-controls="tab-settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17.5 7H20M4 17h2.5M11 17h9"/><circle cx="15.2" cy="7" r="2.2"/><circle cx="8.7" cy="17" r="2.2"/></svg>设置</button>
       </nav>
@@ -184,13 +181,13 @@
               <span id="todayCount"></span>
             </div>
           </div>
-          <!-- 今日概览 Bento：下一节课大卡 + 教学周/天气/课程/日程统计 + 明日引导 -->
+          <!-- 今日概览 Bento：下一节课大卡 + 天气/课程/日程/剩余考试统计 + 明日引导 -->
           <div class="today-bento" id="todayBento">
             <button type="button" id="nextClassBar" class="next-class hidden" aria-label="下一节课，点击查看周课表"></button>
-            <div class="ov-cell tb-week"><div class="ov-val" id="tbWeekVal">—<small>周</small></div><div class="ov-label">当前教学周</div><div class="ov-sub" id="tbWeekSub"></div></div>
             <div class="ov-cell tb-weather hidden" id="tbWeatherCell"><div class="ov-val" id="tbWeatherVal">—<small>℃</small></div><div class="ov-label" id="tbWeatherLabel">今日天气</div><div class="ov-sub" id="tbWeatherSub"></div></div>
             <div class="ov-cell tb-courses"><div class="ov-val" id="tbCourseVal">0<small>门</small></div><div class="ov-label">今日课程</div><div class="ov-sub" id="tbCourseSub"></div></div>
             <div class="ov-cell tb-events"><div class="ov-val" id="tbEventVal">0<small>项</small></div><div class="ov-label">今日日程</div><div class="ov-sub" id="tbEventSub"></div></div>
+            <div class="ov-cell tb-exams"><div class="ov-val" id="tbExamVal">0<small>场</small></div><div class="ov-label">剩余考试</div><div class="ov-sub" id="tbExamSub"></div></div>
             <button type="button" class="tb-tomorrow hidden" id="tbTomorrow">
               <span class="tb-dot"></span>
               <span class="tb-txt"><b id="tbTomorrowTitle">明日安排</b><span id="tbTomorrowSub"></span></span>
@@ -272,66 +269,12 @@
         </p>
       </section>
 
-      <!-- AI -->
-      <section id="tab-ai" class="hidden">
-        <div class="card chat-box">
-          <div class="chat-head">
-            <div>
-              <div class="chat-title-line">
-                <span class="ai-status-dot" aria-hidden="true"></span>
-                <h2>知序 AI 助手</h2>
-                <span class="ai-badge">个人校园助手</span>
-              </div>
-              <p>基于你的课表、考试与日程回答，也能读你上传的课件、作业与表格；对话自动保存，刷新不会丢</p>
-            </div>
-            <div class="chat-head-actions">
-              <button class="small" id="memoryBtn">记忆</button>
-              <button class="small" id="chatClearBtn">清空</button>
-            </div>
-          </div>
-          <div class="chat-msgs" id="chatMsgs" role="log">
-            <div class="msg ai">你好，我是知序。课程、考试和个人日程都可以问我；也可以直接说「明天下午三点开会」或「记住我喜欢坐前排」。要读课件、作业要求、表格，点输入框左边的回形针传文件给我就行。</div>
-          </div>
-          <div class="chips" id="chatChips" aria-label="快捷操作">
-            <span class="chips-label">快捷</span>
-            <button type="button" data-prefill="添加日程：">添加日程</button>
-            <button type="button">明天有什么课？</button>
-            <button type="button">这周哪天没课？</button>
-            <button type="button">我最近有什么考试？</button>
-          </div>
-          <div class="chat-attach" id="chatAttachList"></div>
-          <div class="chat-input">
-            <button type="button" class="attach-btn" id="chatAttachBtn"
-                    aria-label="上传文件" title="上传文件（Word / PDF / Excel / PPT / 文本 / 图片）">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
-                   stroke="currentColor" stroke-width="1.7" stroke-linecap="round"
-                   stroke-linejoin="round" aria-hidden="true">
-                <path d="M20.5 11.6 12 20.1a5.3 5.3 0 0 1-7.5-7.5l8.6-8.6a3.5 3.5 0 0 1 5 5l-8.6 8.6a1.8 1.8 0 0 1-2.5-2.5l7.9-7.9"/>
-              </svg>
-            </button>
-            <input type="file" id="chatFileInput" multiple hidden
-                   accept=".txt,.text,.md,.markdown,.csv,.tsv,.json,.jsonl,.log,.pdf,.docx,.pptx,.xlsx,.xlsm,.html,.htm,.xml,.yaml,.yml,.toml,.ini,.conf,.py,.js,.ts,.jsx,.tsx,.java,.c,.h,.cpp,.go,.rs,.php,.rb,.sh,.sql,.tex,.png,.jpg,.jpeg,.webp,.gif,.bmp" />
-            <input
-              id="chatInput"
-              placeholder="问问课程、考试，或记录一个安排…"
-              aria-label="向知序 AI 助手提问"
-              autocomplete="off"
-            />
-            <button class="primary" id="chatSend">发送</button>
-          </div>
-          <div class="chat-input-hint">
-            <span>Enter 发送 · 可拖入文件或粘贴图片与你聊天</span>
-            <span>课程与考试信息以教务系统为准</span>
-          </div>
-        </div>
-      </section>
-
       <!-- 课表来源 -->
       <section id="tab-source" class="hidden">
         <div class="card">
           <h2>课表数据来源</h2>
           <p class="hint">
-            两套数据源各有取舍：正方教务是排课数据的源头，带任课教师和考试安排；门户能反映老师临时调课后的课表，但没有教师字段。默认以正方为准，需要看调课时可在这里切到门户。
+            两套数据源各有取舍：门户能反映老师临时调课后的课表，但没有教师字段；正方教务是排课数据的源头，带任课教师和考试安排。默认以门户为准，需要看教务原始排课时可在这里切到正方；考试始终从正方获取。
           </p>
           <div class="source-primary" id="sourcePrimaryRow">
             <span class="sp-label">课表主数据源</span>
@@ -346,7 +289,7 @@
             <!-- 门户卡片 -->
             <div class="source-card" id="sourcePortalCard">
               <div class="source-card-head">
-                <span class="sch-text"><strong>融合门户</strong><small>扫码登录 · 反映调课</small></span>
+                <span class="sch-text"><strong>融合门户</strong><small>推荐 · 扫码登录 · 反映调课</small></span>
                 <span class="badge" id="portalBadge">未配置</span>
               </div>
               <p class="hint">扫码登录门户，自动发现并接入课表接口，无需抓包、无需填 Cookie。门户只提供课表数据，但能反映调课后的课表。</p>
@@ -371,10 +314,10 @@
             <!-- 正方卡片 -->
             <div class="source-card" id="sourceZfCard">
               <div class="source-card-head">
-                <span class="sch-text"><strong>正方教务</strong><small>推荐 · 学号+密码</small></span>
+                <span class="sch-text"><strong>正方教务</strong><small>考试与空教室 · 学号+密码</small></span>
                 <span class="badge" id="zfBadge">未配置</span>
               </div>
-              <p class="hint">填学号+密码即可，后端自动模拟登录正方，无需 Cookie。正方提供课表与考试安排，带任课教师；课表是排课数据，不包含临时调课。</p>
+              <p class="hint">填学号+密码即可，后端自动模拟登录正方，无需 Cookie。考试与空教室查询始终使用正方；课表是排课原始数据，不包含临时调课，想看这份排课时可把主数据源切到正方。</p>
               <div class="form-grid">
                 <label class="field full"><span>教务地址</span><input id="zfBase" placeholder="https://jxgl.qut.edu.cn/jwglxt" /></label>
                 <label class="field"><span>学号</span><input id="zfUsername" /></label>
@@ -499,8 +442,7 @@
           <button type="button" data-target="settingsAccount"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg><span>账号</span></button>
           <button type="button" data-target="settingsSync"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 6.4M20 5v6h-6"/></svg><span>同步</span></button>
           <button type="button" data-target="settingsPush"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 8h18s-3-1-3-8M13.7 21a2 2 0 0 1-3.4 0"/></svg><span>推送</span></button>
-          <button type="button" data-target="settingsAi"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4L12 3z"/><path d="M19 17l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7.7-2z"/></svg><span>AI</span></button>
-        </nav>
+          </nav>
         <!-- 手机 iOS 设置首页：大标题 + 分组列表；点行进入详情 -->
         <div class="settings-home" id="settingsHome">
           <h1 class="ios-page-title">设置</h1>
@@ -523,11 +465,7 @@
               <span class="ios-row-ic ic-push"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 8h18s-3-1-3-8M13.7 21a2 2 0 0 1-3.4 0"/></svg></span>
               <span class="ios-row-label">推送</span><span class="ios-row-arrow">›</span>
             </button>
-            <button type="button" class="ios-row" data-target="settingsAi">
-              <span class="ios-row-ic ic-ai"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4L12 3z"/></svg></span>
-              <span class="ios-row-label">AI 助手</span><span class="ios-row-arrow">›</span>
-            </button>
-          </div>
+            </div>
         </div>
         <!-- 详情返回栏（手机） -->
         <button type="button" class="settings-back" id="settingsBack"><span>‹</span> 设置</button>
@@ -561,17 +499,16 @@
             <button class="danger" id="deleteAccountBtn">注销账号</button>
           </div>
           <p class="hint">
-            注销会永久删除该账号的课表快照、手动调整、考试、推送记录以及数据源与 AI
+            注销会永久删除该账号的课表快照、手动调整、考试、推送记录以及数据源
             配置，无法恢复。若是管理员注销，管理员权限会自动交给最早注册的其他账号。
           </p>
         </div>
         <div class="card" id="settingsSync">
           <h2>同步</h2>
           <div class="form-grid">
-            <label class="field"
-              ><span>每日同步时间</span
-              ><input name="sync_time" placeholder="12:00"
-            /></label>
+            <p class="hint" style="grid-column: 1 / -1">
+              同步时间由服务器按注册人数自动错峰分配，无需手动设置；想立即更新课表可随时点顶部的「同步」。
+            </p>
             <label class="field"
               ><span>开学日期（第 1 周周一）</span
               ><input name="semester_start" type="date"
@@ -737,7 +674,7 @@
         <div class="card" id="settingsPushLog">
           <h2>最近推送</h2>
           <p class="hint">
-            测试、课前提醒、每日推送与 AI 推送的最近结果，失败会写明原因。
+            测试、课前提醒与每日推送的最近结果，失败会写明原因。
           </p>
           <div id="pushLogList"></div>
           <div class="form-actions">
@@ -745,69 +682,6 @@
           </div>
         </div>
 
-        <div class="card" id="settingsAi">
-          <h2>AI 助手</h2>
-          <div class="switch-list">
-            <label class="switch-row">
-              <span class="switch-text"
-                ><b>启用 AI 问答</b><small>OpenAI 兼容接口</small></span
-              >
-              <input type="checkbox" class="switch-input" id="aiEnabled" role="switch" aria-label="启用 AI 问答" />
-              <span class="switch-track" aria-hidden="true"></span>
-            </label>
-            <label class="switch-row">
-              <span class="switch-text"
-                ><b>在主页显示 AI 助手</b><small>关闭后主页只保留今日、日程、课表来源等分块</small></span
-              >
-              <input type="checkbox" class="switch-input" id="aiShowInNav" role="switch" aria-label="在主页显示 AI 助手" />
-              <span class="switch-track" aria-hidden="true"></span>
-            </label>
-          </div>
-          <div class="form-grid">
-            <label class="field full"
-              ><span>接口地址</span
-              ><input
-                name="ai.base_url"
-                placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1"
-            /></label>
-            <label class="field"
-              ><span>模型</span><input name="ai.model" placeholder="qwen-plus"
-            /></label>
-            <label class="field"
-              ><span>API Key</span><input name="ai.api_key" type="password"
-            /></label>
-          </div>
-          <div class="form-actions" style="margin-top: 10px">
-            <button class="small" data-ai-preset="qwen">通义千问</button>
-            <button class="small" data-ai-preset="deepseek">DeepSeek</button>
-            <button class="small" data-ai-preset="ollama">本地 Ollama</button>
-            <span class="muted" style="font-size: 12px"
-              >预设只填地址与模型，Key 仍需自己填</span
-            >
-          </div>
-          <div class="form-grid" style="margin-top: 12px">
-            <label class="field full"
-              ><span
-                >自定义请求头（JSON，可覆盖 Authorization，适配自建网关）</span
-              >
-              <textarea
-                name="ai.headers"
-                rows="2"
-                placeholder='{"X-API-Key": "xxx"}'
-              ></textarea>
-            </label>
-          </div>
-          <div class="form-actions">
-            <button id="aiModelsBtn">探测可用模型</button>
-            <button id="aiTestBtn">测试连接</button>
-          </div>
-          <pre id="aiDiag" class="log-box hidden"></pre>
-          <p class="hint">
-            支持任何 OpenAI 兼容服务：通义千问
-            DashScope、DeepSeek、Moonshot、自建网关，或本地
-            Ollama（http://127.0.0.1:11434/v1，Key 任意填）。换服务不用改代码。
-          </p>
-        </div>
         </div><!-- /.settings-body -->
 
         <div class="form-actions">
@@ -947,7 +821,7 @@
         <div class="sheet-head">
           <div>
             <h2 id="eventEditorTitle">添加日程</h2>
-            <p class="hint">时间留空表示全天安排；日程会并入今日安排与 AI 问答。</p>
+            <p class="hint">时间留空表示全天安排；日程会并入今日安排。</p>
           </div>
           <button class="small" id="closeEventEditorBtn">取消</button>
         </div>
@@ -985,26 +859,6 @@
       </div>
     </div>
 
-    <!-- 长期记忆管理 -->
-    <div id="memorySheet" class="sheet hidden">
-      <div class="sheet-panel" role="dialog" aria-modal="true" aria-label="长期记忆">
-        <div class="sheet-head">
-          <div>
-            <h2>长期记忆</h2>
-            <p class="hint">知序记住的长期事实，会注入每次 AI 问答；清空对话不会清除记忆。</p>
-          </div>
-          <button class="small" id="memoryCloseBtn">关闭</button>
-        </div>
-        <div class="memory-add">
-          <input id="memoryInput" placeholder="例如：我喜欢坐前排" autocomplete="off" maxlength="200" />
-          <button class="primary" id="memoryAddBtn">添加</button>
-        </div>
-        <p class="hint" id="memoryCount"></p>
-        <div id="memoryList"></div>
-        <p class="hint" id="memoryError" style="color:var(--fail)"></p>
-      </div>
-    </div>
-
     <!-- 注销账号 -->
     <div id="deleteAccountSheet" class="sheet hidden">
       <div class="sheet-panel" role="dialog" aria-modal="true" aria-label="注销账号">
@@ -1026,7 +880,7 @@
           >
         </div>
         <p class="hint">
-          将删除课表快照、考试、手动调整、推送记录以及数据源和 AI 配置；邀请码会随账号一起失效。
+          将删除课表快照、考试、手动调整、推送记录以及数据源配置；邀请码会随账号一起失效。
         </p>
         <div class="form-actions">
           <button class="danger solid" id="confirmDeleteBtn">永久注销</button>
@@ -1098,6 +952,6 @@
       </div>
     </div>
 
-    <script src="/static/js/app.js"></script>
+    <script src="/static/js/app.js?v=2.0.0"></script>
   </body>
 </html>

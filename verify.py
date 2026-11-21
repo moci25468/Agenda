@@ -12,11 +12,6 @@ from pathlib import Path
 import time
 import subprocess
 import socket
-from app.ai import (build_context, _request_headers, _sse_delta, SYSTEM_PROMPT,
-                    weeks_mentioned, relative_weeks, last_room_query, room_query_context,
-                    free_sections, free_sections_context, _free_spans,
-                    _config_status_lines, current_section_lines,
-                    now_anchor_lines, _time_stamp, _user_content, _wants_weather)
 from app.providers.httpjson import courses_from_payload
 from app.browser_login import (
     build_candidate, pick_best, _headers_for_config, _parse_body, _public_candidates,
@@ -32,8 +27,9 @@ from app.config import load_config as _load_cfg, save_config as _save_cfg, MASK
 from app import db as _db
 from datetime import date, datetime, timedelta
 from app.push import (push_all, send_wecom, _wecom_url, WECOM_API,
-                      send_selected, available_channels, wecom_input_error)
+                      send_selected, wecom_input_error)
 from app.scheduler import (run_sync, format_changes, courses_on, section_time,
+                           free_sections, free_spans,
                            run_reminders, push_exam_reviews, TZ)
 import app.scheduler as _sched
 import app.weather as _weather
@@ -185,6 +181,14 @@ check("数据源.配门户后不再回退 mock",
       == "portal")
 check("数据源.未配置任何真实来源才回退 mock",
       _resolve_src(_json.loads(_json.dumps(_def_cfg))) == "mock")
+_both = {**_json.loads(_json.dumps(_def_cfg)), "provider": {**_def_cfg["provider"],
+         "zhengfang": {"base": "https://x", "username": "u", "password": "p"},
+         "portal": {"url": "https://portal.qut.edu.cn/x",
+                    "headers": '{"cookie": "c"}'}}}
+check("数据源.auto 双源时门户优先", _resolve_src(_both) == "portal")
+check("数据源.显式选正方时不被门户抢回",
+      _resolve_src({**_both, "provider": {**_both["provider"], "primary": "zhengfang"}})
+      == "zhengfang")
 
 from app.providers.zhengfang import rsa_encrypt, _hidden_value, _page_message
 _rsa_n = base64.b64encode(((1 << 1023) + 0x12345).to_bytes(128, "big")).decode()
@@ -303,18 +307,7 @@ db.save_exam_snapshot([exam.to_dict()], "test")
 esnap = db.get_exam_snapshot()
 check("考试.快照落库", bool(esnap) and esnap["source"] == "test"
       and esnap["exams"][0]["name"] == "高等数学", str(esnap)[:160])
-# AI 上下文只展示尚未结束的考试：固定日期会过期，这里临时换成明天的同一场考试
-_future_day = (date.today() + timedelta(days=1)).isoformat()
-_future_exam = Exam.from_dict({"name": "高等数学",
-                               "time": f"{_future_day} 09:00-11:00",
-                               "room": "1-201", "seat": "12"})
-db.save_exam_snapshot([_future_exam.to_dict()], "test")
-ctx = build_context(load_config())
-check("考试.AI 上下文可回答教室座号",
-      "高等数学" in ctx and "@1-201" in ctx and "座号 12" in ctx, ctx[-220:])
-db.save_exam_snapshot(esnap["exams"], esnap["source"])  # 恢复，避免影响后续用例
-
-# 个人日程：模型、落库、AI 上下文
+# 个人日程：模型、落库
 _ev = Event.from_dict({"title": "社团例会", "date": "2026-11-09",
                        "start": "19:00", "end": "20:30", "location": "活动中心"})
 check("日程.时间描述", _ev.display_time() == "2026-11-09 19:00-20:30")
@@ -327,40 +320,8 @@ _saved_ev = db.add_event({"title": "社团例会", "date": "2099-12-31",
                           "start": "19:00", "end": "20:30", "location": "活动中心"})
 check("日程.落库与读取", bool(_saved_ev["id"])
       and db.get_event(_saved_ev["id"])["title"] == "社团例会", str(_saved_ev)[:160])
-_ctx_ev = build_context(load_config())
-check("日程.AI 上下文包含", "社团例会" in _ctx_ev and "@活动中心" in _ctx_ev, _ctx_ev[-200:])
-_prompt = SYSTEM_PROMPT.format(context="占位上下文")
-check("日程.提示词模板可渲染", "占位上下文" in _prompt and "[添加日程]" in _prompt
-      and '"title"' in _prompt)
-check("AI.推荐追问标记可渲染", "[追问]" in _prompt and "2-3 个" in _prompt)
 db.delete_event(_saved_ev["id"])
 check("日程.删除后不可读", db.get_event(_saved_ev["id"]) is None)
-
-# 长期记忆：落库、去重、注入 AI 上下文、删除
-_mem = db.add_memory("我喜欢坐前排")
-check("记忆.落库", bool(_mem["id"]) and not _mem["duplicate"], str(_mem)[:160])
-_mem2 = db.add_memory("我喜欢坐前排")
-check("记忆.重复去重", _mem2["duplicate"] and _mem2["id"] == _mem["id"])
-_ctx_mem = build_context(load_config())
-check("记忆.AI 上下文包含", "我喜欢坐前排" in _ctx_mem and "长期记忆" in _ctx_mem,
-      _ctx_mem[-200:])
-_prompt_mem = SYSTEM_PROMPT.format(context="占位上下文")
-check("记忆.提示词模板可渲染", "[记住]" in _prompt_mem and '"content"' in _prompt_mem)
-check("记忆.删除与幂等", db.delete_memory(_mem["id"])
-      and not db.delete_memory(_mem["id"]))
-check("记忆.删除后上下文不含", "我喜欢坐前排" not in build_context(load_config()))
-
-# 对话短期记忆：整体替换（编辑截断）、读取、清空
-db.replace_chat_history([{"role": "user", "content": "你好"},
-                         {"role": "assistant", "content": "你好呀"}])
-check("对话.落库读取", db.get_chat_history() == [
-    {"role": "user", "content": "你好"},
-    {"role": "assistant", "content": "你好呀"}], str(db.get_chat_history())[:160])
-db.replace_chat_history([{"role": "user", "content": "截断后"}])
-check("对话.整体替换即截断", db.get_chat_history() == [
-    {"role": "user", "content": "截断后"}])
-db.clear_chat_history()
-check("对话.清空", db.get_chat_history() == [])
 
 # 空教室：位掩码参数与响应解析（2026-11-08 正方实测协议）
 from app.providers.zhengfang import room_query_data, parse_room
@@ -378,75 +339,14 @@ check("空教室.响应解析", _room["code"] == "C2-4-114" and _room["seats"] =
       and _room["building"] == "环境实验楼" and _room["campus"] == "黄岛校区",
       str(_room)[:200])
 
-# 空教室 × AI：对话不再提供空教室查询，提示词只指路到「日程」页周课表的空格
-_prompt_room = SYSTEM_PROMPT.format(context="占位上下文")
-check("空教室.提示词不含查询标记", "[查空教室]" not in _prompt_room
-      and "空教室不在对话里提供" in _prompt_room, "")
-_ctx_room = build_context(load_config())
-check("空教室.上下文指向日程页", "空教室查询：该功能不在对话里提供" in _ctx_room
-      and "查空教室" in _ctx_room, _ctx_room[-200:])
-_cfg_room = load_config()
-_cfg_room["provider"] = {**_cfg_room.get("provider", {}), "zhengfang": {
-    **_cfg_room.get("provider", {}).get("zhengfang", {}),
-    "username": "20260001", "password": "dummy"}}
-save_config(_cfg_room)
-check("空教室.上下文不泄露凭据",
-      "20260001" not in build_context(load_config())
-      and "dummy" not in build_context(load_config()))
-# 默认校区：仅用于周课表空教室查询，不再注入 AI 上下文
+# 默认校区：仅用于周课表空教室查询
 check("默认校区.配置含默认项",
       "default_campus" in load_config().get("rooms", {}), "")
-_cfg_room["rooms"] = {"default_campus": "05", "default_campus_name": "黄岛校区"}
-save_config(_cfg_room)
-_ctx_def = build_context(load_config())
-check("默认校区.不注入 AI 上下文",
-      "用户默认校区" not in _ctx_def, _ctx_def[-300:])
-_cfg_room["rooms"] = {"default_campus": "", "default_campus_name": ""}
-save_config(_cfg_room)
-check("默认校区.未设置不注入",
-      "用户默认校区：" not in build_context(load_config()), "")
-_cfg_room["provider"]["zhengfang"]["username"] = ""
-_cfg_room["provider"]["zhengfang"]["password"] = ""
-save_config(_cfg_room)
 
-# 空教室多轮追问：沿用最近一次查询的日期/节次/校区，不切回今天
-_room_hist = [
-    {"role": "user", "content": "明天我想找一个空教室"},
-    {"role": "assistant", "content":
-     '好的，先查明天下午。\n[查空教室] {"date": "2026-11-10", "start": 5, "end": 8, '
-     '"campus": "黄岛校区", "building": ""}\n[追问] ["上午三四节呢", "换到市北校区"]'},
-    {"role": "assistant", "content":
-     '已查询。\n[空教室结果] {"date": "2026-11-10", "start": 5, "end": 8, '
-     '"campus": "黄岛校区", "building": "", "count": 3, "groups": []}'},
-    {"role": "user", "content": "我想找一个小一点的教室"},
-]
-_q_last = last_room_query(_room_hist)
-check("空教室.追问沿用上次条件", bool(_q_last)
-      and _q_last["date"] == "2026-11-10" and _q_last["start"] == 5
-      and _q_last["end"] == 8 and _q_last["campus"] == "黄岛校区", str(_q_last))
-_room_ctx = room_query_context(_room_hist)
-check("空教室.上下文写明确切日期",
-      "最近一次空教室查询条件" in _room_ctx and "2026-11-10" in _room_ctx
-      and "第 5–8 节" in _room_ctx and "不要切回今天" in _room_ctx, _room_ctx)
-_room_hist2 = _room_hist + [
-    {"role": "assistant", "content":
-     '[空教室结果] {"date": "2026-11-11", "start": 1, "end": 2, '
-     '"campus": "市北校区", "building": "一号教学楼"}'}]
-check("空教室.取最近一次查询", last_room_query(_room_hist2)["date"] == "2026-11-11"
-      and "一号教学楼" in room_query_context(_room_hist2), "")
-check("空教室.无历史不注入",
-      last_room_query([]) is None and room_query_context(None) == "", "")
-check("空教室.失败结果不算条件",
-      last_room_query([{"role": "assistant", "content":
-                        '[空教室结果] {"error": "超时", "date": "2026-11-10", '
-                        '"start": 5, "end": 8}'}]) is None, "")
-check("空教室.提示词不再要求追问", "空教室查询条件" not in SYSTEM_PROMPT
-      and "查空教室的 start/end" not in SYSTEM_PROMPT, "")
-
-# 空闲节次：后端按课表算好注入 AI，问「我没课的时候」不再靠模型自己数课表
-check("空闲节次.区间合并", _free_spans({1, 2, 5, 6}) == [(3, 4), (7, 12)]
-      and _free_spans(set()) == [(1, 12)]
-      and _free_spans(set(range(1, 13))) == [], "")
+# 空闲节次：按课表算出没课的连续区间
+check("空闲节次.区间合并", free_spans({1, 2, 5, 6}) == [(3, 4), (7, 12)]
+      and free_spans(set()) == [(1, 12)]
+      and free_spans(set(range(1, 13))) == [], "")
 _fs_orig = db.get_snapshot()
 db.save_snapshot([
     Course("占用A", day=2, start=1, end=2, weeks=list(range(1, 31))).to_dict(),
@@ -457,91 +357,10 @@ _fs_cfg["semester_start"] = "2026-08-31"
 check("空闲节次.按课表算空闲",
       free_sections(_fs_cfg, date(2026, 11, 10)) == [(3, 4), (7, 12)],
       str(free_sections(_fs_cfg, date(2026, 11, 10))))
-_fs_ctx = free_sections_context(_fs_cfg, [
-    {"role": "assistant", "content":
-     '[空教室结果] {"date": "2026-11-12", "start": 1, "end": 2}'}])
-check("空闲节次.注入含查询日期", "用户空闲节次" in _fs_ctx
-      and "2026-11-12" in _fs_ctx and "当天无课" in _fs_ctx, _fs_ctx)
 if _fs_orig:
     db.save_snapshot(_fs_orig["courses"], _fs_orig["source"])
-check("空闲节次.上下文自解释", "用户空闲节次" in _fs_ctx
-      and "不要自己重新数课表" in _fs_ctx, "")
 
-# 当前节次：AI 回答「现在去哪自习」不能漏掉正在上的这一节
-from datetime import datetime as _dt
-_cs_cfg = load_config()
-_cs_1430 = current_section_lines(_cs_cfg, _dt(2026, 11, 9, 14, 30))
-check("当前节次.正在上的一节",
-      "正在上第 5 节" in _cs_1430 and "按第 5 节回答" in _cs_1430, _cs_1430)
-_cs_0955 = current_section_lines(_cs_cfg, _dt(2026, 11, 9, 9, 55))
-check("当前节次.课间给最近一节",
-      "不在上课时段" in _cs_0955 and "第 3 节" in _cs_0955, _cs_0955)
-_cs_2300 = current_section_lines(_cs_cfg, _dt(2026, 11, 9, 23, 0))
-check("当前节次.今天已放学", "都已结束" in _cs_2300, _cs_2300)
-check("当前节次.注入AI上下文", "当前节次" in build_context(_fs_cfg), "")
-check("当前节次.提示词含现在规则",
-      "现在上什么" in SYSTEM_PROMPT and "下一节" in SYSTEM_PROMPT, "")
-
-# 时间锚点：每轮都注入本机时间，且明确「重复问明天=同一天」
-_na_now = _dt(2026, 11, 18, 23, 58)
-_na_ctx = build_context(_fs_cfg, now=_na_now)
-check("时间锚点.上下文末段是当前时间",
-      "【当前时间】" in _na_ctx[-600:] and not _na_ctx.startswith("【当前时间】"),
-      _na_ctx[-160:])
-check("时间锚点.给出今明后天具体日期",
-      all(s in _na_ctx for s in ("明天 = 2026-11-19", "后天 = 2026-11-20")),
-      _na_ctx.splitlines()[0])
-check("时间锚点.禁止按历史日期顺延",
-      "顺延成后天" in "\n".join(now_anchor_lines(_na_now, 12))
-      and "往后推一天" in SYSTEM_PROMPT and "【提问时间】" in SYSTEM_PROMPT, "")
-_na_stamp = _time_stamp(_na_now)
-check("时间锚点.每条消息带提问时间",
-      _na_stamp.startswith("【提问时间】") and "2026-11-18" in _na_stamp
-      and _user_content([], [], "明天什么课", stamp=_na_stamp).startswith("【提问时间】"),
-      _na_stamp)
-
-# 应用辅导 + 配置状态注入 AI 上下文
-_ctx_cfg = build_context(load_config())
-check("辅导.AI 上下文含配置现状",
-      "应用配置现状" in _ctx_cfg and "推送" in _ctx_cfg and "日历订阅" in _ctx_cfg
-      and "Bark" in _ctx_cfg, _ctx_cfg[-400:])
-_prompt_guide = SYSTEM_PROMPT.format(context="占位上下文")
-check("辅导.提示词含应用使用说明",
-      "应用使用辅导" in _prompt_guide and "Bark" in _prompt_guide
-      and "一键订阅" in _prompt_guide, "")
-check("推送.提示词含推送标记规则",
-      "[推送]" in _prompt_guide and '"channels"' in _prompt_guide
-      and "企业微信" in _prompt_guide and "4. 用户明确要求" in _prompt_guide, "")
-# 可用通道：只列已开启且已配置的通道，且不泄露具体 Key / webhook
-_pcfg = load_config()
-_pcfg["push"] = {**_pcfg.get("push", {}), "bark_enabled": True,
-                 "bark_key": "SECRETKEY123", "wecom_enabled": True,
-                 "wecom_webhook": "http://127.0.0.1:9/hook"}
-_plines = _config_status_lines(_pcfg)
-check("推送.上下文列出可用通道",
-      "可用于主动推送的通道" in _plines and '"bark"' in _plines
-      and '"wecom"' in _plines and "SECRETKEY123" not in _plines
-      and "127.0.0.1" not in _plines, _plines)
-_pcfg["push"]["bark_enabled"] = False
-_pcfg["push"]["wecom_enabled"] = False
-_plines_off = _config_status_lines(_pcfg)
-check("推送.未开启时不列通道",
-      "无（不能主动推送" in _plines_off, _plines_off)
-check("推送.可用通道函数与开关一致",
-      available_channels(_pcfg) == [], str(available_channels(_pcfg)))
-# 敏感值不泄露：配置了 Bark Key 后，上下文不应出现具体 Key
-_cfg_sens = load_config()
-_cfg_sens["push"] = {**_cfg_sens.get("push", {}),
-                     "bark_enabled": True, "bark_key": "SECRETKEY123"}
-save_config(_cfg_sens)
-_ctx_sens = build_context(load_config())
-check("辅导.上下文不泄露 Bark Key",
-      "SECRETKEY123" not in _ctx_sens and "已配置" in _ctx_sens, _ctx_sens[-400:])
-_cfg_sens["push"]["bark_enabled"] = False
-_cfg_sens["push"]["bark_key"] = ""
-save_config(_cfg_sens)
-
-# 天气按天摘要 + 注入 AI 上下文
+# 天气按天摘要
 _orig_fetch2 = _weather.fetch_hourly
 from datetime import date as _date
 _today_s = _date.today().isoformat()
@@ -568,10 +387,6 @@ check("天气.关闭后摘要为空",
 _wcfg_off["weather"]["enabled"] = True
 save_config(_wcfg_off)
 
-# AI 上下文注入天气（异步 _weather_context，仍用 fake 数据）
-from app.ai import _weather_context
-_ctx_w = asyncio.run(_weather_context(load_config()))
-check("天气.AI 上下文注入", "今日天气" in _ctx_w and "明日天气" in _ctx_w, _ctx_w)
 _weather.fetch_hourly = _orig_fetch2
 
 # 天气接口抖动时不能把整块天气变空：先重试，再回落上次成功的数据
@@ -665,45 +480,6 @@ check("天气.主源熔断后直接走备用源",
       _wttr_hits["n"] == 1 and _cb_hourly.get(f"{_today_s}T08:00", {}).get("temp") == 9,
       f"wttr={_wttr_hits['n']} {str(_cb_hourly)[:80]}")
 
-# 天气慢时不能拖着 AI 一起等：3 秒预算，超时就不带天气、后台继续跑
-import app.ai as _ai_mod
-_orig_wctx = _ai_mod._weather_context
-async def _slow_wctx(cfg):
-    await asyncio.sleep(3.5)
-    return "今日天气（慢）：晴。"
-async def _probe_budget():
-    t0 = time.monotonic()
-    out = await _ai_mod._weather_context_bounded(load_config())
-    dur = time.monotonic() - t0
-    for tk in list(_ai_mod._bg_tasks):   # 等后台任务收尾，避免事件循环关闭时告警
-        await tk
-    return out, dur
-_ai_mod._weather_context = _slow_wctx
-_budget_out, _budget_dur = asyncio.run(_probe_budget())
-_ai_mod._weather_context = _orig_wctx
-check("天气.AI 注入有 3 秒预算",
-      _budget_out == "" and _budget_dur < 3.4, f"{_budget_dur:.1f}s")
-
-# 按需拉天气：不问天气就不碰天气接口（下节课、课表、日程…都秒过）
-check("天气.问天气才触发",
-      _wants_weather("今天天气怎么样") and _wants_weather("明天会下雨吗"))
-check("天气.与天气无关不触发",
-      not _wants_weather("下节课是什么时候")
-      and not _wants_weather("明天有什么课")
-      and not _wants_weather("帮我加个日程：周五开会"))
-
-
-# 流式回复的 SSE 行解析（OpenAI 兼容格式）
-check("流式.SSE 解析增量",
-      _sse_delta('data: {"choices":[{"delta":{"content":"你好"}}]}') == "你好")
-check("流式.忽略空增量与结束标记",
-      _sse_delta('data: {"choices":[{"delta":{"role":"assistant"}}]}') is None
-      and _sse_delta("data: [DONE]") is None)
-check("流式.兼容一次性 message",
-      _sse_delta('data: {"choices":[{"message":{"content":"完整"}}]}') == "完整")
-check("流式.坏行安全跳过",
-      _sse_delta("data: not-json") is None and _sse_delta("event: ping") is None)
-
 # 4. 明日课表筛选（2026-11-08 周日 → 无课；周一有课）
 cfg = load_config()
 snap = db.get_snapshot()
@@ -713,54 +489,6 @@ mon = courses_on(cfg, courses, date(2026, 11, 9))
 check("周日无课筛选", len(sun) == 0)
 check("周一有课筛选", bool(mon) and all(
     c.day == 1 for c in mon), str([c.name for c in mon]))
-
-# 4b. AI 上下文按周展开：问「下周的课」时必须能看到下周课程，且不能误答「课表未同步」
-_w_now = current_week(cfg.get("semester_start", ""), date.today(), cfg.get("total_weeks", 30))
-_w_total = cfg.get("total_weeks", 30) or 30
-# 学期最后一周没有「下周」，改用上周，保证用例在任何日期都成立
-_w_next = _w_now + 1 if _w_now < _w_total else max(1, _w_now - 1)
-_w_orig = db.get_snapshot()
-db.save_snapshot([
-    {"name": "相邻周专属课", "day": 1, "start": 3, "end": 4, "room": "C301",
-     "weeks": [_w_next]},
-    {"name": "本周常规课", "day": 2, "start": 1, "end": 2, "room": "A101",
-     "weeks": [_w_now]},
-], "portal")
-_ctx_weeks = build_context(cfg)
-check("AI 上下文.下周课程可见", "相邻周专属课" in _ctx_weeks, _ctx_weeks[:300])
-check("AI 上下文.本周课程可见", "本周常规课" in _ctx_weeks)
-check("AI 上下文.按周标注", f"第 {_w_next} 周" in _ctx_weeks and "下周" in _ctx_weeks)
-check("AI 上下文.已同步不误报", "课表已同步" in _ctx_weeks
-      and "课表尚未同步" not in _ctx_weeks)
-check("AI 上下文.范围外有说明", "只展开以下周次" in _ctx_weeks)
-check("AI 上下文.提取指定周次", weeks_mentioned("我第 20 周有什么课？") == [20],
-      str(weeks_mentioned("我第 20 周有什么课？")))
-_ctx_far = build_context(cfg, extra_weeks=[20])
-check("AI 上下文.按需展开指定周", "第20周" in _ctx_far and "第 20 周" in _ctx_far,
-      _ctx_far[:200])
-# 每周都上的课在默认展开的周次里若内容相同，应压缩成「与第 N 周完全相同」
-# （默认只展开本周+下周，因此至少出现 1 条去重行；显式传入更多周可产生更多）
-db.save_snapshot([
-    {"name": "每周固定课", "day": 3, "start": 1, "end": 2, "room": "B101", "weeks": []},
-], "portal")
-_ctx_dup = build_context(cfg)
-check("AI 上下文.重复周课表去重", _ctx_dup.count("与第") >= 1, _ctx_dup[:300])
-db.save_snapshot(_w_orig["courses"], _w_orig["source"])
-
-# AI 速度优化：相对周次解析 + 默认只展开本周/下周 + 时间锚定后置 + 连接池复用
-_rel = relative_weeks("下周和大下周的课", 5, 30)
-check("AI 优化.相对周次解析", _rel == [6, 7], str(_rel))
-check("AI 优化.上周解析", relative_weeks("上周考得怎样", 5, 30) == [4],
-      str(relative_weeks("上周考得怎样", 5, 30)))
-check("AI 优化.本周不重复展开", relative_weeks("本周安排", 5, 30) == [],
-      str(relative_weeks("本周安排", 5, 30)))
-_base_weeks = [ln for ln in build_context(cfg).splitlines() if ln.startswith("第 ")]
-check("AI 优化.默认只展开两周", len(_base_weeks) <= 2, str(_base_weeks))
-_opt_ctx = build_context(cfg, now=_dt(2026, 11, 18, 23, 58))
-check("AI 优化.时间锚定位于末段",
-      "【当前时间】" in _opt_ctx[-600:] and not _opt_ctx.startswith("【当前时间】"), "")
-check("AI 优化.精炼输出条款",
-      "客套话一律不写" in SYSTEM_PROMPT and "先给一句话结论" in SYSTEM_PROMPT, "")
 
 # 课前提醒：固定 now + mock 推送，验证窗口 / 去重 / 开关 / 提前量 / 用户隔离
 _orig_push = _sched.push_all
@@ -1214,9 +942,6 @@ async def main():
     _bad = await send_wecom({"push": {"wecom_webhook": "242cbb531ae9a13ea3604a2819a0af87"}},
                             "t", "b")
     check("群机器人.非法值不发请求", _bad[0] is False and "key" in _bad[1], str(_bad))
-    check("群机器人.非法值不算已配置",
-          available_channels({"push": {"wecom_enabled": True,
-                                       "wecom_webhook": "2" * 34}}) == [])
     check("群机器人.未配置优雅失败",
           (await send_wecom({"push": {}}, "t", "b"))[0] is False)
     _cw = load_config()
@@ -1230,11 +955,9 @@ async def main():
           any(x["channel"] == "wecom" and x["status"] == "ok" for x in _wlogs))
     check("群机器人.默认关闭", load_config()["push"]["wecom_enabled"] is False
           and load_config()["push"]["wecom_webhook"] == "")
-    # 按通道发送：测试可绕过启用开关，AI 主动推送要求已启用
+    # 按通道发送：测试可绕过启用开关
     _scfg = {"push": {"bark_enabled": False, "bark_key": "",
                       "wecom_enabled": True, "wecom_webhook": WECOM_OK}}
-    check("推送.可用通道只列已启用",
-          available_channels(_scfg) == ["wecom"], str(available_channels(_scfg)))
     _sr = await send_selected(_scfg, "标题", "正文", ["wecom"])
     check("推送.按通道发送", _sr[0]["ok"] is True and _wecom_hits
           and _wecom_hits[-1][1]["text"]["content"].endswith("正文"), str(_sr))
@@ -1244,13 +967,6 @@ async def main():
     _sr = await send_selected(_scfg, "t", "b", ["sms"])
     check("推送.未知通道拒绝",
           _sr[0]["ok"] is False and "不支持" in _sr[0]["error"], str(_sr))
-    _sr = await send_selected({**_scfg, "push": {**_scfg["push"],
-                                                 "wecom_enabled": False}},
-                              "t", "b", ["wecom"], need_enabled=True)
-    check("推送.未启用时拒绝 AI 发送",
-          _sr[0]["ok"] is False and "未启用" in _sr[0]["error"], str(_sr))
-    _sr = await send_selected(_scfg, "t", "b", ["wecom"], need_enabled=True)
-    check("推送.已启用时允许 AI 发送", _sr[0]["ok"] is True, str(_sr))
 
     # 7. 日志落库
     logs = db.get_logs(10)
@@ -1281,15 +997,15 @@ async def main():
 
     # 8. 配置保存 + 掩码保留密钥
     cfg3 = load_config()
-    cfg3["ai"]["api_key"] = "sk-test-secret"
+    cfg3["push"]["bark_key"] = "sk-test-secret"
     save_config(cfg3)
     from app.config import masked_config
     masked = masked_config(load_config())
-    check("密钥掩码", masked["ai"]["api_key"] == "********")
-    save_config({"ai": {"api_key": "********"}})
-    check("掩码提交保留原密钥", load_config()["ai"]["api_key"] == "sk-test-secret")
+    check("密钥掩码", masked["push"]["bark_key"] == "********")
+    save_config({"push": {"bark_key": "********"}})
+    check("掩码提交保留原密钥", load_config()["push"]["bark_key"] == "sk-test-secret")
     # 清理测试密钥
-    save_config({"ai": {"api_key": ""}})
+    save_config({"push": {"bark_key": ""}})
 
 asyncio.run(main())
 
@@ -1401,21 +1117,11 @@ check("一键登录.初始状态", get_status()["status"] == "idle")
 check("一键登录.状态锁可重入", isinstance(_bl_lock, type(threading.RLock())),
       type(_bl_lock).__name__)
 
-# 11d. App 化预埋：共用解析函数与可插拔模型请求头
+# 11d. App 化预埋：共用课表解析函数
 cs = courses_from_payload(
     {"courses": [{"name": "数学", "day": 1, "start": 1, "end": 2, "room": "A1"}]},
     "courses", {})
 check("预埋.课表解析可复用", len(cs) == 1 and cs[0].name == "数学" and cs[0].room == "A1")
-check("预埋.AI 自定义请求头", _request_headers({"api_key": "k", "headers": {"X-API-Key": "x"}})
-      == {"Authorization": "Bearer k", "X-API-Key": "x"})
-check("预埋.AI 请求头覆盖鉴权", _request_headers({"api_key": "k", "headers": '{"Authorization": "Bearer other"}'})
-      ["Authorization"] == "Bearer other")
-try:
-    _request_headers({"api_key": "k", "headers": "{bad"})
-    check("预埋.AI 非法请求头报错", False)
-except ValueError as e:
-    check("预埋.AI 非法请求头报错", "合法 JSON" in str(e))
-
 # 11e. 门户 xskb 全大写字段与应用列表误判（真实故障回归）
 xskb_payload = {"results": {"data": {"Rows": [
     {"KCMC": "形势与政策5", "XQJ": "1", "KSJC": "5", "JSJC": "6",
@@ -1444,126 +1150,6 @@ check("接口挑选.选中 xskb 课表接口",
       str(ck)[:160] if ck else "None")
 check("告警.学期参数单独提示", any("换学期" in w for w in diagnose_url(
     "https://portal.qut.edu.cn/portal/api/v2/datacenter/get/xskb?XN=2026-2027&XQ=1")))
-
-# 11.5 AI 附件：解析各类文件、注入模型的文本块、按用户隔离
-import io as _io
-import zipfile as _zipfile
-
-from app import files as _files
-from app.ai import _user_content as _mk_user_content
-
-
-def _mk_zip(entries: dict) -> bytes:
-    buf = _io.BytesIO()
-    with _zipfile.ZipFile(buf, "w") as z:
-        for name, data in entries.items():
-            z.writestr(name, data)
-    return buf.getvalue()
-
-
-def _attach_text(meta, uid=1):
-    items = _files.resolve(uid, [meta["id"]])
-    return items[0]["text"] if items else ""
-
-
-_docx = _mk_zip({"word/document.xml": (
-    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-    '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
-    "<w:body><w:p><w:r><w:t>实验报告要求</w:t></w:r></w:p>"
-    "<w:p><w:r><w:t>1. 手写 2000 字</w:t></w:r><w:r><w:tab/><w:t>截止周五</w:t></w:r></w:p>"
-    "</w:body></w:document>")})
-_pptx = _mk_zip({"ppt/slides/slide1.xml": (
-    '<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
-    'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
-    "<p:cSld><p:spTree><a:p><a:r><a:t>第三章 线性表</a:t></a:r></a:p></p:spTree></p:cSld></p:sld>")})
-_xlsx = _mk_zip({
-    "xl/sharedStrings.xml": (
-        '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-        "<si><t>姓名</t></si><si><t>张三</t></si></sst>"),
-    "xl/worksheets/sheet1.xml": (
-        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-        '<sheetData><row r="1"><c r="A1" t="s"><v>0</v></c></row>'
-        '<row r="2"><c r="A2" t="s"><v>1</v></c><c r="B2"><v>88</v></c></row>'
-        "</sheetData></worksheet>"),
-})
-
-_m_txt = _files.save(1, "笔记.txt", "第一章 绪论\n第二章 方法".encode("utf-8"))
-check("附件.纯文本可读", _m_txt["kind"] == "text" and _m_txt["chars"] > 0
-      and "绪论" in _m_txt["preview"], str(_m_txt)[:180])
-check("附件.GB18030 编码自动识别",
-      "中文编码" in _files.save(1, "gbk.txt", "中文编码".encode("gb18030"))["preview"])
-check("附件.Word 正文可提取",
-      "实验报告要求" in _attach_text(_files.save(1, "要求.docx", _docx))
-      and "截止周五" in _attach_text(_files.save(1, "要求.docx", _docx)))
-check("附件.PPT 逐页文本", "线性表" in _attach_text(_files.save(1, "课件.pptx", _pptx)))
-_xlsx_meta = _files.save(1, "成绩.xlsx", _xlsx)
-check("附件.Excel 单元格（共享字符串 + 数值）",
-      "张三 | 88" in _attach_text(_xlsx_meta), _attach_text(_xlsx_meta)[:120])
-_pdf_stream = "BT /F1 12 Tf 72 720 Td (Homework due Friday 18:00) Tj ET"
-_pdf_objs = [
-    "<</Type/Catalog/Pages 2 0 R>>",
-    "<</Type/Pages/Kids[3 0 R]/Count 1>>",
-    "<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]"
-    "/Resources<</Font<</F1 4 0 R>>>>/Contents 5 0 R>>",
-    "<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>",
-    f"<</Length {len(_pdf_stream)}>>\nstream\n{_pdf_stream}\nendstream",
-]
-_pdf = bytearray(b"%PDF-1.4\n")
-_offs = []
-for _i, _body in enumerate(_pdf_objs, 1):
-    _offs.append(len(_pdf))
-    _pdf += f"{_i} 0 obj\n{_body}\nendobj\n".encode()
-_xref = len(_pdf)
-_pdf += f"xref\n0 {len(_pdf_objs) + 1}\n0000000000 65535 f \n".encode()
-for _off in _offs:
-    _pdf += f"{_off:010d} 00000 n \n".encode()
-_pdf += (f"trailer\n<</Size {len(_pdf_objs) + 1}/Root 1 0 R>>\n"
-         f"startxref\n{_xref}\n%%EOF\n").encode()
-_pdf_meta = _files.save(1, "作业.pdf", bytes(_pdf))
-check("附件.PDF 文本（pypdf）", "Homework due Friday" in _attach_text(_pdf_meta)
-      and _pdf_meta["pages"] == 1
-      and _attach_text(_pdf_meta).startswith("【第 1 页】"), str(_pdf_meta)[:160])
-_img_meta = _files.save(1, "截图.png", b"\x89PNG\r\n\x1a\n" + b"0" * 64)
-_img_item = _files.resolve(1, [_img_meta["id"]])[0]
-check("附件.图片转 data URL 交给多模态", _img_meta["kind"] == "image"
-      and _img_item["data_url"].startswith("data:image/png;base64,"), str(_img_meta)[:120])
-check("附件.正文按用户隔离", _files.resolve(2, [_m_txt["id"]]) == [], str(_m_txt["id"]))
-
-
-def _reject(name, data):
-    try:
-        _files.save(1, name, data)
-    except _files.FileError:
-        return True
-    return False
-
-
-check("附件.空文件被拒", _reject("空.txt", b""))
-check("附件.二进制文件被拒", _reject("未知.bin", b"\x00\x01\x02" * 200))
-check("附件.旧版 .doc 给出另存提示", _reject("旧.doc", b"\xd0\xcf\x11\xe0"))
-check("附件.超大文件被拒", _reject("大.txt", b"a" * (_files.MAX_UPLOAD_BYTES + 1)))
-check("附件.移除后取不到", _files.drop(1, _m_txt["id"]) is True
-      and _files.resolve(1, [_m_txt["id"]]) == [])
-
-_blocks, _images, _ = _files.build_blocks([
-    {"name": "要求.docx", "kind": "text", "text": "只写一页"},
-    {"name": "截图.png", "kind": "image", "data_url": "data:image/png;base64,AAA"}])
-check("附件.注入块带文件名与结束标记",
-      "【附件 1：要求.docx" in _blocks[0] and "【附件 1 结束】" in _blocks[0]
-      and _images and _images[0]["name"] == "截图.png", str(_blocks)[:160])
-_long_blocks, _, _gap = _files.build_blocks(
-    [{"name": "长.txt", "kind": "text", "text": "字" * (_files.MAX_TOTAL_CHARS + 5000)}])
-check("附件.超出总量时截断并标记", _gap is True and "上限" in _long_blocks[0],
-      str(len(_long_blocks[0])) if _long_blocks else "空")
-check("附件.历史消息去掉内部 id",
-      _files.strip_ids("【附件：a.pdf#0123456789ab】\n读一下") == "【附件：a.pdf】\n读一下")
-_text_content = _mk_user_content(_blocks, [], "总结一下重点")
-check("附件.纯文本文本注入 message", "只写一页" in _text_content
-      and "总结一下重点" in _text_content, str(_text_content)[:120])
-_multi = _mk_user_content(_blocks, [_images[0]], "这页讲什么")
-check("附件.带图片时用多模态 parts", isinstance(_multi, list)
-      and any(p.get("type") == "image_url" for p in _multi)
-      and any(p.get("type") == "text" for p in _multi), str(_multi)[:160])
 
 # 12. 导入管线端到端：自启临时服务当"外部接口"，跑完自动关闭。
 #     不再依赖 8300 常驻服务，单独执行 python verify.py 即可全绿。
@@ -1661,31 +1247,14 @@ async def http_tests(port: int):
               str(st.get("rooms"))[:160])
         await ca.post(f"{base}/api/settings", json={"rooms": {
             "default_campus": "", "default_campus_name": ""}})
-        # 推送：企业微信单通道测试（免启用开关）与 AI 主动推送（需已启用）
+        # 推送：企业微信单通道测试（免启用开关）
         await ca.post(f"{base}/api/settings", json={"push": {
             "bark_enabled": False, "bark_key": "",
             "wecom_enabled": False, "wecom_webhook": WECOM_OK}})
         r = (await ca.post(f"{base}/api/push/test", json={"channel": "wecom"})).json()
         check("推送.企业微信单通道测试", r["results"][0]["channel"] == "wecom"
               and r["results"][0]["ok"] is True, str(r)[:200])
-        r = (await ca.post(f"{base}/api/push/send", json={
-            "title": "AI 推送", "body": "明天 08:00 上课",
-            "channels": ["wecom"]})).json()
-        check("推送.AI 发送未启用被拒", r["results"][0]["ok"] is False
-              and "未启用" in r["results"][0]["error"], str(r)[:200])
         await ca.post(f"{base}/api/settings", json={"push": {"wecom_enabled": True}})
-        r = (await ca.post(f"{base}/api/push/send", json={
-            "title": "AI 推送", "body": "明天 08:00 上课",
-            "channels": ["wecom"]})).json()
-        check("推送.AI 发送成功", r["results"][0]["ok"] is True
-              and "明天 08:00 上课" in _wecom_hits[-1][1]["text"]["content"],
-              str(r)[:200])
-        d = (await ca.post(f"{base}/api/push/send", json={
-            "title": "自动通道", "body": "内容"})).json()
-        check("推送.未指定通道用已启用通道",
-              d["results"][0]["channel"] == "wecom", str(d)[:200])
-        r = await ca.post(f"{base}/api/push/send", json={"title": "x", "body": "  "})
-        check("推送.空内容被拒", r.status_code == 400, str(r.status_code))
         st_push = (await ca.get(f"{base}/api/status")).json()
         check("推送.状态列出企业微信通道",
               "wecom" in st_push.get("push_channels", []),
@@ -2195,87 +1764,6 @@ async def http_tests(port: int):
         r = await ca.get(f"{base}/api/rooms/my-free", params={"date_s": "11/09"})
         check("空教室.空闲节次非法日期", r.status_code == 400, str(r.status_code))
 
-        # AI 附件：上传解析、鉴权、不支持格式、移除
-        up = await ca.post(f"{base}/api/chat/upload", params={"name": "课堂笔记.txt"},
-                           content="第一章 绪论\n第二章 方法".encode("utf-8"),
-                           headers={"Content-Type": "text/plain"})
-        aj = up.json() if up.status_code == 200 else {}
-        check("附件.接口上传文本成功", up.status_code == 200
-              and aj.get("kind") == "text" and aj.get("chars", 0) > 0,
-              str(up.text)[:200])
-        check("附件.接口返回预览片段", "绪论" in (aj.get("preview") or ""),
-              str(aj.get("preview"))[:120])
-        up2 = await ca.post(f"{base}/api/chat/upload", params={"name": "坏文件.zip"},
-                            content=b"PK\x03\x04binary")
-        check("附件.压缩包被拒并说明原因", up2.status_code == 400
-              and "压缩包" in up2.text, str(up2.text)[:160])
-        async with _hx.AsyncClient(timeout=30, trust_env=False) as _anon_up:
-            up3 = await _anon_up.post(f"{base}/api/chat/upload",
-                                      params={"name": "a.txt"}, content=b"hi",
-                                      headers={"Content-Type": "text/plain"})
-        check("附件.未登录上传被拒", up3.status_code == 401, str(up3.status_code))
-        rm = await ca.delete(f"{base}/api/chat/attachments/{aj.get('id')}")
-        check("附件.接口可移除", rm.status_code == 200
-              and rm.json().get("ok") is True, str(rm.text)[:120])
-
-        # 对话落库：读取 → 回存（过滤非法角色）→ 截断式回存 → 清空
-        h = (await ca.get(f"{base}/api/chat/history")).json()
-        check("对话.初始为空", h.get("messages") == [], str(h)[:160])
-        r = await ca.post(f"{base}/api/chat/history", json={"messages": [
-            {"role": "user", "content": "明天有什么课"},
-            {"role": "assistant", "content": "明天有高数"},
-            {"role": "system", "content": "应被过滤"},
-            {"role": "user", "content": "   "}]})
-        check("对话.回存过滤非法角色", r.status_code == 200
-              and r.json().get("count") == 2, str(r.text)[:160])
-        h = (await ca.get(f"{base}/api/chat/history")).json()
-        check("对话.刷新后恢复", [m["content"] for m in h.get("messages", [])]
-              == ["明天有什么课", "明天有高数"], str(h)[:200])
-        await ca.post(f"{base}/api/chat/history", json={"messages": [
-            {"role": "user", "content": "明天有什么课"}]})
-        h = (await ca.get(f"{base}/api/chat/history")).json()
-        check("对话.编辑截断回存", len(h.get("messages", [])) == 1, str(h)[:160])
-        await ca.post(f"{base}/api/chat/clear")
-        h = (await ca.get(f"{base}/api/chat/history")).json()
-        check("对话.清空", h.get("messages") == [], str(h)[:160])
-
-        # 长期记忆：添加 → 去重 → 列表 → 校验 → 多用户隔离 → 删除
-        r = await ca.post(f"{base}/api/memories",
-                          json={"action": "add", "content": "我喜欢坐前排"})
-        mem_id = r.json().get("memory", {}).get("id")
-        check("记忆.添加", r.status_code == 200 and bool(mem_id), str(r.text)[:160])
-        r = await ca.post(f"{base}/api/memories",
-                          json={"action": "add", "content": "我喜欢坐前排"})
-        check("记忆.接口去重", r.json().get("memory", {}).get("duplicate") is True
-              and r.json().get("memory", {}).get("id") == mem_id, str(r.text)[:160])
-        m = (await ca.get(f"{base}/api/memories")).json()
-        check("记忆.列表", len(m.get("memories", [])) == 1, str(m)[:160])
-        r = await ca.post(f"{base}/api/memories", json={"action": "add", "content": " "})
-        check("记忆.空内容被拒", r.status_code == 400, str(r.status_code))
-        r = await ca.post(f"{base}/api/memories",
-                          json={"action": "add", "content": "字" * 201})
-        check("记忆.超长被拒", r.status_code == 400, str(r.status_code))
-        async with _hx.AsyncClient(timeout=30, trust_env=False,
-                                   cookies={"qut_session": token_b}) as cb_mem:
-            m = (await cb_mem.get(f"{base}/api/memories")).json()
-            check("记忆.隔离.他人不可见", m.get("memories") == [], str(m)[:160])
-            r = await cb_mem.post(f"{base}/api/memories",
-                                  json={"action": "delete", "id": mem_id})
-            check("记忆.隔离.不能删他人记忆", r.status_code == 404, str(r.status_code))
-            r = await cb_mem.post(f"{base}/api/memories",
-                                  json={"action": "add", "content": "B 的记忆"})
-            check("记忆.隔离.各自可添加", r.status_code == 200, str(r.text)[:160])
-            await cb_mem.post(f"{base}/api/chat/history", json={"messages": [
-                {"role": "user", "content": "B 的对话"}]})
-        r = await ca.post(f"{base}/api/memories",
-                          json={"action": "delete", "id": mem_id})
-        m = (await ca.get(f"{base}/api/memories")).json()
-        check("记忆.删除", r.status_code == 200 and m.get("memories") == [],
-              str(m)[:160])
-        r = await ca.post(f"{base}/api/memories",
-                          json={"action": "delete", "id": mem_id})
-        check("记忆.重复删除404", r.status_code == 404, str(r.status_code))
-
         # 正方保存：密码留空沿用旧密码，学年归一化，测试失败不改配置
         r = await ca.post(f"{base}/api/provider/zhengfang", json={
             "username": "20230001", "password": "", "test": False})
@@ -2303,18 +1791,6 @@ async def http_tests(port: int):
         ex_portal = (await ca.get(f"{base}/api/exams")).json()
         check("考试.门户+正方凭证可用", ex_portal.get("supported") is True
               and ex_portal.get("provider") == "portal", str(ex_portal)[:180])
-
-        # AI 流式：未配置直接 400；上游不可达时用 SSE error 事件兜底
-        st = await ca.post(f"{base}/api/chat/stream", json={"message": "你好"})
-        check("流式.未配置被拒", st.status_code == 400, str(st.status_code))
-        await ca.post(f"{base}/api/settings", json={"ai": {
-            "enabled": True, "api_key": "dummy", "model": "x",
-            "base_url": "http://127.0.0.1:9/v1"}})
-        rr = await ca.post(f"{base}/api/chat/stream", json={"message": "你好"})
-        check("流式.返回事件流", rr.status_code == 200
-              and "text/event-stream" in rr.headers.get("content-type", ""),
-              str(rr.headers.get("content-type")))
-        check("流式.上游失败写入 error 事件", '"error"' in rr.text, rr.text[:200])
 
     async with _hx.AsyncClient(timeout=30, trust_env=False,
                                cookies={"qut_session": token_b}) as cb:
@@ -2353,15 +1829,9 @@ async def http_tests(port: int):
         with db.get_conn() as conn:
             n_ev = conn.execute("SELECT COUNT(*) FROM events WHERE user_id = ?",
                                 (bob_id,)).fetchone()[0]
-            n_chat = conn.execute("SELECT COUNT(*) FROM chat_messages WHERE user_id = ?",
-                                  (bob_id,)).fetchone()[0]
-            n_mem = conn.execute("SELECT COUNT(*) FROM user_memories WHERE user_id = ?",
-                                 (bob_id,)).fetchone()[0]
             n_rem = conn.execute("SELECT COUNT(*) FROM reminders WHERE user_id = ?",
                                  (bob_id,)).fetchone()[0]
         check("注销.个人日程一并删除", n_ev == 0, str(n_ev))
-        check("注销.对话与记忆一并删除", n_chat == 0 and n_mem == 0,
-              f"chat={n_chat} mem={n_mem}")
         check("注销.提醒记录一并删除", n_rem == 0, str(n_rem))
         # 管理员注销时把权限交给最早注册的其他账号
         code2 = (await ca2.post(f"{base}/api/auth/invites")).json().get("code")

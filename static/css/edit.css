@@ -85,9 +85,6 @@
   .form-grid {
     grid-template-columns: 1fr;
   }
-  .msg {
-    max-width: 92%;
-  }
   .course-time {
     flex-basis: 76px;
   }

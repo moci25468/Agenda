@@ -643,3 +643,116 @@ def stop() -> dict:
     if _stop_event is not None:
         _stop_event.set()
     return {"ok": True, "message": "正在取消…"}
+
+
+# ---------------- 静默续期：同步发现门户登录态过期时才调用 ----------------
+# 一次无头启动在 2 核 VPS 上约 +450MB 内存 / 3–6 秒，属于"贵但不常发生"的操作：
+# 常态由 httpjson 顺手抓 Set-Cookie 续期，只有真正被踢回登录页才走到这里。
+_SILENT_LOCK = threading.Lock()
+MIN_AVAILABLE_MB = 600
+
+
+def _available_mb() -> int | None:
+    """可用物理内存（MB）；非 Linux（本机开发）返回 None 表示不限制。"""
+    try:
+        with open("/proc/meminfo", encoding="ascii") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) // 1024
+    except OSError:
+        pass
+    return None
+
+
+def _save_portal_cookie(cookie_str: str) -> bool:
+    """把续期得到的 Cookie 写回当前用户的门户配置；返回是否真的发生变化。"""
+    cfg = load_config()
+    portal = cfg.setdefault("provider", {}).setdefault("portal", {})
+    headers = dict(portal.get("headers") or {})
+    key = next((k for k in headers if str(k).lower() == "cookie"), None)
+    if key is None:
+        return False  # cURL 导入但没带登录态头的配置，不擅自造一个
+    if headers.get(key) == cookie_str:
+        return False
+    headers[key] = cookie_str
+    portal["headers"] = headers
+    save_config(cfg)
+    return True
+
+
+def silent_refresh_cookie(save: bool = True) -> dict:
+    """用持久 profile 无头打开门户，尝试静默续期登录态。
+
+    返回 {ok, refreshed, expired, reason}：
+      refreshed=True  → 已拿到有效登录态（并写回配置），调用方可重试取数
+      expired=True    → 确认被踢回统一身份认证，需要用户重新扫码
+    """
+    uid = get_current_user()
+    if uid is None:
+        return {"ok": False, "refreshed": False, "expired": False, "reason": "no-user"}
+    with _lock:
+        if _thread is not None and _thread.is_alive():
+            return {"ok": False, "refreshed": False, "expired": False,
+                    "reason": "interactive-login-running"}
+    profile_dir = _profile_dir(uid)
+    if not profile_dir.is_dir() or not any(profile_dir.iterdir()):
+        return {"ok": False, "refreshed": False, "expired": False, "reason": "no-profile"}
+    avail = _available_mb()
+    if avail is not None and avail < MIN_AVAILABLE_MB:
+        return {"ok": False, "refreshed": False, "expired": False,
+                "reason": f"low-memory({avail}MB)"}
+    if not _SILENT_LOCK.acquire(blocking=False):
+        return {"ok": False, "refreshed": False, "expired": False, "reason": "busy"}
+    try:
+        return _silent_refresh_inner(profile_dir, save)
+    finally:
+        _SILENT_LOCK.release()
+
+
+def _silent_refresh_inner(profile_dir, save: bool) -> dict:
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return {"ok": False, "refreshed": False, "expired": False, "reason": "no-playwright"}
+    args = ["--no-sandbox", "--disable-dev-shm-usage",
+            "--disable-gpu", "--no-first-run"]
+    ctx = None
+    try:
+        with sync_playwright() as pw:
+            try:
+                ctx = pw.chromium.launch_persistent_context(
+                    str(profile_dir), channel="chrome", headless=True,
+                    args=args, viewport={"width": 1180, "height": 820})
+            except Exception:  # noqa: BLE001
+                # Docker 镜像只装了 chromium headless shell，没有本机 Chrome
+                ctx = pw.chromium.launch_persistent_context(
+                    str(profile_dir), headless=True,
+                    args=args, viewport={"width": 1180, "height": 820})
+            page = ctx.pages[0] if ctx.pages else ctx.new_page()
+            try:
+                page.goto(PORTAL_ENTRY, wait_until="domcontentloaded", timeout=45000)
+            except Exception as e:  # noqa: BLE001
+                return {"ok": False, "refreshed": False, "expired": False,
+                        "reason": "goto: " + str(e).splitlines()[0][:80]}
+            time.sleep(1.5)  # 等 SPA 落定 + 网关回写 Cookie
+            if not any(_looks_logged_in(u) for u in _page_urls(ctx)):
+                return {"ok": True, "refreshed": False, "expired": True,
+                        "reason": "redirected-to-login"}
+            cookies = ctx.cookies()
+            cookie_str = _cookie_from_context(cookies)
+            if not cookie_str:
+                return {"ok": True, "refreshed": False, "expired": True,
+                        "reason": "no-cookie"}
+            if save:
+                _save_portal_cookie(cookie_str)
+            return {"ok": True, "refreshed": True, "expired": False,
+                    "cookie_count": len(cookies)}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "refreshed": False, "expired": False,
+                "reason": str(e).splitlines()[0][:120]}
+    finally:
+        if ctx is not None:
+            try:
+                ctx.close()
+            except Exception:  # noqa: BLE001
+                pass

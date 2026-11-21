@@ -196,18 +196,6 @@ input.invalid, select.invalid, textarea.invalid {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--fail) 18%, transparent);
 }
 
-/* P1-7 AI 出错内联卡片 */
-.chat-error {
-  margin-top: 10px; padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, var(--fail) 35%, var(--line));
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--fail) 9%, var(--card));
-}
-.chat-error-head { font-size: 12px; font-weight: 600; color: var(--fail); }
-.chat-error-msg { margin-top: 4px; font-size: 12px; line-height: 1.6; color: var(--text); word-break: break-word; }
-.chat-error-actions { margin-top: 9px; }
-.chat-error-actions button { font-size: 11px; padding: 5px 12px; }
-
 /* P2-10 首屏启动骨架 */
 .boot-splash {
   position: fixed; inset: 0; z-index: 200;
@@ -272,6 +260,15 @@ input.invalid, select.invalid, textarea.invalid {
   padding: 6px 12px; border: 1px solid var(--line);
   border-radius: var(--radius-l); background: var(--card);
 }
+/* 今天固定在最前，其余几天用一条细分隔标题衔接 */
+.week-days-more {
+  display: flex; align-items: center; gap: 10px;
+  margin: 16px 2px 10px; color: var(--sub);
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.16em;
+}
+.week-days-more::before, .week-days-more::after {
+  content: ""; flex: 1; height: 1px; background: var(--line);
+}
 
 /* 断点契约（实测修正版）：
    ≤480 小屏微调 | ≤720 移动端主档（底部标签栏 + 日视图） | >720 桌面顶部胶囊导航。
@@ -281,6 +278,10 @@ input.invalid, select.invalid, textarea.invalid {
   .week-grid-scroll { overflow-x: visible; }
   .week-grid { display: none; }
   .week-days { display: block; }
+  /* 今天固定第一：日视图紧跟周导航，本周概览等统计挪到整周课表之后 */
+  #tab-week > .week-nav,
+  #tab-week > .week-jump,
+  #tab-week > .week-grid-scroll { order: -1; }
   /* iOS 聚焦 <16px 输入框会自动放大整页，导致布局跳动。
      用 !important 盖过各皮肤里的 ID 级字号（如 #curlInput / #adminSort）。 */
   input:not([type="checkbox"]):not([type="radio"]),

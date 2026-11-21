@@ -20,7 +20,7 @@ CACHE_TTL = 1800          # 成功后缓存 30 分钟
 FAIL_TTL = 120            # 失败只短暂回避，两分钟后就允许重试
 STALE_MAX = 6 * 3600      # 兜底数据最多沿用 6 小时，避免把一天前的天气当今日
 TIMEOUT = 10.0            # 跨境访问偶发 5s 级抖动，8s 太紧
-PRIMARY_TIMEOUT = 5.0     # 主源连不通时是干等满超时，给短一点免得卡住页面/AI
+PRIMARY_TIMEOUT = 5.0     # 主源连不通时是干等满超时，给短一点免得卡住页面
 RETRY_DELAYS = (0.5,)     # 失败后再试一次，最多两次请求
 DEAD_TTL = 900            # 主源连续失败后熔断 15 分钟，期间直接走备用源
 
@@ -269,7 +269,7 @@ async def weather_line(cfg: dict, day_s: str, hhmm: str) -> str:
 async def daily_summary(cfg: dict, day_s: str) -> str:
     """返回某一天（YYYY-MM-DD）的天气概况一句话，如「多云，12~18℃，最高降水概率 40%」。
 
-    供 AI 上下文注入使用；未开启、坐标无效或接口不可用时返回空串。
+    未开启、坐标无效或接口不可用时返回空串。
     """
     w = cfg.get("weather") or {}
     if w.get("enabled") is False or not day_s:

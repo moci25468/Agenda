@@ -16,11 +16,11 @@ from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import ai, auth, browser_login, db, files
+from . import auth, browser_login, db
 from .config import (
     DEFAULT_CONFIG, MASK, global_config, load_config, masked_config, save_config,
 )
@@ -33,10 +33,11 @@ from .models import (
 )
 from .providers import get_provider
 from .providers.zhengfang import ZhengfangProvider, zhengfang_configured
-from .push import available_channels, push_all, send_selected, wecom_input_error
+from .push import push_all, send_selected, wecom_input_error
 from .scheduler import (
-    WEEKDAY_CN, apply_snapshot, courses_on, next_run_time, reschedule, run_sync,
-    section_time, shutdown_scheduler, start_scheduler,
+    WEEKDAY_CN, apply_snapshot, courses_on, free_sections, next_run_time,
+    reschedule, run_sync, section_time, shutdown_scheduler, start_scheduler,
+    sync_slot_hhmm,
 )
 from . import weather
 from .weather import hours_map
@@ -69,8 +70,6 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_warm_weather())
     yield
     shutdown_scheduler()
-    from . import ai as _ai
-    await _ai.aclose_http()
 
 
 app = FastAPI(title="Agenda 知序", version=get_version(), lifespan=lifespan)
@@ -205,6 +204,36 @@ class AccessGuard:
 app.add_middleware(AccessGuard)
 
 
+class CachePolicy:
+    """页面外壳与静态资源一律 no-cache：每次使用前凭 ETag 回源校验（未变则 304）。
+
+    缺少 Cache-Control 时浏览器按启发式新鲜度（距 Last-Modified 的 10%）直接用缓存、
+    不回源校验，发布后旧 app.js 会与新 index.html 配对运行并整页报错（登录失效事故根因）。
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        path = scope.get("path", "") if scope["type"] == "http" else ""
+        if not (path in ("/", "/index.html", "/manifest.webmanifest")
+                or path.startswith("/static/")):
+            return await self.app(scope, receive, send)
+
+        async def send_no_cache(message):
+            if message["type"] == "http.response.start":
+                headers = [(k, v) for k, v in message["headers"]
+                           if k.lower() != b"cache-control"]
+                headers.append((b"cache-control", b"no-cache"))
+                message["headers"] = headers
+            await send(message)
+
+        await self.app(scope, receive, send_no_cache)
+
+
+app.add_middleware(CachePolicy)
+
+
 @app.get("/")
 async def index():
     return FileResponse(STATIC_DIR / "index.html")
@@ -271,10 +300,8 @@ async def status():
         "next_exam": upcoming_exams[0].to_dict() if upcoming_exams else None,
         "exam_fetched_at": exam_snap["fetched_at"] if exam_snap else None,
         "last_sync": snap["fetched_at"] if snap else None,
-        "sync_time": cfg.get("sync_time", "12:00"),
+        "sync_time": sync_slot_hhmm(),
         "next_sync": next_run_time(),
-        "ai_enabled": bool(cfg.get("ai", {}).get("enabled") and cfg.get("ai", {}).get("api_key")),
-        "ai_show_in_nav": cfg.get("ai", {}).get("show_in_nav", True) is not False,
         "push_channels": [c for c, on in (
             ("bark", push_cfg.get("bark_enabled")),
             ("wecom", push_cfg.get("wecom_enabled")),
@@ -815,7 +842,7 @@ async def rooms_my_free(date_s: str = ""):
         d = date.fromisoformat(date_s)
     except ValueError:
         raise HTTPException(400, "日期格式应为 YYYY-MM-DD")
-    spans = ai.free_sections(load_config(), d)
+    spans = free_sections(load_config(), d)
     return {"date": date_s,
             "spans": None if spans is None
             else [{"start": a, "end": b} for a, b in spans]}
@@ -1170,19 +1197,6 @@ def _validate_settings(cfg: dict) -> dict:
                 except UnsafeURLError as e:
                     raise HTTPException(400, f"课表接口地址不安全：{e}")
 
-    ai_cfg = out.get("ai")
-    if isinstance(ai_cfg, dict):
-        if "enabled" in ai_cfg:
-            ai_cfg["enabled"] = _req_bool(ai_cfg["enabled"], "ai.enabled")
-        if ai_cfg.get("base_url") and ai_cfg["base_url"] != MASK:
-            bu = _req_str(ai_cfg["base_url"], "ai.base_url", 500)
-            parts = urlsplit(bu)
-            if parts.scheme not in ("http", "https") or not parts.netloc:
-                raise HTTPException(400, "ai.base_url 需为 http(s):// 地址")
-            try:
-                assert_safe_outbound_url(bu)
-            except UnsafeURLError as e:
-                raise HTTPException(400, f"AI 接口地址不安全：{e}")
     return out
 
 
@@ -1381,12 +1395,6 @@ class PushTestRequest(BaseModel):
     channel: str = ""
 
 
-class PushSendRequest(BaseModel):
-    title: str = ""
-    body: str = ""
-    channels: list[str] = []
-
-
 @app.get("/api/push/log")
 async def push_log(limit: int = 10):
     return {"logs": db.list_push_logs(max(1, min(limit, 200)))}
@@ -1403,180 +1411,6 @@ async def push_test(req: PushTestRequest | None = None):
     else:
         results = await push_all(cfg, title, body)
     return {"results": results}
-
-
-@app.post("/api/push/send")
-async def push_send(req: PushSendRequest):
-    """AI 主动推送：只发给已配置并启用的通道，逐条返回结果。"""
-    cfg = load_config()
-    title = (req.title or "").strip()[:60] or "Agenda 消息"
-    body = (req.body or "").strip()
-    if not body:
-        raise HTTPException(400, "推送内容不能为空")
-    channels = list(dict.fromkeys(c for c in (req.channels or []) if c))
-    if not channels:
-        channels = available_channels(cfg)
-        if not channels:
-            raise HTTPException(400, "未配置或未启用 Bark / 企业微信推送，请先到设置中填写并开启")
-    results = await send_selected(cfg, title, body[:1000], channels, need_enabled=True)
-    return {"results": results}
-
-
-class ChatRequest(BaseModel):
-    message: str
-    history: list[dict] = []
-    attachments: list[str] = []      # 附件 id，由 /api/chat/upload 返回
-
-
-@app.post("/api/chat/upload")
-async def chat_upload(request: Request, name: str = ""):
-    """上传附件：请求体就是文件原始字节，文件名走 ?name=（不依赖 multipart）。"""
-    length = (request.headers.get("content-length") or "").strip()
-    limit = files.MAX_UPLOAD_BYTES
-    if length.isdigit() and int(length) > limit:
-        raise HTTPException(413, f"文件太大，单个文件上限 {limit // 1048576} MB")
-    data = await request.body()
-    if len(data) > limit:
-        raise HTTPException(413, f"文件太大，单个文件上限 {limit // 1048576} MB")
-    try:
-        return await run_in_threadpool(
-            files.save, db._uid(), name or request.headers.get("x-filename") or "", data)
-    except files.FileError as e:
-        raise HTTPException(400, str(e))
-
-
-@app.delete("/api/chat/attachments/{attach_id}")
-async def chat_attachment_drop(attach_id: str):
-    return {"ok": files.drop(db._uid(), attach_id)}
-
-
-EXPIRED_ATTACH_NOTE = "\n\n（说明：之前上传的附件已过期，这次没能读到；需要的话请重新上传。）"
-
-
-def _chat_attachments(ids: list[str]) -> tuple[list[dict], str]:
-    """取出本次消息要带的附件；全部失效时给模型一句提示，好如实告诉用户。"""
-    items = files.resolve(db._uid(), ids)
-    if ids and not items:
-        return items, EXPIRED_ATTACH_NOTE
-    return items, ""
-
-
-@app.post("/api/chat")
-async def chat_endpoint(req: ChatRequest):
-    if not req.message.strip():
-        raise HTTPException(400, "消息不能为空")
-    attachments, note = _chat_attachments(req.attachments)
-    try:
-        reply = await ai.chat(req.message + note, req.history, attachments)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"AI 请求失败: {e}")
-    return {"reply": reply}
-
-
-@app.post("/api/chat/stream")
-async def chat_stream_endpoint(req: ChatRequest):
-    """SSE 流式回复：data: {"delta": "..."}，结束发 {"done": true}，失败发 {"error": "..."}。"""
-    if not req.message.strip():
-        raise HTTPException(400, "消息不能为空")
-    try:
-        ai.check_ready()
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-    attachments, note = _chat_attachments(req.attachments)
-
-    async def event_gen():
-        try:
-            async for chunk in ai.chat_stream(req.message + note, req.history, attachments):
-                yield "data: " + json.dumps({"delta": chunk}, ensure_ascii=False) + "\n\n"
-            yield 'data: {"done": true}\n\n'
-        except Exception as e:  # noqa: BLE001
-            yield "data: " + json.dumps({"error": f"AI 请求失败: {e}"}, ensure_ascii=False) + "\n\n"
-
-    return StreamingResponse(event_gen(), media_type="text/event-stream", headers={
-        "Cache-Control": "no-cache",
-        "X-Accel-Buffering": "no",   # 让 nginx 不缓冲，逐字下发
-    })
-
-
-@app.get("/api/ai/models")
-async def ai_models():
-    try:
-        return {"models": await ai.list_models()}
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(400, str(e))
-
-
-# ---------- AI 对话落库（短期记忆）与长期记忆 ----------
-
-class ChatHistoryRequest(BaseModel):
-    messages: list[dict] = []
-
-
-@app.get("/api/chat/history")
-async def chat_history():
-    """当前用户的对话快照，刷新/换设备后恢复。"""
-    return {"messages": db.get_chat_history()}
-
-
-@app.post("/api/chat/history")
-async def save_chat_history(req: ChatHistoryRequest):
-    """前端在每轮对话结束、编辑截断后整体回存（客户端为准）。"""
-    cleaned = []
-    for m in req.messages[:db.CHAT_HISTORY_CAP]:
-        role = m.get("role")
-        content = str(m.get("content") or "")[:4000]
-        if role in ("user", "assistant") and content.strip():
-            cleaned.append({"role": role, "content": content})
-    db.replace_chat_history(cleaned)
-    return {"ok": True, "count": len(cleaned)}
-
-
-@app.post("/api/chat/clear")
-async def clear_chat():
-    db.clear_chat_history()
-    return {"ok": True}
-
-
-class MemoryRequest(BaseModel):
-    action: str                 # add | delete
-    content: str = ""
-    id: str | None = None
-
-
-@app.get("/api/memories")
-async def list_memories():
-    return {"memories": db.list_memories()}
-
-
-@app.post("/api/memories")
-async def edit_memory(req: MemoryRequest):
-    action = (req.action or "").strip()
-    if action == "add":
-        content = req.content.strip()
-        if not content:
-            raise HTTPException(400, "记忆内容不能为空")
-        if len(content) > 200:
-            raise HTTPException(400, "记忆太长（最多 200 字）")
-        try:
-            return {"ok": True, "memory": db.add_memory(content)}
-        except ValueError as e:
-            raise HTTPException(400, str(e))
-    if action == "delete":
-        mem_id = (req.id or "").strip()
-        if not mem_id or not db.delete_memory(mem_id):
-            raise HTTPException(404, "记忆不存在")
-        return {"ok": True}
-    raise HTTPException(400, "未知操作")
-
-
-@app.post("/api/ai/test")
-async def ai_test():
-    try:
-        return await ai.test_connection()
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(400, str(e))
 
 
 @app.post("/api/security/token")
@@ -2042,7 +1876,7 @@ class PrimaryRequest(BaseModel):
 
 @app.post("/api/provider/primary")
 async def set_provider_primary(req: PrimaryRequest):
-    """手动指定课表主数据源：auto（正方优先）/ zhengfang / portal，并立即按新源同步一次。"""
+    """手动指定课表主数据源：auto（门户优先）/ zhengfang / portal，并立即按新源同步一次。"""
     from .config import portal_configured, resolve_course_source, zhengfang_configured
 
     if req.primary not in ("auto", "zhengfang", "portal"):
@@ -2160,27 +1994,37 @@ async def save_zhengfang(req: ZhengfangSaveRequest):
 
     zf["year"], zf["term"] = provider.year, provider.term
     p["zhengfang"] = zf
-    # 用户刚验证过正方账号：课表主数据源直接切到正方，否则仍会按门户渲染，
-    # 导致「测试成功但课表还是门户那份」。
-    p["primary"] = "zhengfang"
     save_config(cfg)
     label = term_label(provider.year, provider.term)
     message = (f"已自动切换到教务当前学期（{label}）：" if switched else f"{label}：")
     message += f"{len(courses)} 门课程"
     message += f"，{len(exams)} 场考试" if not exam_error else "；考试接口失败"
-    # 立即把这次拉到的教务课表写进快照，页面无需再等下一次定时同步
-    try:
-        await apply_snapshot(cfg, courses, "zhengfang", False,
-                             exams=exams or None,
-                             exam_source="zhengfang" if not exam_error else None)
-    except Exception as e:  # noqa: BLE001
-        message += f"；课表已保存但写入失败：{e}"
+    from .config import resolve_course_source
+    resolved = resolve_course_source(load_config())
+    if resolved == "zhengfang":
+        # 课表主源就是正方：直接写入这次拉到的数据，页面无需等下一次定时同步
+        try:
+            await apply_snapshot(cfg, courses, "zhengfang", False,
+                                 exams=exams or None,
+                                 exam_source="zhengfang" if not exam_error else None)
+        except Exception as e:  # noqa: BLE001
+            message += f"；课表已保存但写入失败：{e}"
+        message += "，课表已切换为正方教务"
+    else:
+        # 课表主源是门户：不用正方的课表覆盖门户那份（门户含临时调课），
+        # 只触发一次同步把正方的考试数据带进来。
+        message += "；课表仍以门户为准，正方用于考试与空教室"
+        try:
+            await run_sync(push=False)
+        except Exception:  # noqa: BLE001
+            pass
     snap = db.get_snapshot()
-    return {"ok": True, "message": message + "，课表已切换为正方教务",
+    return {"ok": True, "message": message,
             "course_count": len(courses),
             "exam_count": len(exams), "exam_error": exam_error,
-            "overwritten": (snap or {}).get("source") == "portal",
-            "primary": "zhengfang",
+            "overwritten": resolved == "zhengfang" and (snap or {}).get("source") == "portal",
+            "primary": p.get("primary") or "auto",
+            "resolved": resolved,
             "year": provider.year, "term": provider.term,
             "switched": bool(switched)}
 

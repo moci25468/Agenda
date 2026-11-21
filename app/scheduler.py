@@ -31,11 +31,47 @@ NEXT_DAY_JOB_ID = "next_day_summary"
 BACKUP_JOB_ID = "daily_backup"
 SYNC_CHECK_JOB_ID = "daily_sync_check"
 
+# 自动同步窗口：用户不再自设时间，服务器按注册人数把所有人均匀铺进这个窗口，
+# 一人一个时段，避免同一分钟集中打门户（也避免续期浏览器排队）。
+SYNC_WINDOW_START = (6, 30)
+SYNC_WINDOW_SECONDS = 3600   # 目标窗口长度（人数多时按比例压缩间隔）
+SYNC_SPACING_MIN = 60        # 相邻用户最小间隔
+SYNC_SPACING_MAX = 300       # 人少时也不拉得太开
+
 # 同步串行化：手动同步与定时同步可能同时触发，若并发执行会各自基于同一份旧快照
 # 算出重复变更并重复推送。用非阻塞锁保证同一时刻只有一个同步流程。
 # （apply_snapshot 另有一把短锁，保护 diff→保存→写日志这段无 await 的临界区。）
 _sync_lock = threading.Lock()
 _apply_lock = threading.Lock()
+
+
+def free_spans(occupied: set[int], max_section: int = 12) -> list[tuple[int, int]]:
+    """把空闲节次合并成连续区间，如 {1,2,5,6} → [(3,4),(7,12)]。"""
+    spans = []
+    s = 1
+    while s <= max_section:
+        if s in occupied:
+            s += 1
+            continue
+        e = s
+        while e + 1 <= max_section and e + 1 not in occupied:
+            e += 1
+        spans.append((s, e))
+        s = e + 1
+    return spans
+
+
+def free_sections(cfg: dict, day: date) -> list[tuple[int, int]] | None:
+    """算出某天没课的节次区间；课表尚未同步时返回 None（区别于「全天没课」）。"""
+    snap = db.get_snapshot()
+    if not snap:
+        return None
+    courses = apply_course_overrides(
+        [Course.from_dict(d) for d in snap["courses"]], cfg.get("course_overrides"))
+    occupied: set[int] = set()
+    for c in courses_on(cfg, courses, day):
+        occupied.update(range(c.start, c.end + 1))
+    return free_spans(occupied)
 
 
 def section_time(cfg: dict, section: int, end: bool = False) -> str:
@@ -162,7 +198,7 @@ async def _fallback_bundle(cfg: dict):
 async def run_sync(push: bool = True) -> dict:
     """按当前数据源拉取一次课表并应用快照（同一时刻只允许一个同步流程）。
 
-    课表主数据源由 provider.primary 决定（auto = 正方优先，没配正方才用门户）；
+    课表主数据源由 provider.primary 决定（auto = 门户优先，没配门户才用正方）；
     考试始终优先从正方拉取（门户只提供课表），门户存在时也不影响考试同步。
     auto 模式下主源拉取失败会自动回退到另一套来源，避免单个账号故障导致课表停更。
     """
@@ -175,12 +211,37 @@ async def run_sync(push: bool = True) -> dict:
         _sync_lock.release()
 
 
+async def _fetch_bundle_with_cookie_refresh(cfg: dict):
+    """门户取数失败且是登录态过期时，用持久 profile 静默续期并重试一次。
+
+    常态不会走到这里：httpjson 每次请求都会顺手接收网关下发的滚动 Cookie，
+    只有当会话真的被踢回统一身份认证，才付出一次无头浏览器启动的代价。
+    """
+    provider = get_provider(cfg)
+    try:
+        return provider, await provider.fetch_bundle()
+    except AuthExpiredError:
+        if resolve_course_source(cfg) != "portal":
+            raise
+        from .browser_login import silent_refresh_cookie
+        try:
+            res = await asyncio.to_thread(silent_refresh_cookie)
+        except Exception:  # noqa: BLE001
+            res = {}
+        if not res.get("refreshed"):
+            raise
+        cfg = load_config()
+        provider = get_provider(cfg)
+        bundle = await provider.fetch_bundle()
+        db.add_sync_log("ok", "门户登录态过期，已用本机浏览器登录态静默续期并重试成功")
+        return provider, bundle
+
+
 async def _run_sync_inner(push: bool = True) -> dict:
     cfg = load_config()
     fallback_note = ""
     try:
-        provider = get_provider(cfg)
-        courses, exams = await provider.fetch_bundle()
+        provider, (courses, exams) = await _fetch_bundle_with_cookie_refresh(cfg)
     except Exception as e:  # noqa: BLE001
         fallback = await _fallback_bundle(cfg)
         if not fallback:
@@ -500,24 +561,49 @@ def _reminder_job_wrapper():
             current_user_id.reset(ctx)
 
 
-def _sync_check_wrapper():
-    """每分钟逐用户检查是否到各自的 sync_time；命中且当天未同步才同步。
+def sync_spacing_seconds(n: int) -> int:
+    """相邻用户同步间隔：人数越多间隔越小，但限制在 1~5 分钟。"""
+    if n <= 1:
+        return SYNC_SPACING_MIN
+    return min(SYNC_SPACING_MAX, max(SYNC_SPACING_MIN, SYNC_WINDOW_SECONDS // n))
 
-    sync_time 是每用户配置，而 APScheduler 的 cron 任务是全局的，用一个固定
-    时刻会让「最后保存设置的人」决定所有人时间。改为每分钟按用户比对，既尊重
-    各自配置，也避免互相覆盖。
+
+def sync_slots(day: date | None = None) -> dict[int, datetime]:
+    """按注册顺序（id 升序）给每个活跃用户分配当天的同步时刻。"""
+    ids = db.list_user_ids() or [1]
+    day = day or datetime.now(TZ).date()
+    base = datetime(day.year, day.month, day.day,
+                    SYNC_WINDOW_START[0], SYNC_WINDOW_START[1], tzinfo=TZ)
+    gap = sync_spacing_seconds(len(ids))
+    return {uid: base + timedelta(seconds=i * gap) for i, uid in enumerate(ids)}
+
+
+def sync_slot_hhmm(uid: int | None = None) -> str:
+    """当前用户被分配的每日同步时刻（HH:MM），供状态栏展示。"""
+    from .user_context import get_current_user
+
+    uid = uid if uid is not None else get_current_user()
+    slot = sync_slots().get(uid) if uid is not None else None
+    return slot.strftime("%H:%M") if slot else "--:--"
+
+
+def _sync_check_wrapper():
+    """每分钟检查：到点且今天还没同步的用户逐个同步（服务器自动错峰）。
+
+    用户不再自设时间：时刻按注册人数均匀分配。判定条件是「已过自己的时段」
+    而不是「正好这一分钟」，所以进程重启、错过时段当天也能补跑。
     """
     from .user_context import current_user_id, set_current_user
 
     now = datetime.now(TZ)
-    hm = now.strftime("%H:%M")
     today = now.date().isoformat()
+    slots = sync_slots(now.date())
     for uid in (db.list_user_ids() or [1]):
+        slot = slots.get(uid)
+        if slot is None or now < slot:
+            continue
         ctx = set_current_user(uid)
         try:
-            cfg = load_config()
-            if (cfg.get("sync_time") or "12:00") != hm:
-                continue
             if db.reminder_sent(today, "daily_sync"):
                 continue
             db.mark_reminder(today, "daily_sync")  # 先占位，避免同一分钟重复触发
@@ -592,7 +678,7 @@ def start_scheduler(cfg: dict):
         id=NEXT_DAY_JOB_ID, replace_existing=True, max_instances=1,
         coalesce=True, misfire_grace_time=120,
     )
-    # 每日同步：每分钟检查各用户的 sync_time（每用户可不同），命中且当天未同步才跑
+    # 每日同步：每分钟检查，到点且今天未同步才跑；时刻由 sync_slots() 按注册人数错峰分配
     _scheduler.add_job(
         _sync_check_wrapper, IntervalTrigger(minutes=1, timezone=TZ),
         id=SYNC_CHECK_JOB_ID, replace_existing=True, max_instances=1,
@@ -615,7 +701,7 @@ def start_scheduler(cfg: dict):
 
 
 def reschedule(cfg: dict):
-    """兼容旧调用：同步时间已改为每分钟按用户比对，无需重排全局 cron。
+    """兼容旧调用：同步时刻改为按注册人数自动分配（见 sync_slots），无需重排 cron。
 
     保留函数是为了不破坏 post_settings 等既有调用点；真正的调度逻辑见
     _sync_check_wrapper。
@@ -624,20 +710,21 @@ def reschedule(cfg: dict):
 
 
 def next_run_time() -> str | None:
-    """按当前用户的 sync_time 估算下次同步时间（今天未到则今天，否则明天）。"""
-    try:
-        cfg = load_config()
-        parts = (cfg.get("sync_time") or "12:00").split(":")
-        hh, mm = int(parts[0]), int(parts[1])
-        if not (0 <= hh <= 23 and 0 <= mm <= 59):
-            raise ValueError
-    except (ValueError, IndexError, TypeError):
-        hh, mm = 12, 0
+    """当前用户下一次自动同步时刻（服务器分配；今天已完成则顺延到明天）。"""
+    from .user_context import get_current_user
+
     now = datetime.now(TZ)
-    target = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
-    if target <= now:
-        target += timedelta(days=1)
-    return target.strftime("%Y-%m-%d %H:%M:%S")
+    uid = get_current_user()
+    slot = sync_slots(now.date()).get(uid) if uid is not None else None
+    if slot is None:
+        return None
+    try:
+        if not db.reminder_sent(now.date().isoformat(), "daily_sync"):
+            # 已过时段但今天还没同步：一分钟后补跑
+            return (slot if now < slot else now).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:  # noqa: BLE001
+        pass
+    return (slot + timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def shutdown_scheduler():

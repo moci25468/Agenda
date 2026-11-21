@@ -254,147 +254,6 @@ nav button.active {
   #todayCount { margin-top: 13px; padding-top: 9px; border-top: 1px solid var(--line); font-size: 11px; }
 }
 
-/* AI：去卡片化对话（01 §3.10）+ 可点击追问 */
-.chat-box {
-  height: clamp(600px, calc(100vh - 235px), 760px);
-  height: clamp(600px, calc(100dvh - 235px), 760px);
-  min-height: 0;
-  padding: 0;
-  overflow: hidden;
-  border-radius: var(--radius-xl);
-}
-.chat-head {
-  align-items: center;
-  padding: 21px 26px;
-  border-bottom-color: var(--line);
-  background: var(--card);
-}
-.chat-title-line { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
-.chat-head h2 { font-size: 18px; }
-.ai-status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
-.ai-badge {
-  padding: 3px 8px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 10px;
-  font-weight: 550;
-}
-.chat-head p { margin-top: 6px; font-size: 12px; line-height: 1.6; }
-.chat-head-actions { gap: 7px; }
-.chat-head-actions button { background: var(--fill); }
-.chat-msgs {
-  padding: 26px;
-  background: var(--bg);
-  scroll-behavior: smooth;
-  scrollbar-color: color-mix(in srgb, var(--sub) 35%, transparent) transparent;
-  scrollbar-width: thin;
-}
-.msg { line-height: 1.8; }
-.msg.user {
-  max-width: min(58%, 520px);
-  width: fit-content;
-  align-self: flex-end;
-  margin-bottom: 24px;
-  padding: 11px 16px;
-  border-radius: 15px 15px 4px 15px;
-  background: var(--accent);
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 14%, transparent);
-}
-.msg.ai {
-  max-width: 100%;
-  margin-bottom: 20px;
-  padding: 0 0 20px;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  white-space: normal;
-}
-.msg.ai::before {
-  content: "知序";
-  display: block;
-  margin-bottom: 6px;
-  color: var(--accent);
-  font-size: 10px;
-  font-weight: 650;
-  letter-spacing: 0.12em;
-}
-.msg.ai:last-child { border-bottom-color: transparent; }
-.msg.ai .md-p { margin: 6px 0; }
-.msg.ai .md-p:first-of-type { margin-top: 0; }
-.msg.ai .md-h { margin: 16px 0 7px; color: var(--text); }
-.msg.ai .md-li { margin: 4px 0; padding-left: 17px; }
-.msg.ai .md-li::before { color: var(--accent); }
-.msg.ai .md-table { margin: 12px 0; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; border-collapse: separate; border-spacing: 0; }
-.msg.ai .md-table th, .msg.ai .md-table td { padding: 8px 11px; border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-.msg.ai .md-table th:last-child, .msg.ai .md-table td:last-child { border-right: 0; }
-.msg.ai .md-table tbody tr:last-child td { border-bottom: 0; }
-.msg.ai .md-table th { background: var(--fill); color: var(--text); }
-.msg.ai .md-table tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--sub) 5%, transparent); }
-.msg.ai .md-quote { margin: 10px 0; padding: 6px 12px; border-left-color: var(--accent); border-radius: 0 7px 7px 0; background: var(--fill); }
-.msg.ai code { background: var(--fill); color: var(--accent); }
-.msg-actions { margin-top: 10px; opacity: 0.55; }
-.msg:hover .msg-actions,
-.msg:focus-within .msg-actions { opacity: 1; }
-.msg-actions button { min-height: 0; padding: 0; border-radius: 4px; font-size: 11px; font-weight: 450; }
-.msg-actions button:hover { background: transparent; }
-.reply-followups {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 7px;
-  margin-top: 16px;
-  padding-top: 14px;
-  border-top: 1px dashed var(--line);
-}
-.reply-followups-label { margin-right: 2px; color: var(--sub); font-size: 11px; white-space: nowrap; }
-.reply-followup {
-  min-height: 31px;
-  padding: 5px 10px;
-  border-color: var(--line-strong);
-  border-radius: var(--radius);
-  background: var(--fill);
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 500;
-  text-align: left;
-}
-.reply-followup::after { content: " ↗"; color: var(--accent-faint); }
-.reply-followup:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
-.chips {
-  align-items: center;
-  gap: 7px;
-  padding: 13px 26px;
-  border-top: 1px solid var(--line);
-  background: var(--card);
-}
-.chips-label { margin-right: 3px; color: var(--sub); font-size: 11px; white-space: nowrap; }
-.chips button {
-  min-height: 31px;
-  padding: 5px 11px;
-  border-color: var(--line);
-  border-radius: 999px;
-  background: var(--card);
-  color: var(--sub);
-  font-size: 11px;
-}
-.chips button:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
-.chat-input { gap: 10px; padding: 0 26px; background: var(--card); }
-.chat-input input { min-height: 46px; border-radius: 12px; background: var(--fill); }
-.chat-input button { min-width: 80px; min-height: 46px; border-radius: 999px; }
-.chat-input-hint {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 27px 16px;
-  background: var(--card);
-  color: var(--sub);
-  font-size: 11px;
-}
-.event-proposal, .memory-chip { border-radius: var(--radius-l); }
-
 /* 登录：更清晰的产品层级 */
 .auth-screen { padding: 52px 32px; }
 .auth-layout { max-width: 1020px; grid-template-columns: minmax(0, 1fr) 410px; gap: 100px; }
@@ -444,19 +303,6 @@ nav button.active {
   .day-head .date, .today-card .day-head .date { font-size: 25px; }
   .course-row { gap: 16px; padding: 19px 0; }
   .course-time { flex-basis: 106px; }
-  .chat-box { height: calc(100vh - 238px); height: calc(100dvh - 238px); min-height: 520px; border-radius: var(--radius-xl); }
-  .chat-head { padding: 17px 18px; }
-  .chat-head p { max-width: 360px; }
-  .chat-msgs { padding: 18px; }
-  .msg.ai { max-width: 100%; padding: 0 0 16px; }
-  .msg.user { max-width: 82%; width: fit-content; align-self: flex-end; }
-  .chips { flex-wrap: nowrap; overflow-x: auto; padding: 11px 18px; scrollbar-width: none; }
-  .chips::-webkit-scrollbar { display: none; }
-  .chips button { flex: 0 0 auto; }
-  .chat-input { padding: 0 18px; }
-  .chat-input-hint { padding: 7px 19px 13px; }
-  .reply-followups { gap: 6px; }
-  .reply-followup { font-size: 11px; }
   .sheet-panel { border-radius: var(--radius-xl) var(--radius-xl) 0 0; }
   .auth-screen { padding: 30px 20px; }
   .auth-layout { max-width: 440px; }
@@ -476,20 +322,6 @@ nav button.active {
   .course-time { flex-basis: 88px; }
   .course-time .range { font-size: 13px; }
   .course-name { font-size: 15px; }
-  .chat-box { height: calc(100vh - 225px); height: calc(100dvh - 225px); min-height: 500px; }
-  .chat-head { padding: 15px; }
-  .chat-head p { display: none; }
-  .chat-head-actions button { min-height: 31px; padding: 5px 9px; }
-  .ai-badge { font-size: 9px; }
-  .chat-msgs { padding: 14px; }
-  .msg.ai { padding: 0 0 14px; }
-  .msg.ai .md-table { display: block; overflow-x: auto; white-space: nowrap; }
-  .chips { padding: 10px 14px; }
-  .chat-input { gap: 7px; padding: 0 14px; }
-  .chat-input button { min-width: 62px; padding: 8px 11px; }
-  .chat-input-hint { padding: 7px 15px 12px; }
-  .chat-input-hint span:last-child { display: none; }
-  .reply-followups-label { width: 100%; }
   .auth-screen { padding: 25px 16px; }
   .auth-eyebrow { margin-bottom: 14px; }
   .auth-card { padding: 23px 20px; }
@@ -580,20 +412,6 @@ nav button.active {
 }
 .exam-countdown span { display: block; margin-top: 4px; color: var(--sub); font-size: 10px; letter-spacing: 0.04em; }
 .exam-countdown.urgent b { color: var(--warn); }
-
-/* 长对话：加载更早消息 */
-.chat-more {
-  align-self: center;
-  min-height: 30px;
-  margin: 0 0 14px;
-  padding: 5px 14px;
-  border: 1px dashed var(--line);
-  border-radius: var(--radius);
-  background: transparent;
-  color: var(--sub);
-  font-size: 11px;
-}
-.chat-more:hover { border-color: var(--accent); background: transparent; color: var(--accent); }
 
 /* 移动端底部标签栏 */
 @media (max-width: 720px) {

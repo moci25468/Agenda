@@ -19,8 +19,7 @@
 #tab-week > .card,
 #tab-source > .card,
 #tab-admin > .card,
-#tab-settings .settings-body > .card,
-#tab-ai > .chat-box {
+#tab-settings .settings-body > .card {
   border: 1px solid var(--line);
   border-radius: var(--card-r);
   background: var(--card);
@@ -103,7 +102,7 @@
 #tab-admin .admin-user-row,
 #tab-admin .log-row,
 #tab-admin .invite-row,
-#tab-settings .memory-row {
+#tab-settings .push-row {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--fill);
@@ -116,7 +115,7 @@
 #tab-admin .admin-user-row:last-child,
 #tab-admin .log-row:last-child,
 #tab-admin .invite-row:last-child,
-#tab-settings .memory-row:last-child {
+#tab-settings .push-row:last-child {
   margin-bottom: 0;
 }
 #tab-week #weekEventList .course-row:hover,
@@ -124,7 +123,7 @@
 #tab-admin .admin-user-row:hover,
 #tab-admin .log-row:hover,
 #tab-admin .invite-row:hover,
-#tab-settings .memory-row:hover {
+#tab-settings .push-row:hover {
   border-color: var(--accent);
 }
 
@@ -157,8 +156,7 @@
   #tab-week > .card,
   #tab-source > .card,
   #tab-admin > .card,
-  #tab-settings .settings-body > .card,
-  #tab-ai > .chat-box {
+  #tab-settings .settings-body > .card {
     border-radius: var(--card-r);
   }
 }
@@ -172,7 +170,7 @@
   #tab-admin .admin-user-row,
   #tab-admin .log-row,
   #tab-admin .invite-row,
-  #tab-settings .memory-row {
+  #tab-settings .push-row {
     transition: none;
   }
 }

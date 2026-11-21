@@ -155,7 +155,7 @@ class Exam:
         return end_at < (now or datetime.now())
 
     def display_time(self) -> str:
-        """用于推送 / AI 的一行时间描述。"""
+        """用于推送的一行时间描述。"""
         day = self.date or self.time
         if self.start and self.end:
             day = f"{day} {self.start}-{self.end}"
@@ -256,7 +256,7 @@ class Event:
         return end_at < now
 
     def display_time(self) -> str:
-        """用于推送 / AI 的一行时间描述；无开始时间视为全天。"""
+        """用于推送的一行时间描述；无开始时间视为全天。"""
         if self.start and self.end:
             return f"{self.date} {self.start}-{self.end}"
         if self.start:

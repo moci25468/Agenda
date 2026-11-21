@@ -463,112 +463,8 @@ nav button.active {
   font-variant-numeric: tabular-nums;
 }
 
-/* 问答：减少气泡感，保留清晰对话层级 */
-.chat-box {
-  height: 620px;
-  padding: 0;
-  overflow: hidden;
-}
-.chat-head {
-  padding: 19px 24px;
-  border-bottom: 1px solid var(--line);
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-}
-.chat-head-actions {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
-}
-/* 对话消息操作：编辑 / 重试 */
-.msg-actions {
-  margin-top: 6px;
-  display: flex;
-  gap: 12px;
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-.msg:hover .msg-actions,
-.msg.editing .msg-actions {
-  opacity: 1;
-}
-@media (hover: none) {
-  .msg-actions {
-    opacity: 1;
-  }
-}
-.msg-actions button {
-  background: none;
-  border: 0;
-  padding: 0;
-  font-size: 11px;
-  color: var(--sub);
-  cursor: pointer;
-}
-.msg-actions button:hover {
-  color: var(--accent);
-}
-.msg.user .msg-actions {
-  justify-content: flex-end;
-}
-.msg.user .msg-actions button {
-  color: inherit;
-  opacity: 0.75;
-}
-.msg.user.editing {
-  background: var(--card);
-  color: var(--text);
-  border: 1px solid var(--line);
-  width: 100%;
-  max-width: 100%;
-  align-self: stretch;
-}
-.msg.editing textarea {
-  width: 100%;
-  min-height: 64px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  line-height: 1.7;
-  resize: vertical;
-  padding: 0;
-}
-.msg.editing textarea:focus {
-  outline: none;
-}
-.msg-edit-actions {
-  margin-top: 8px;
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
-/* 长期记忆 */
-.memory-chip {
-  margin-top: 10px;
-  padding: 8px 12px;
-  border: 1px solid var(--line);
-  border-left: 2px solid var(--accent);
-  border-radius: 6px;
-  font-size: 12px;
-  color: var(--sub);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-}
-.push-chip .push-err { color: var(--warn); }
-.memory-add {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-.memory-add input {
-  flex: 1;
-}
-.memory-row {
+/* 设置页推送记录等列表行 */
+.push-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -576,96 +472,16 @@ nav button.active {
   padding: 12px 0;
   border-bottom: 1px solid var(--line);
 }
-.memory-row:last-child {
+.push-row:last-child {
   border-bottom: 0;
 }
-.memory-row .m-content {
+.push-row .m-content {
   font-size: 14px;
 }
-.memory-row .m-date {
+.push-row .m-date {
   font-size: 11px;
   color: var(--sub);
   margin-top: 2px;
-}
-.chat-head h2 {
-  margin: 0;
-}
-.chat-head p {
-  margin-top: 2px;
-  color: var(--sub);
-  font-size: 11px;
-}
-.chat-msgs {
-  padding: 20px 24px;
-}
-.msg {
-  line-height: 1.75;
-  animation-duration: 0.16s;
-}
-.msg.user {
-  max-width: 76%;
-  margin-bottom: 24px;
-  padding: 10px 15px;
-  border-radius: 10px 10px 2px 10px;
-  background: var(--accent);
-}
-.msg.ai {
-  max-width: 100%;
-  margin-bottom: 20px;
-  padding: 0 0 20px;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  border-radius: 0;
-  background: transparent;
-  white-space: normal;
-}
-.msg.ai::before {
-  content: "知序";
-  display: block;
-  margin-bottom: 6px;
-  color: var(--accent);
-  font-size: 10px;
-  font-weight: 650;
-  letter-spacing: 0.12em;
-}
-.msg.ai:last-child {
-  border-bottom-color: transparent;
-}
-.msg.ai pre {
-  border-radius: 7px;
-  background: #20262E;
-}
-.chips {
-  gap: 7px;
-  padding: 14px 24px;
-  background: var(--fill);
-}
-.chips button {
-  min-height: 30px;
-  padding: 5px 10px;
-  border-color: var(--line);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--sub);
-  font-size: 11px;
-  font-weight: 400;
-}
-.chips button:hover {
-  border-color: var(--line-strong);
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-.chat-input {
-  gap: 10px;
-  padding: 0 24px 22px;
-  background: var(--fill);
-}
-.chat-input input {
-  min-height: 42px;
-  background: var(--card);
-}
-.chat-input button {
-  min-width: 74px;
 }
 
 /* 表单、记录与浮层 */
@@ -811,35 +627,6 @@ button.danger:hover {
   .week-nav .label {
     min-width: 110px;
   }
-  .chat-box {
-    height: calc(100vh - 238px);
-    height: calc(100dvh - 238px);
-    min-height: 500px;
-  }
-  .chat-head {
-    padding: 16px 18px;
-  }
-  .chat-msgs {
-    padding: 18px;
-  }
-  .msg.user {
-    max-width: 82%;
-    width: fit-content;
-    align-self: flex-end;
-  }
-  .chips {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    padding: 12px 18px;
-    scrollbar-width: none;
-  }
-  .chips button {
-    flex-shrink: 0;
-    white-space: nowrap;
-  }
-  .chat-input {
-    padding: 0 18px 18px;
-  }
   .log-row {
     flex-wrap: wrap;
     gap: 5px 10px;
@@ -902,10 +689,5 @@ button.danger:hover {
   }
   .form-actions {
     flex-wrap: wrap;
-  }
-  .chat-input button {
-    min-width: 62px;
-    padding-right: 11px;
-    padding-left: 11px;
   }
 }

@@ -165,7 +165,7 @@ class ZhengfangProvider(TimetableProvider):
         self.last_detected_term: tuple[str, str] | None = None
         if not self.base:
             raise ValueError("未配置正方教务地址（设置 → 课表来源 → 正方教务，填入学号密码）")
-        # 与门户/AI/推送统一走出站安全校验：正方地址也是用户可填配置，
+        # 与门户/推送统一走出站安全校验：正方地址也是用户可填配置，
         # 避免被利用打 SSRF（本机/内网/云元数据）。教务系统常见 http 内网部署，允许 http。
         from ..netguard import assert_safe_outbound_url
         from ..netguard import UnsafeURLError as _UnsafeURLError

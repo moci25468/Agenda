@@ -1,7 +1,7 @@
 /* Agenda 知序 Service Worker：提供安装能力，并在离线时回落到已缓存的页面外壳。
    策略：导航请求网络优先、失败回落缓存的 "/" 外壳；静态资源网络优先、离线回落缓存；
    接口（/api/）一律不进缓存。 */
-const CACHE = "agenda-static-v3";
+const CACHE = "agenda-static-v4";
 const SHELL = ["/", "/static/icons/icon-192.png", "/static/icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {

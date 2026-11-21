@@ -19,7 +19,7 @@ p, .hint, .confirm-text, .auth-intro-sub { line-height: 1.65; }
 .today-card #todayCount, .today-card .day-meta .muted { color: var(--sub); }
 
 /* 卡片与内容层级 */
-.card, .today-card, .source-card, .auth-card, .chat-box,
+.card, .today-card, .source-card, .auth-card,
 .week-grid, .day-card, .search-results, .install-tip {
   border: 1px solid var(--line);
   border-radius: var(--radius-l);
@@ -73,11 +73,12 @@ header h1 .brand-cn { color: var(--sub); letter-spacing: 0.02em; }
   font-size: 12px;
   letter-spacing: 0;
 }
+/* 单行摘要只在手机出现，PC 仍显示完整状态 */
+.statusbar .sb-mini { display: none; }
 
 /* 按钮、胶囊与表单 */
 button, button.small, button.primary, #syncBtn,
-.chips button, .reply-followup, .theme-choice button,
-button.log-toggle, .attach-btn {
+.theme-choice button, button.log-toggle {
   border-radius: 999px;
   font-weight: 500;
   letter-spacing: 0;
@@ -106,23 +107,11 @@ button.primary:hover, #syncBtn:hover, .auth-tabs button.primary:hover {
   background: var(--accent-hover);
   color: var(--accent-ink);
 }
-/* 次要操作：Apple 官网式蓝色描边，而不是一片实心蓝胶囊 */
-.chips button, .reply-followup {
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-  background: transparent;
-  color: var(--accent);
-}
-.chips button:hover, .reply-followup:hover {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--accent);
-}
 button:focus-visible, a:focus-visible {
   outline: 3px solid color-mix(in srgb, var(--accent) 35%, transparent);
   outline-offset: 2px;
 }
-.reply-followup::after { content: ""; }
-.badge, .ai-badge, .sr-kind {
+.badge, .sr-kind {
   border-radius: 999px;
   letter-spacing: 0;
   font-variant-numeric: tabular-nums;
@@ -318,40 +307,16 @@ nav button.active::after { content: none; }
 }
 .mini-course .n { color: var(--text); font-weight: 600; }
 .mini-course .t, .mini-course .r { color: var(--sub); }
-.week-cell .wc-free, .chat-more { border-radius: 999px; }
+.week-cell .wc-free { border-radius: 999px; }
 .day-card-head { background: var(--fill); }
 .day-card.today .day-card-head { background: var(--fill-strong); }
 
-/* AI、登录、分段控件与悬浮层 */
-.chat-box { border-radius: 20px; }
-.chat-input input, .chat-input button { border-radius: 999px; }
-.msg.user {
-  border-radius: 18px 18px 5px 18px;
-  background: var(--accent);
-  color: var(--accent-ink);
-  box-shadow: none;
-}
-/* AI 回复恢复气泡：左对齐浅灰气泡，与用户蓝色气泡形成对话层次 */
-.msg.ai {
-  max-width: min(78%, 600px);
-  width: fit-content;
-  align-self: flex-start;
-  margin-bottom: 20px;
-  padding: 12px 16px;
-  border: 1px solid var(--line);
-  border-radius: 18px 18px 18px 5px;
-  background: var(--fill);
-  box-shadow: none;
-  white-space: normal;
-}
-.msg.ai::before { color: var(--sub); letter-spacing: 0.02em; }
-.msg.ai:last-child { border-bottom-color: var(--line); }
-.chat-file, .msg .msg-file, .log-box {
+/* 登录、分段控件与悬浮层 */
+.log-box {
   border-color: var(--line);
   border-radius: 12px;
   background: var(--fill);
 }
-.msg .msg-file { background: color-mix(in srgb, var(--card) 72%, transparent); }
 .auth-screen { background: var(--bg); }
 .auth-title { color: var(--text); font-size: 62px; line-height: 1.1; }
 .auth-title span {
@@ -453,19 +418,28 @@ nav button.active::after { content: none; }
   .settings-nav button { padding: 7px 6px; font-size: 12px; border-radius: 999px; }
   .auth-title { font-size: 44px; }
   .auth-card { border-radius: 20px; box-shadow: none; }
+  /* 状态栏：手机只留单行摘要（去卡片化、超宽省略），完整状态留给 PC */
   #statusbar {
-    flex-wrap: wrap;
-    overflow: visible;
-    white-space: normal;
-    gap: 3px 10px;
-    padding: 9px 0;
+    display: block;
+    margin: 0 0 2px;
+    padding: 8px 2px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--faint);
     font-size: 10.5px;
+    letter-spacing: 0.02em;
     line-height: 1.4;
+    white-space: nowrap;
+    overflow: hidden;
   }
-  #statusbar span { white-space: nowrap; }
-  /* 手机端只留核心状态，隐藏冗长的下次同步/推送/AI 三项 */
-  #statusbar span:nth-last-child(-n+3) { display: none; }
-  #statusbar span:not(:last-of-type)::after { margin: 0 5px; }
+  #statusbar .sb-mini {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #statusbar span:not(.sb-mini) { display: none; }
+  #statusbar span::after { content: none; }
   #app { padding-bottom: calc(104px + env(safe-area-inset-bottom)); }
   .tomorrow-card .day-head { flex-wrap: wrap; gap: 12px; }
   .tomorrow-card .day-head .date {
@@ -1355,9 +1329,8 @@ html[data-theme="dark"] .today-bento .tb-tomorrow:hover { border-color: var(--ac
   .today-bento .next-class { grid-column: span 4; grid-row: auto; }
 }
 @media (max-width: 520px) {
-  /* 移动端精简：教学周与日期头的「第 N 教学周」重复，隐藏；余下小卡自适应均分一行 */
+  /* 移动端精简：日期头已有「第 N 教学周」，余下小卡自适应均分一行 */
   .today-bento { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; margin: 2px 0 6px; }
-  .today-bento .tb-week { display: none; }
   .today-bento .ov-cell { min-height: 58px; padding: 10px 12px; }
   .today-bento .ov-val { font-size: 22px; }
   .today-bento .ov-sub { font-size: 10px; }
@@ -1373,6 +1346,10 @@ html[data-theme="dark"] .today-bento .tb-tomorrow:hover { border-color: var(--ac
   .today-bento .next-class .nc-ring { width: 56px; height: 56px; }
   .today-bento .next-class .nc-ring-center b { font-size: 17px; }
   .today-bento .tb-tomorrow { grid-column: 1 / -1; min-height: 48px; padding: 10px 14px; }
+}
+@media (max-width: 420px) {
+  /* 四张小卡在窄屏排成等宽两列，避免最后一张单独落行 */
+  .today-bento { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 900px) {
   .week-overview { grid-template-columns: repeat(4, minmax(0, 1fr)); }
@@ -1609,9 +1586,6 @@ html[data-theme="dark"] #tab-source .source-card-head .badge.real { color: #34c7
   mask: var(--mi) center / contain no-repeat;
 }
 /* 每类卡片一枚线性图标 */
-#tab-today .today-bento .tb-week .ov-label {
-  --mi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='17' rx='2'/%3E%3Cpath d='M8 2v4M16 2v4M3 9h18'/%3E%3C/svg%3E");
-}
 #tab-today .today-bento .tb-weather .ov-label {
   --mi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='4'/%3E%3Cpath d='M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4'/%3E%3C/svg%3E");
 }
@@ -1620,6 +1594,9 @@ html[data-theme="dark"] #tab-source .source-card-head .badge.real { color: #34c7
 }
 #tab-today .today-bento .tb-events .ov-label {
   --mi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 6h11M9 12h11M9 18h11'/%3E%3Cpath d='M3 6l1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17'/%3E%3C/svg%3E");
+}
+#tab-today .today-bento .tb-exams .ov-label {
+  --mi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2'/%3E%3Crect x='8' y='2' width='8' height='4' rx='1'/%3E%3C/svg%3E");
 }
 #tab-today .today-bento .ov-cell > .ov-val {
   order: 1;

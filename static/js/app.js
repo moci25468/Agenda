@@ -6,8 +6,7 @@
         viewWeek = null,
         weatherData = null,
         weatherLoading = false,
-        weekRender = null,
-        chatHistory = [];
+        weekRender = null;
 
       let pendingRequests = 0, progressTimer = 0;
       function requestBegin() {
@@ -175,24 +174,35 @@
             httpjson: "自定义接口",
             portal: "校门户",
           }[status.provider] || status.provider;
-        $("#statusbar").innerHTML = [
-          `数据源：${esc(providerName)}`,
-          `课程数：${status.course_count}`,
-          status.upcoming_exam_count
-            ? `考试：${status.upcoming_exam_count} 场待考`
-            : "",
-          status.upcoming_event_count
-            ? `日程：${status.upcoming_event_count} 项待办`
-            : "",
-          `上次同步：${esc(status.last_sync || "尚未同步")}`,
-          `下次同步：${esc(status.next_sync || "-")}（每日 ${esc(status.sync_time)}）`,
-          `推送：${status.push_channels.length ? status.push_channels.join(" / ") : "未启用"}`,
-          `AI：${status.ai_enabled ? "已启用" : "未配置"}`,
+        // 手机端用单行摘要，避免多条小字折行堆叠；两种格式同时输出，由 CSS 按断点切换
+        const hm = /(\d{2}:\d{2})/.exec(status.last_sync || "");
+        const mini = [
+          providerName,
+          `${status.course_count} 门课`,
+          status.upcoming_exam_count ? `${status.upcoming_exam_count} 场待考` : "",
+          status.upcoming_event_count ? `${status.upcoming_event_count} 项待办` : "",
+          hm ? `同步 ${hm[1]}` : "尚未同步",
         ]
           .filter(Boolean)
-          .map((s) => `<span>${s}</span>`)
-          .join("");
-        if (typeof applyAiNavVisibility === "function") applyAiNavVisibility();
+          .join(" · ");
+        $("#statusbar").innerHTML =
+          `<span class="sb-mini">${esc(mini)}</span>` +
+          [
+            `数据源：${esc(providerName)}`,
+            `课程数：${status.course_count}`,
+            status.upcoming_exam_count
+              ? `考试：${status.upcoming_exam_count} 场待考`
+              : "",
+            status.upcoming_event_count
+              ? `日程：${status.upcoming_event_count} 项待办`
+              : "",
+            `上次同步：${esc(status.last_sync || "尚未同步")}`,
+            `下次同步：${esc(status.next_sync || "-")}（每日 ${esc(status.sync_time)}）`,
+            `推送：${status.push_channels.length ? status.push_channels.join(" / ") : "未启用"}`,
+          ]
+            .filter(Boolean)
+            .map((s) => `<span>${s}</span>`)
+            .join("");
       }
 
       function courseRow(c) {
@@ -271,7 +281,7 @@
         markTimelineEdges(root);
       }
 
-      // 今日概览 Bento：教学周 / 天气 / 课程数 / 日程数 + 明日引导
+      // 今日概览 Bento：天气 / 课程数 / 日程数 / 剩余考试 + 明日引导
       function renderTodayBento() {
         const wd = weekData;
         if (!wd) return;
@@ -283,25 +293,30 @@
           const el = $(id);
           if (el) el.textContent = text || "";
         };
-        // 教学周：显示学期进度（当前周 / 总周）
-        setVal("#tbWeekVal", wd.current_week > 0 ? wd.current_week : "—", "周");
-        const totalWeeks = status?.total_weeks || wd.total_weeks || 0;
-        setSub("#tbWeekSub", wd.current_week > 0 && totalWeeks
-          ? `共 ${totalWeeks} 周 · 已过 ${Math.round((wd.current_week / totalWeeks) * 100)}%`
-          : wd.current_week > 0 ? "学期进行中" : "假期");
-        // 今日课程 / 日程数（与 loadToday 的一级统计口径一致）
+        // 今日课程 / 日程；考试卡统计全部未考完的场次，而不只是今天
         const courses = wd.today_courses || [];
         const events = wd.today_events || [];
-        const exams = wd.today_exams || [];
         setVal("#tbCourseVal", courses.length, "门");
         setSub("#tbCourseSub", courses.length
           ? courses.map((c) => c.start_time).filter(Boolean).sort().slice(0, 3).join(" · ") + " 开课"
           : "今天没有课");
-        setVal("#tbEventVal", events.length + exams.length, "项");
-        const evBits = [];
-        if (events.length) evBits.push(`${events.length} 项日程`);
-        if (exams.length) evBits.push(`${exams.length} 场考试`);
-        setSub("#tbEventSub", evBits.length ? evBits.join(" · ") : "暂无安排");
+        setVal("#tbEventVal", events.length, "项");
+        setSub("#tbEventSub", events.length
+          ? `${events[0].start || ""} ${events[0].title || "日程"}`.trim()
+          : "暂无安排");
+        const upcoming = (examData && examData.upcoming) || [];
+        const examCount = examData
+          ? upcoming.length
+          : status
+            ? status.upcoming_exam_count
+            : 0;
+        setVal("#tbExamVal", examCount || 0, "场");
+        const nextExam = upcoming[0];
+        setSub("#tbExamSub", nextExam
+          ? `最近 ${(nextExam.date || "").slice(5)} ${nextExam.name || "考试"}`.trim()
+          : examCount
+            ? "待考"
+            : "暂无待考考试");
         // 天气：取当前时段的逐小时天气，未配置/未取到则隐藏该卡
         const now = new Date();
         const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
@@ -516,8 +531,8 @@
         // 今日无安排时也照常展示方便规划；避免添加明日日程后模块被隐藏
         if (tmHasItems || !items.length) renderTomorrow();
         else $("#tomorrowBlock").classList.add("hidden");
-        // 今日页同时承载个人日程与未考完的考试
-        await loadEvents().catch(() => {});
+        // 今日页同时承载个人日程与未考完的考试；考试卡要用完整待考列表
+        await Promise.all([loadEvents().catch(() => {}), loadExams().catch(() => {})]);
         renderNextClass();
         renderTodayBento();
       }
@@ -905,8 +920,9 @@
           })
           .join("");
         $("#weekGrid").innerHTML = `<div></div>${heads}${rows}`;
-        // 手机端按天重排：同一份数据、同一套格子内容，只是从「行优先」改成「天优先」
-        const daysHtml = data.dates.map((iso, i) => {
+        // 手机端按天重排：同一份数据、同一套格子内容，只是从「行优先」改成「天优先」。
+        // 今天固定排在最前，往下滑才是本周其余几天（本周视图打开即见今天）。
+        const dayCards = data.dates.map((iso, i) => {
           const d = new Date(iso + "T00:00:00");
           const slots = blocks.map((b, bi) => {
             const st = data.section_times[String(b.s)] || "";
@@ -924,7 +940,12 @@
           ${iso === data.today ? '<span class="day-today">今天</span>' : ""}</div>
         <div class="day-slots">${slots}</div>
       </div>`;
-        }).join("");
+        });
+        const todayIdx = data.dates.indexOf(data.today);
+        const daysHtml = todayIdx > 0
+          ? dayCards[todayIdx] + `<div class="week-days-more">本周其余</div>` +
+            dayCards.filter((_, i) => i !== todayIdx).join("")
+          : dayCards.join("");
         const daysBox = $("#weekDays");
         if (daysBox) daysBox.innerHTML = daysHtml;
         renderWeekEvents();
@@ -1742,978 +1763,6 @@
         renderWeekOverview();
       }
 
-      /* ---------- AI ---------- */
-      // 行内 Markdown（输入已整体转义）：代码 / 粗体 / 斜体 / 删除线 / 链接
-      function renderInline(s) {
-        const stash = [];
-        let t = s.replace(/`([^`\n]+)`/g, (_, code) => {
-          stash.push(`<code>${code}</code>`);
-          return `\u0001${stash.length - 1}\u0001`;
-        });
-        t = t
-          .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
-          .replace(/~~([^~\n]+)~~/g, "<del>$1</del>")
-          .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>")
-          .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (m, label, url) => {
-            // 只允许 http/https/mailto，避免 javascript: 之类的链接注入
-            if (!/^(https?:\/\/|mailto:)/i.test(url.replace(/&amp;/g, "&"))) return m;
-            // esc 只转义 & < >，引号需单独处理，防止提前闭合 href 属性
-            const safe = url.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-            return `<a href="${safe}" target="_blank" rel="noopener noreferrer">${label}</a>`;
-          });
-        return t.replace(/\u0001(\d+)\u0001/g, (_, i) => stash[Number(i)] || "");
-      }
-      // 流式输出时先隐藏未写完的动作标记，结束后再渲染成卡片
-      function stripPendingMarkers(s) {
-        return (s || "").replace(/\[(添加日程|日程已添加|记住|推送|追问)\][\s\S]*$/, "");
-      }
-      // 轻量 Markdown：标题 / 列表 / 表格 / 引用 / 分隔线 / 代码块，先整体转义再渲染
-      function renderReply(raw) {
-        const lines = esc(raw || "").split("\n");
-        const out = [];
-        let para = [];
-        let inCode = false, codeLang = "", codeBuf = [];
-        const flushPara = () => {
-          if (!para.length) return;
-          out.push(`<div class="md-p">${para.map(renderInline).join("<br>")}</div>`);
-          para = [];
-        };
-        const isTableSep = (l) =>
-          /^[\s|:-]+$/.test(l) && l.includes("-") && l.includes("|");
-        const isRow = (l) => l.includes("|") && l.trim().length > 1;
-        const cells = (l) => {
-          let v = l.trim();
-          if (v.startsWith("|")) v = v.slice(1);
-          if (v.endsWith("|")) v = v.slice(0, -1);
-          return v.split("|").map((x) => renderInline(x.trim()));
-        };
-        const codeBlock = () => {
-          const head = `<div class="md-code-head"><span>${codeLang || "代码"}</span><button type="button" data-mact="copy-code">复制</button></div>`;
-          return `<div class="md-code">${head}<pre><code>${codeBuf.join("\n")}</code></pre></div>`;
-        };
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i];
-          const trimmed = line.trim();
-          if (trimmed.startsWith("```")) {
-            flushPara();
-            if (inCode) {
-              out.push(codeBlock());
-              codeBuf = [];
-              inCode = false;
-            } else {
-              inCode = true;
-              codeLang = trimmed.slice(3).trim();
-            }
-            continue;
-          }
-          if (inCode) { codeBuf.push(line); continue; }
-          if (!trimmed) { flushPara(); continue; }
-          // 表格：当前行是表头，且下一行是 | --- | --- | 分隔行
-          if (isRow(line) && i + 1 < lines.length && isTableSep(lines[i + 1])) {
-            flushPara();
-            const head = `<thead><tr>${cells(line).map((c) => `<th>${c}</th>`).join("")}</tr></thead>`;
-            const body = [];
-            i += 2;
-            while (i < lines.length && isRow(lines[i]) && !isTableSep(lines[i])) {
-              body.push(`<tr>${cells(lines[i]).map((c) => `<td>${c}</td>`).join("")}</tr>`);
-              i++;
-            }
-            i--;
-            out.push(`<table class="md-table">${head}<tbody>${body.join("")}</tbody></table>`);
-            continue;
-          }
-          const h = line.match(/^\s*(#{1,4})\s+(.+)$/);
-          if (h) {
-            flushPara();
-            out.push(`<div class="md-h lv${h[1].length}">${renderInline(h[2])}</div>`);
-            continue;
-          }
-          if (/^\s*([-*_])\s*\1\s*\1[\s-]*$/.test(line) || /^\s*-{3,}\s*$/.test(line)) {
-            flushPara();
-            out.push('<hr class="md-hr">');
-            continue;
-          }
-          // esc 后 > 会变成 &gt;，两种写法都要识别
-          const quote = line.match(/^\s*(?:>|&gt;)\s?(.*)$/);
-          if (quote) {
-            flushPara();
-            out.push(`<div class="md-quote">${renderInline(quote[1])}</div>`);
-            continue;
-          }
-          const ul = line.match(/^\s*[-*+]\s+(.+)$/);
-          if (ul) {
-            flushPara();
-            out.push(`<div class="md-li">${renderInline(ul[1])}</div>`);
-            continue;
-          }
-          const ol = line.match(/^\s*(\d+)[.)]\s+(.+)$/);
-          if (ol) {
-            flushPara();
-            out.push(`<div class="md-li num">${ol[1]}. ${renderInline(ol[2])}</div>`);
-            continue;
-          }
-          para.push(line);
-        }
-        flushPara();
-        if (inCode && codeBuf.length) out.push(codeBlock());
-        return out.join("");
-      }
-      // 滚动聊天区到底部；instant=true 时临时关闭 smooth，立即定位（用于恢复历史/切 tab）
-      function scrollChatToBottom(instant = false) {
-        const box = $("#chatMsgs");
-        if (!box) return;
-        if (instant) {
-          const prev = box.style.scrollBehavior;
-          box.style.scrollBehavior = "auto";
-          box.scrollTop = box.scrollHeight;
-          // 下一帧恢复 smooth，避免影响后续发送消息的平滑滚动
-          requestAnimationFrame(() => { box.style.scrollBehavior = prev; });
-        } else {
-          box.scrollTop = box.scrollHeight;
-        }
-      }
-      function addMsg(role, text, isError = false, hidx = null) {
-        const div = document.createElement("div");
-        div.className =
-          "msg " +
-          (role === "user" ? "user" : "ai" + (isError ? " error" : ""));
-        div.textContent = text;
-        // 用户消息里若带附件，把【附件：xxx】前缀拆成小标签，正文只留提问
-        if (role === "user" && typeof text === "string" && text.startsWith("【附件：")) {
-          const parsed = splitAttachPrefix(text);
-          if (parsed.files.length) {
-            div.textContent = "";
-            const bar = document.createElement("div");
-            bar.className = "msg-files";
-            parsed.files.forEach((f) => {
-              const tag = document.createElement("span");
-              tag.className = "msg-file";
-              tag.title = f.name;
-              const label = document.createElement("span");
-              label.textContent = f.name;
-              tag.appendChild(label);
-              bar.appendChild(tag);
-            });
-            div.appendChild(bar);
-            div.appendChild(document.createTextNode(parsed.text));
-          }
-        }
-        if (hidx !== null) {
-          div.dataset.hidx = hidx;
-          attachMsgActions(div, role);
-        }
-        $("#chatMsgs").appendChild(div);
-        $("#chatMsgs").scrollTop = $("#chatMsgs").scrollHeight;
-        return div;
-      }
-      function attachMsgActions(div, role) {
-        const bar = document.createElement("div");
-        bar.className = "msg-actions";
-        bar.innerHTML =
-          role === "user"
-            ? '<button data-mact="edit">编辑</button>'
-            : '<button data-mact="copy">复制</button><button data-mact="retry">重试</button>';
-        div.appendChild(bar);
-      }
-      function copyText(s) {
-        if (!s) return;
-        const done = () => toast("已复制", 1500);
-        if (navigator.clipboard && window.isSecureContext) {
-          navigator.clipboard.writeText(s).then(done).catch(() => fallbackCopy(s, done));
-        } else {
-          fallbackCopy(s, done);
-        }
-      }
-      function fallbackCopy(s, done) {
-        const ta = document.createElement("textarea");
-        ta.value = s;
-        ta.style.position = "fixed";
-        ta.style.opacity = "0";
-        document.body.appendChild(ta);
-        ta.select();
-        try { document.execCommand("copy"); done(); }
-        catch (e) { toast("复制失败，请手动选择文本", 2500, "error"); }
-        ta.remove();
-      }
-      let chatBusy = false;
-      const CHAT_WELCOME =
-        "你好，我是知序。课程、考试和个人日程都可以问我；也可以直接说「明天下午三点开会」或「记住我喜欢坐前排」。要读课件、作业要求、表格，点输入框左边的回形针传文件给我就行。";
-
-      // 编辑重发：从某条消息起截断历史，再按窗口重渲染
-      function truncateChat(k) {
-        if (k < chatHistory.length) chatHistory.length = k;
-        renderChatWindow();
-      }
-      function startEditMsg(div, hidx) {
-        const original = chatHistory[hidx]?.content;
-        if (original == null) return;
-        // 编辑只改提问正文，附件前缀留着，重发时仍能带上文件
-        const parsed = splitAttachPrefix(original);
-        div.classList.add("editing");
-        div.innerHTML = `<textarea>${esc(parsed.text)}</textarea>
-          <div class="msg-edit-actions">
-            <button class="small" data-edit="no">取消</button>
-            <button class="small primary" data-edit="ok">重发</button>
-          </div>`;
-        const ta = div.querySelector("textarea");
-        ta.focus();
-        ta.setSelectionRange(ta.value.length, ta.value.length);
-      }
-      function cancelEditMsg(div, hidx) {
-        div.classList.remove("editing");
-        renderChatWindow();
-      }
-      function retryFrom(hidx) {
-        const userMsg = chatHistory[hidx - 1];
-        if (!userMsg || userMsg.role !== "user") return;
-        truncateChat(hidx);
-        sendChat(userMsg.content, { resend: true });
-      }
-      // 失败时在对话流里留一张明确的错误卡片，而不是让提示一闪而过
-      function renderChatError(bubble, message, partial) {
-        bubble.classList.remove("thinking", "streaming");
-        // renderAiContent 会挂一组小按钮，这里移除以免出现两个「重试」
-        const oldBar = bubble.querySelector(".msg-actions");
-        if (oldBar) oldBar.remove();
-        const card = document.createElement("div");
-        card.className = "chat-error";
-        const head = document.createElement("div");
-        head.className = "chat-error-head";
-        head.textContent = partial ? "回答中断" : "发送失败";
-        const msg = document.createElement("div");
-        msg.className = "chat-error-msg";
-        msg.textContent = message || "网络或模型服务暂时不可用";
-        const actions = document.createElement("div");
-        actions.className = "chat-error-actions";
-        const retry = document.createElement("button");
-        retry.className = "small";
-        retry.type = "button";
-        retry.textContent = "重试";
-        retry.addEventListener("click", () => {
-          const hidx = Number(bubble.dataset.hidx);
-          if (Number.isInteger(hidx)) retryFrom(hidx);
-        });
-        actions.appendChild(retry);
-        card.append(head, msg, actions);
-        bubble.appendChild(card);
-      }
-      $("#chatMsgs").addEventListener("click", (e) => {
-        const btn = e.target.closest("button");
-        if (!btn) return;
-        // 代码块复制按钮可能出现在还没有历史序号的流式气泡里，先单独处理
-        if (btn.dataset.mact === "copy-code") {
-          const code = btn.closest(".md-code")?.querySelector("pre code");
-          if (code) copyText(code.textContent);
-          return;
-        }
-        if (chatBusy) return;
-        if (btn.id === "chatMoreBtn") {
-          const box = $("#chatMsgs");
-          const prevH = box.scrollHeight;
-          const prevT = box.scrollTop;
-          chatRenderLimit += CHAT_WINDOW;
-          renderChatWindow();
-          // 保持视觉锚点：新加载的消息撑高多少，就把滚动位置下移多少
-          box.scrollTop = box.scrollHeight - prevH + prevT;
-          return;
-        }
-        if (btn.dataset.followup) {
-          sendChat(btn.dataset.followup);
-          return;
-        }
-        const div = btn.closest(".msg");
-        if (!div || div.dataset.hidx === undefined) return;
-        const hidx = parseInt(div.dataset.hidx, 10);
-        if (btn.dataset.mact === "copy") {
-          const m = chatHistory[hidx];
-          if (m) copyText(stripPendingMarkers(m.content).trim());
-        } else if (btn.dataset.mact === "edit") startEditMsg(div, hidx);
-        else if (btn.dataset.mact === "retry") retryFrom(hidx);
-        else if (btn.dataset.edit === "no") cancelEditMsg(div, hidx);
-        else if (btn.dataset.edit === "ok") {
-          const text = div.querySelector("textarea").value.trim();
-          if (!text) return;
-          const keep = splitAttachPrefix(chatHistory[hidx]?.content || "").files;
-          truncateChat(hidx);
-          sendChat(text, { attachFiles: keep });
-        }
-      });
-
-      // 对话落库：每轮结束整体回存（客户端为准），刷新后从服务器恢复
-      function persistChat() {
-        api("/api/chat/history", {
-          method: "POST",
-          body: JSON.stringify({ messages: chatHistory }),
-        }).catch(() => {});
-      }
-      // 长对话只渲染最近 N 条，更早的按需向上加载，避免整页越拉越长
-      const CHAT_WINDOW = 30;
-      let chatRenderLimit = CHAT_WINDOW;
-      function renderChatWindow() {
-        const box = $("#chatMsgs");
-        box.innerHTML = "";
-        if (!chatHistory.length) {
-          box.innerHTML = `<div class="msg ai">${CHAT_WELCOME}</div>`;
-          return;
-        }
-        const hidden = Math.max(0, chatHistory.length - chatRenderLimit);
-        if (hidden > 0) {
-          const more = document.createElement("button");
-          more.type = "button";
-          more.id = "chatMoreBtn";
-          more.className = "chat-more";
-          more.textContent = `加载更早的消息（还有 ${hidden} 条）`;
-          box.appendChild(more);
-        }
-        chatHistory.slice(hidden).forEach((m, i) => {
-          const hidx = hidden + i;
-          if (m.role === "user") {
-            addMsg("user", m.content, false, hidx);
-          } else {
-            const bubble = addMsg("ai", "", false, hidx);
-            renderAiContent(bubble, m.content, true);
-          }
-        });
-      }
-      async function loadChatHistory() {
-        const box = $("#chatMsgs");
-        // 首次进入时欢迎语还在，加载期间用骨架承接，弱网下不会像卡住
-        const isFirst = !chatHistory.length;
-        if (isFirst) box.innerHTML = skeletonRows(3);
-        try {
-          const r = await api("/api/chat/history");
-          const msgs = r.messages || [];
-          if (!msgs.length) { if (isFirst) renderChatWindow(); return; }
-          chatHistory = msgs;
-          chatRenderLimit = CHAT_WINDOW;
-          renderChatWindow();
-          // 所有消息渲染完后滚到底，避免最后一条 AI 长回复把位置顶回中间
-          requestAnimationFrame(() => scrollChatToBottom(true));
-        } catch (e) {
-          if (isFirst) renderChatWindow();   // 失败也恢复欢迎语，别把骨架留在页面上
-        }
-      }
-      // AI 回复末尾的 [追问] ["...", "..."] → 可点击选项；正文不暴露控制标记
-      function extractFollowups(text) {
-        const m = (text || "").match(/\[追问\]\s*(\[[^\n]*\])/);
-        if (!m) return { text, followups: [] };
-        let items = [];
-        try {
-          const parsed = JSON.parse(m[1]);
-          if (Array.isArray(parsed)) {
-            items = parsed
-              .filter((x) => typeof x === "string")
-              .map((x) => x.trim().replace(/\s+/g, " ").slice(0, 40))
-              .filter(Boolean)
-              .slice(0, 3);
-          }
-        } catch (e) {}
-        return { text: text.replace(m[0], "").trim(), followups: items };
-      }
-      function fallbackFollowups(text, flags = {}) {
-        if (flags.proposal)
-          return ["调整这条日程", "查看我最近的安排", "明天还有什么课？"];
-        if (flags.memory)
-          return ["我明天有什么安排？", "这周哪天没课？", "我最近有什么考试？"];
-        if (/考试|考场|复习/.test(text))
-          return ["最近的考试是哪一场？", "帮我安排考前复习", "考试当天还有什么课？"];
-        if (/下周|大下周/.test(text))
-          return ["再往后一周呢？", "下周哪天没课？", "下周第一节课是什么？"];
-        if (/明天|明日/.test(text))
-          return ["后天呢？", "帮我安排明天的自习", "我下一节课在哪？"];
-        if (/本周|这周|课表|课程/.test(text))
-          return ["这周哪天没课？", "我明天有什么课？", "下一节课在哪里？"];
-        return ["我明天有什么安排？", "这周哪天没课？", "我最近有什么考试？"];
-      }
-      function appendFollowups(bubble, items) {
-        if (!items || !items.length) return;
-        const box = document.createElement("div");
-        box.className = "reply-followups";
-        const label = document.createElement("span");
-        label.className = "reply-followups-label";
-        label.textContent = "继续问";
-        box.appendChild(label);
-        items.slice(0, 3).forEach((question) => {
-          const btn = document.createElement("button");
-          btn.type = "button";
-          btn.className = "reply-followup";
-          btn.dataset.followup = question;
-          btn.textContent = question;
-          box.appendChild(btn);
-        });
-        bubble.appendChild(box);
-      }
-      // 渲染一条 AI 回复：动作卡片、正文 Markdown 与推荐追问统一组装
-      function renderAiContent(bubble, acc, fromHistory = false) {
-        const { text: ta, added: eventAdded } = extractEventAdded(acc);
-        const { text: t1, proposal } = extractEventProposal(ta);
-        const { text: t2, memory } = extractMemory(t1);
-        const { text: t3, push } = extractPush(t2);
-        const { text: cleanText, followups } = extractFollowups(t3);
-        const bodyText = cleanText || (proposal ? "为你整理了一条日程，确认后存入："
-          : eventAdded ? "已为你添加到日程："
-          : push ? "正在把你的消息发到手机：" : "已为你整理好，可以继续这样问：");
-        bubble.innerHTML = renderReply(bodyText);
-        attachMsgActions(bubble, "ai");
-        if (eventAdded) appendEventAddedCard(bubble, eventAdded);
-        if (proposal) appendEventProposal(bubble, proposal, acc);
-        if (memory) appendMemoryChip(bubble, memory, fromHistory);
-        if (push) appendPushChip(bubble, push, fromHistory);
-        appendFollowups(bubble, followups.length ? followups : fallbackFollowups(bodyText, {
-          proposal, memory,
-        }));
-      }
-
-      function pushChannelName(channel) {
-        return channel === "bark" ? "Bark" : channel === "wecom" ? "企业微信" : channel;
-      }
-      // [推送] {json} 标记 → 通过 Bark / 企业微信把消息发到手机；历史回放不重发
-      function extractPush(text) {
-        const m = text.match(/\[推送\]\s*(\{[^\n]*\})/);
-        if (!m) return { text, push: null };
-        try {
-          const obj = JSON.parse(m[1]);
-          const title = typeof obj.title === "string" ? obj.title.trim().slice(0, 60) : "";
-          const body = typeof obj.body === "string" ? obj.body.trim().slice(0, 1000) : "";
-          if (body) {
-            const channels = Array.isArray(obj.channels)
-              ? obj.channels.filter((c) => c === "bark" || c === "wecom")
-              : [];
-            return {
-              text: text.replace(m[0], "").trim(),
-              push: { title, body, channels },
-            };
-          }
-        } catch (e) {}
-        return { text, push: null };
-      }
-      async function appendPushChip(bubble, push, fromHistory = false) {
-        const chip = document.createElement("div");
-        chip.className = "memory-chip push-chip";
-        const label = push.title || push.body.slice(0, 20);
-        if (fromHistory) {
-          chip.innerHTML = `<span>已推送到手机：${esc(label)}</span>`;
-          bubble.appendChild(chip);
-          return;
-        }
-        chip.innerHTML = "<span>正在推送到手机…</span>";
-        bubble.appendChild(chip);
-        try {
-          const r = await api("/api/push/send", {
-            method: "POST",
-            body: JSON.stringify(push),
-          });
-          const ok = r.results.filter((x) => x.ok).map((x) => pushChannelName(x.channel));
-          const bad = r.results.filter((x) => !x.ok);
-          if (ok.length) {
-            chip.innerHTML = `<span>已推送到 ${esc(ok.join("、"))}${
-              bad.length
-                ? `；<span class="push-err">${esc(bad.map((x) => x.error).join("；"))}</span>`
-                : ""
-            }</span>`;
-          } else {
-            chip.innerHTML = `<span class="push-err">推送失败：${esc(
-              bad.map((x) => x.error).join("；") || "未知错误",
-            )}</span>`;
-          }
-        } catch (e) {
-          chip.innerHTML = `<span class="push-err">推送失败：${esc(e.message)}</span>`;
-        }
-      }
-
-      // [日程已添加] {json}：卡片确认保存后回写进历史，刷新时只显示结果，
-      // 不再出现可重复点击的「添加到日程」按钮（避免刷新后重复添加）
-      function extractEventAdded(text) {
-        const m = text.match(/\[日程已添加\]\s*(\{[^\n]*\})/);
-        if (!m) return { text, added: null };
-        try {
-          return { text: text.replace(m[0], "").trim(), added: JSON.parse(m[1]) };
-        } catch (e) {
-          return { text: text.replace(m[0], "").trim(), added: {} };
-        }
-      }
-      function appendEventAddedCard(bubble, added) {
-        const card = document.createElement("div");
-        card.className = "event-proposal";
-        const when = [added.date, added.start].filter(Boolean).join(" ");
-        card.innerHTML = `<div class="ep-head">已添加到日程</div>
-          <div class="ep-title">${esc(added.title || "日程")}</div>
-          ${when ? `<div class="ep-meta">${esc(when)}</div>` : ""}
-          <div class="ep-done">已添加</div>`;
-        bubble.appendChild(card);
-      }
-      // AI 回复末尾的 [添加日程] {json} 标记 → 确认卡片，用户点击后才真正保存
-      function extractEventProposal(text) {
-        const m = text.match(/\[添加日程\]\s*(\{[^\n]*\})/);
-        if (!m) return { text, proposal: null };
-        try {
-          const obj = JSON.parse(m[1]);
-          if (obj && typeof obj.title === "string" && obj.title.trim()) {
-            const str = (v) => (typeof v === "string" ? v.trim() : "");
-            return {
-              text: text.replace(m[0], "").trim(),
-              proposal: {
-                title: str(obj.title).slice(0, 100),
-                date: str(obj.date),
-                start: str(obj.start),
-                end: str(obj.end),
-                location: str(obj.location).slice(0, 100),
-                note: str(obj.note).slice(0, 500),
-              },
-            };
-          }
-        } catch (e) {}
-        return { text, proposal: null };
-      }
-      // [记住] {json} 标记 → 自动存入长期记忆，可撤销
-      function extractMemory(text) {
-        const m = text.match(/\[记住\]\s*(\{[^\n]*\})/);
-        if (!m) return { text, memory: null };
-        try {
-          const obj = JSON.parse(m[1]);
-          if (obj && typeof obj.content === "string" && obj.content.trim()) {
-            return {
-              text: text.replace(m[0], "").trim(),
-              memory: obj.content.trim().slice(0, 200),
-            };
-          }
-        } catch (e) {}
-        return { text, memory: null };
-      }
-      async function appendMemoryChip(bubble, content, alreadySaved = false) {
-        const chip = document.createElement("div");
-        chip.className = "memory-chip";
-        chip.innerHTML = `<span>已记住：${esc(content)}</span><button class="small" data-mem="undo">撤销</button>`;
-        bubble.appendChild(chip);
-        let memId = null;
-        if (!alreadySaved) {
-          try {
-            const r = await api("/api/memories", {
-              method: "POST",
-              body: JSON.stringify({ action: "add", content }),
-            });
-            memId = r.memory.id;
-          } catch (e) {
-            chip.innerHTML = `<span>记忆未保存：${esc(e.message)}</span>`;
-            return;
-          }
-        }
-        chip.addEventListener("click", async (e) => {
-          if (!e.target.closest('button[data-mem="undo"]')) return;
-          try {
-            if (!memId) {
-              const r = await api("/api/memories");
-              const found = r.memories.find((m) => m.content === content);
-              if (!found) {
-                chip.innerHTML = "<span>这条记忆已不存在</span>";
-                return;
-              }
-              memId = found.id;
-            }
-            await api("/api/memories", {
-              method: "POST",
-              body: JSON.stringify({ action: "delete", id: memId }),
-            });
-            chip.innerHTML = "<span>已撤销这条记忆</span>";
-          } catch (err) {
-            toast(err.message, 4000, "error");
-          }
-        });
-      }
-      function appendEventProposal(bubble, p, acc = "") {
-        const card = document.createElement("div");
-        card.className = "event-proposal";
-        const when = p.date
-          ? p.date + (p.start ? " " + p.start + (p.end ? "–" + p.end : "") : " 全天")
-          : "日期待定";
-        card.innerHTML = `
-          <div class="ep-head">添加到个人日程</div>
-          <div class="ep-title">${esc(p.title)}</div>
-          <div class="ep-meta">${esc(when)}${p.location ? " · " + esc(p.location) : ""}</div>
-          ${p.note ? `<div class="ep-note">${esc(p.note)}</div>` : ""}
-          <div class="ep-actions">
-            <button class="small primary" data-ep="ok">添加到日程</button>
-            <button class="small" data-ep="no">忽略</button>
-          </div>`;
-        bubble.appendChild(card);
-        card.addEventListener("click", async (e) => {
-          const btn = e.target.closest("button[data-ep]");
-          if (!btn) return;
-          if (btn.dataset.ep === "no") {
-            card.remove();
-            return;
-          }
-          btn.disabled = true;
-          try {
-            await api("/api/events", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ action: "add", event: p }),
-            });
-            card.querySelector(".ep-actions").outerHTML =
-              '<div class="ep-done">已添加到日程</div>';
-            toast("日程已添加");
-            // 回写对话历史：把 [添加日程] 换成 [日程已添加]，刷新后只显示结果卡片，
-            // 不会再出现可重复点击的按钮（否则刷新一次就能重复添加同一条日程）
-            const hidx = parseInt(bubble.dataset.hidx, 10);
-            if (Number.isInteger(hidx) && chatHistory[hidx]?.role === "assistant"
-                && chatHistory[hidx].content === acc) {
-              const mark = acc.match(/\[添加日程\]\s*\{[^\n]*\}/);
-              if (mark) {
-                chatHistory[hidx].content = acc.replace(
-                  mark[0],
-                  "[日程已添加] " + JSON.stringify({
-                    title: p.title, date: p.date || "", start: p.start || "",
-                    end: p.end || "",
-                  }),
-                );
-                persistChat();
-              }
-            }
-            await Promise.all([loadStatus(), loadToday()]);
-          } catch (err) {
-            btn.disabled = false;
-            toast(err.message, 4000, "error");
-          }
-        });
-      }
-      /* ---------- AI 附件：上传、待发送列表、随消息发送 ---------- */
-      const ATTACH_MAX_FILES = 5;
-      const ATTACH_MAX_MB = 20;
-      let chatFiles = [];      // 待发送附件 [{id,name,size,kind,chars,note,uploading,failed}]
-      let attachUploading = 0;
-
-      function fmtFileSize(n) {
-        if (!n && n !== 0) return "";
-        if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB";
-        if (n >= 1024) return Math.round(n / 1024) + " KB";
-        return n + " B";
-      }
-      function renderAttachChips() {
-        const box = $("#chatAttachList");
-        if (!box) return;
-        box.innerHTML = "";
-        chatFiles.forEach((f, i) => {
-          const chip = document.createElement("div");
-          chip.className = "chat-file" +
-            (f.uploading ? " uploading" : f.failed ? " failed" : "");
-          chip.title = f.failed ? `${f.name}：${f.error || "读取失败"}`
-            : [f.name, f.note, f.chars ? `${f.chars} 字` : ""]
-              .filter(Boolean).join(" · ");
-          const status = f.uploading ? "读取中…" : f.failed ? "失败" : fmtFileSize(f.size);
-          chip.innerHTML = `<span class="cf-name">${esc(f.name)}</span>
-            <span class="cf-size">${esc(status)}</span>
-            <button type="button" aria-label="移除附件" title="移除">×</button>`;
-          chip.querySelector("button").addEventListener("click", () => {
-            const [gone] = chatFiles.splice(i, 1);
-            if (gone && gone.id) {
-              api(`/api/chat/attachments/${gone.id}`, { method: "DELETE" }).catch(() => {});
-            }
-            renderAttachChips();
-          });
-          box.appendChild(chip);
-        });
-      }
-      async function uploadAttach(file) {
-        if (!file) return;
-        if (attachUploading + chatFiles.filter((f) => !f.failed).length >= ATTACH_MAX_FILES) {
-          toast(`一次最多带 ${ATTACH_MAX_FILES} 个文件`, 3500);
-          return;
-        }
-        const name = file.name || `粘贴的图片-${Date.now()}.png`;
-        if (file.size > ATTACH_MAX_MB * 1024 * 1024) {
-          toast(`${name} 有 ${fmtFileSize(file.size)}，超过 ${ATTACH_MAX_MB} MB 上限`, 4500);
-          return;
-        }
-        const item = { name, size: file.size, uploading: true };
-        chatFiles.push(item);
-        attachUploading += 1;
-        renderAttachChips();
-        try {
-          const r = await api(`/api/chat/upload?name=${encodeURIComponent(name)}`, {
-            method: "POST",
-            headers: { "Content-Type": file.type || "application/octet-stream" },
-            body: file,
-          });
-          Object.assign(item, r, { uploading: false, failed: false });
-        } catch (e) {
-          item.uploading = false;
-          item.failed = true;
-          item.error = e.message || "读取失败";
-          toast(`${name} 读取失败：${item.error}`, 6000, "error");
-        } finally {
-          attachUploading -= 1;
-          renderAttachChips();
-        }
-      }
-      // 历史里的用户消息带上附件名（含内部 id），方便刷新/重试时还原
-      function attachPrefix(list) {
-        if (!list.length) return "";
-        return "【附件：" + list.map((f) => `${f.name}#${f.id}`).join("、") + "】\n";
-      }
-      function splitAttachPrefix(text) {
-        const m = /^【附件：([^】]*)】\n?/.exec(text || "");
-        if (!m) return { files: [], text: text || "" };
-        const files = m[1].split("、").map((s) => s.trim()).filter(Boolean)
-          .map((s) => {
-            const hit = /^(.*)#([0-9a-f]{12})$/.exec(s);
-            return hit ? { name: hit[1], id: hit[2] } : { name: s, id: "" };
-          });
-        return { files, text: (text || "").slice(m[0].length) };
-      }
-      function bindAttachInputs() {
-        const btn = $("#chatAttachBtn");
-        const input = $("#chatFileInput");
-        if (btn && input) {
-          btn.addEventListener("click", () => input.click());
-          input.addEventListener("change", async () => {
-            const files = Array.from(input.files || []);
-            input.value = "";   // 允许重复选同一个文件
-            for (const f of files) await uploadAttach(f);
-          });
-        }
-        const chatInput = $("#chatInput");
-        if (chatInput) {
-          chatInput.addEventListener("paste", (e) => {
-            const files = Array.from(e.clipboardData?.files || []);
-            if (!files.length) return;
-            e.preventDefault();
-            files.forEach((f) => uploadAttach(f));
-          });
-        }
-        const box = document.querySelector("#tab-ai .chat-box");
-        if (box) {
-          let depth = 0;
-          const hasFiles = (e) =>
-            Array.from(e.dataTransfer?.types || []).includes("Files");
-          box.addEventListener("dragenter", (e) => {
-            if (!hasFiles(e)) return;
-            e.preventDefault();
-            depth += 1;
-            box.classList.add("dragging");
-          });
-          box.addEventListener("dragover", (e) => {
-            if (!hasFiles(e)) return;
-            e.preventDefault();
-            e.dataTransfer.dropEffect = "copy";
-          });
-          box.addEventListener("dragleave", (e) => {
-            if (!hasFiles(e)) return;
-            depth = Math.max(0, depth - 1);
-            if (!depth) box.classList.remove("dragging");
-          });
-          box.addEventListener("drop", (e) => {
-            if (!hasFiles(e)) return;
-            e.preventDefault();
-            depth = 0;
-            box.classList.remove("dragging");
-            Array.from(e.dataTransfer.files || [])
-              .slice(0, ATTACH_MAX_FILES).forEach((f) => uploadAttach(f));
-          });
-        }
-      }
-      bindAttachInputs();
-
-      async function sendChat(text, opts = {}) {
-        if (chatBusy) return;
-        text = (text || $("#chatInput").value).trim();
-        let attachIds = [];
-        let histContent = text;
-        if (opts.resend) {
-          // 重发：从历史内容里把附件 id 还原出来，能带就把文件一起再发一遍
-          const parsed = splitAttachPrefix(text);
-          attachIds = parsed.files.map((f) => f.id).filter(Boolean);
-          text = parsed.text.trim();
-        } else if (opts.attachFiles && opts.attachFiles.length) {
-          // 编辑已有消息后重发：沿用原来的附件
-          const keep = opts.attachFiles.filter((f) => f.id);
-          attachIds = keep.map((f) => f.id);
-          histContent = attachPrefix(keep) + text;
-        } else {
-          if (attachUploading) { toast("文件还在读取中，稍等一下再发送", 3000); return; }
-          const ready = chatFiles.filter((f) => f.id && !f.failed);
-          if (!text && !ready.length) return;
-          if (!text) text = "帮我看看这个文件。";
-          attachIds = ready.map((f) => f.id);
-          histContent = attachPrefix(ready) + text;
-          chatFiles = chatFiles.filter((f) => f.failed);
-          renderAttachChips();
-        }
-        if (!text) text = "帮我看看这个文件。";
-        $("#chatInput").value = "";
-        // 重发模式：用户消息已在历史里，只补一条新的 AI 回复
-        if (!opts.resend) {
-          chatHistory.push({ role: "user", content: histContent });
-          addMsg("user", histContent, false, chatHistory.length - 1);
-        }
-        chatBusy = true;
-        $("#chatSend").disabled = true;
-        const bubble = addMsg("ai", "正在思考…");
-        bubble.classList.add("thinking");
-        let acc = "";
-        // 流式渲染按帧合并，用户向上翻阅时不强行拉回底部
-        const nearBottom = () => {
-          const box = $("#chatMsgs");
-          return box.scrollHeight - box.scrollTop - box.clientHeight < 80;
-        };
-        let rafId = 0;
-        // 节流：整段 Markdown 每帧重建是 O(n²)，120ms 一次足够顺滑且大幅省 CPU
-        const scheduleRender = () => {
-          if (rafId) return;
-          rafId = setTimeout(() => {
-            rafId = 0;
-            const pinned = nearBottom();
-            bubble.innerHTML = renderReply(stripPendingMarkers(acc));
-            if (pinned) $("#chatMsgs").scrollTop = $("#chatMsgs").scrollHeight;
-          }, 120);
-        };
-        try {
-          const resp = await fetch("/api/chat/stream", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              message: text,
-              history: chatHistory.slice(0, -1),
-              attachments: attachIds,
-            }),
-          });
-          if (!resp.ok) {
-            let detail = `请求失败（${resp.status}）`;
-            try {
-              detail = (await resp.json()).detail || detail;
-            } catch (e) {}
-            throw new Error(detail);
-          }
-          bubble.classList.remove("thinking");
-          bubble.classList.add("streaming");
-          const reader = resp.body.getReader();
-          const decoder = new TextDecoder();
-          let buf = "";
-          while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            buf += decoder.decode(value, { stream: true });
-            let idx;
-            while ((idx = buf.indexOf("\n\n")) >= 0) {
-              const evt = buf.slice(0, idx);
-              buf = buf.slice(idx + 2);
-              const line = evt
-                .split("\n")
-                .find((l) => l.startsWith("data:"));
-              if (!line) continue;
-              let payload;
-              try {
-                payload = JSON.parse(line.slice(5).trim());
-              } catch (e) {
-                continue;
-              }
-              if (payload.error) throw new Error(payload.error);
-              if (payload.delta) {
-                acc += payload.delta;
-                scheduleRender();
-              }
-            }
-          }
-          if (!acc) throw new Error("AI 没有返回内容");
-          chatHistory.push({ role: "assistant", content: acc });
-          bubble.dataset.hidx = chatHistory.length - 1;
-          renderAiContent(bubble, acc);
-        } catch (e) {
-          if (acc) {
-            chatHistory.push({ role: "assistant", content: acc });
-            bubble.dataset.hidx = chatHistory.length - 1;
-            renderAiContent(bubble, acc);
-            renderChatError(bubble, `已生成部分内容后中断：${e.message}`, true);
-          } else {
-            bubble.classList.add("error");
-            bubble.textContent = "";
-            // 占位序号：编辑更早的消息时这条错误气泡也会被清掉；重试仍可用
-            bubble.dataset.hidx = chatHistory.length;
-            renderChatError(bubble, e.message, false);
-          }
-        } finally {
-          // 取消待执行的流式帧，避免它在最终卡片渲染之后覆盖掉卡片
-          if (rafId) { clearTimeout(rafId); rafId = 0; }
-          bubble.classList.remove("streaming", "thinking");
-          chatBusy = false;
-          $("#chatSend").disabled = false;
-          $("#chatMsgs").scrollTop = $("#chatMsgs").scrollHeight;
-          persistChat();
-        }
-      }
-
-      /* ---------- 清空对话与长期记忆管理 ---------- */
-      $("#chatClearBtn").addEventListener("click", async () => {
-        if (chatBusy) return;
-        if (!chatHistory.length) { toast("对话已经是空的"); return; }
-        if (!(await confirmDialog("清空全部对话？长期记忆会保留。", { ok: "清空", danger: true }))) return;
-        try {
-          await api("/api/chat/clear", { method: "POST" });
-          chatHistory = [];
-          chatRenderLimit = CHAT_WINDOW;
-          $("#chatMsgs").innerHTML = `<div class="msg ai">${CHAT_WELCOME}</div>`;
-          toast("对话已清空");
-        } catch (e) { toast(e.message, 4000, "error"); }
-      });
-      async function loadMemories() {
-        const box = $("#memoryList");
-        showSkeleton(box, 2);
-        try {
-          const r = await api("/api/memories");
-          $("#memoryCount").textContent = `${r.memories.length} / 50 条`;
-          box.innerHTML = r.memories.length
-            ? r.memories.map((m) => `<div class="memory-row" data-id="${esc(m.id)}">
-                <div>
-                  <div class="m-content">${esc(m.content)}</div>
-                  <div class="m-date">${esc((m.created_at || "").slice(0, 10))}</div>
-                </div>
-                <button class="small" data-mem-del>删除</button>
-              </div>`).join("")
-            : `<div class="empty"><div class="empty-title">还没有长期记忆</div><div class="empty-sub">对知序说「记住我……」，或在上方手动添加。</div></div>`;
-        } catch (e) {
-          box.innerHTML = `<div class="empty"><div class="empty-title">记忆加载失败</div><div class="empty-sub">${esc(e.message)}</div></div>`;
-        }
-      }
-      function closeMemorySheet() {
-        $("#memorySheet").classList.add("hidden");
-      }
-      $("#memoryBtn").addEventListener("click", async () => {
-        $("#memorySheet").classList.remove("hidden");
-        $("#memoryError").textContent = "";
-        try { await loadMemories(); } catch (e) { $("#memoryError").textContent = e.message; }
-      });
-      $("#memoryCloseBtn").addEventListener("click", closeMemorySheet);
-      $("#memorySheet").addEventListener("click", (e) => {
-        if (e.target.id === "memorySheet") closeMemorySheet();
-      });
-      $("#memoryAddBtn").addEventListener("click", async () => {
-        const content = $("#memoryInput").value.trim();
-        if (!content) return;
-        $("#memoryError").textContent = "";
-        try {
-          await api("/api/memories", {
-            method: "POST",
-            body: JSON.stringify({ action: "add", content }),
-          });
-          $("#memoryInput").value = "";
-          await loadMemories();
-          toast("已记住");
-        } catch (e) { $("#memoryError").textContent = e.message; }
-      });
-      bindImeSafeEnter($("#memoryInput"), () => $("#memoryAddBtn").click());
-      $("#memoryList").addEventListener("click", async (e) => {
-        const btn = e.target.closest("button[data-mem-del]");
-        if (!btn) return;
-        const row = btn.closest(".memory-row");
-        if (!(await confirmDialog("删除这条记忆？", { ok: "删除", danger: true }))) return;
-        try {
-          await api("/api/memories", {
-            method: "POST",
-            body: JSON.stringify({ action: "delete", id: row.dataset.id }),
-          });
-          await loadMemories();
-        } catch (err) { toast(err.message, 4000, "error"); }
-      });
       /* ---------- 日志（已移除独立页，保留空实现避免引用报错） ---------- */
       async function loadLogs() {}
 
@@ -2748,8 +1797,6 @@
         $("#reminderEnabled").checked = cfg.push?.reminder_enabled !== false;
         $("#weatherEnabled").checked = cfg.weather?.enabled !== false;
         $("#examReviewEnabled").checked = cfg.push?.exam_review_enabled !== false;
-        $("#aiEnabled").checked = !!cfg.ai?.enabled;
-        $("#aiShowInNav").checked = cfg.ai?.show_in_nav !== false;
         // 载入的是服务器已保存值，不算用户改动：隐藏保存条并清除 dirty
         setSettingsDirty(false);
         if (typeof layoutSettingsColumns === "function") requestAnimationFrame(layoutSettingsColumns);
@@ -2869,9 +1916,6 @@
         cfg.weather = cfg.weather || {};
         cfg.weather.enabled = $("#weatherEnabled").checked;
         cfg.push.exam_review_enabled = $("#examReviewEnabled").checked;
-        cfg.ai = cfg.ai || {};
-        cfg.ai.enabled = $("#aiEnabled").checked;
-        cfg.ai.show_in_nav = $("#aiShowInNav").checked;
         return cfg;
       }
       function toggleProviderFields() {
@@ -2962,7 +2006,7 @@
         }
       }
 
-      // 课表主数据源：正方（教务原始排课）/ 门户（含临时调课）/ 自动（正方优先）
+      // 课表主数据源：正方（教务原始排课）/ 门户（含临时调课）/ 自动（门户优先）
       function renderPrimaryState(s) {
         const seg = $("#primarySeg");
         if (!seg) return;
@@ -2973,7 +2017,7 @@
           b.setAttribute("aria-pressed", on ? "true" : "false");
         });
         const cn = { zhengfang: "正方教务", portal: "融合门户", mock: "演示数据" };
-        const chosen = { zhengfang: "正方教务", portal: "融合门户", auto: "自动（正方优先）" }[active];
+        const chosen = { zhengfang: "正方教务", portal: "融合门户", auto: "自动（门户优先）" }[active];
         const resolved = cn[s.resolved] || s.resolved || "未配置";
         const snap = cn[s.snapshot_source] || s.snapshot_source || "未同步";
         $("#primaryState").textContent =
@@ -3205,28 +2249,10 @@
       else if (themeMq.addListener) themeMq.addListener(onSystemThemeChange);
       applyTheme(readThemeChoice());
 
-      /* ---------- AI 助手主页分块显隐 ---------- */
-      // 关闭「在主页显示 AI 助手」后，只隐藏主页导航里的 AI 助手分块；
-      // 设置页的 AI 入口（PC 侧栏 + 手机 iOS 首页）必须始终可见，
-      // 否则用户关了之后再也进不去 AI 设置页、无法重新打开这个开关。
-      // 若当前正停在 AI 页，则自动切回「今日」，避免停在已隐藏的页面上。
-      function applyAiNavVisibility() {
-        const aiNavBtn = document.querySelector('#nav button[data-tab="ai"]');
-        const show = status && status.ai_show_in_nav !== false;
-        if (aiNavBtn) aiNavBtn.classList.toggle("hidden", !show);
-        if (!show) {
-          const saved = readSavedTab();
-          if (saved === "ai") {
-            saveTab("today");
-            switchTab("today");
-          }
-        }
-      }
-
       /* ---------- Tab 切换 ---------- */
       // 记住当前页面，刷新后停留在原 tab（按浏览器本地保存，不含任何隐私数据）
       const TAB_KEY = "qut.currentTab";
-      const TAB_IDS = ["today", "week", "rooms", "ai", "source", "admin", "settings"];
+      const TAB_IDS = ["today", "week", "rooms", "source", "admin", "settings"];
       function readSavedTab() {
         try {
           const t = localStorage.getItem(TAB_KEY);
@@ -3251,7 +2277,7 @@
           b.setAttribute("aria-selected", on ? "true" : "false");
           b.tabIndex = on ? 0 : -1;
         });
-        ["today", "week", "ai", "source", "admin", "settings"].forEach((t) =>
+        ["today", "week", "source", "admin", "settings"].forEach((t) =>
           $("#tab-" + t).classList.toggle("hidden", t !== tab),
         );
         if (tab === "today") safeLoad(loadToday());
@@ -3278,14 +2304,7 @@
           // 设置页从 hidden 变可见后才能量到吸顶栏的真实高度，补一次同步
           queueSyncStickyMetrics();
         }
-        // 切到 AI 页时滚到底部：历史在页面加载时（容器还隐藏）就渲染了，
-        // 那时的滚底无效，需等 tab 可见、布局完成后重新定位到最后一条消息。
-        if (tab === "ai") {
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => scrollChatToBottom(true));
-          });
         }
-      }
 
       /* ---------- 接口诊断展示 ---------- */
       const KIND_CN = {
@@ -3468,7 +2487,12 @@
       }
       $("#nav").addEventListener("click", (e) => {
         const btn = e.target.closest("button[data-tab]");
-        if (btn) switchTab(btn.dataset.tab);
+        if (!btn) return;
+        if (btn.dataset.tab === "week" && isPhoneLayout()) {
+          // 之前翻到别的周也拉回本周，保证「日程」打开就是今天（今天已固定排在最前）
+          viewWeek = weekRender?.current_week ?? status?.week ?? null;
+        }
+        switchTab(btn.dataset.tab);
       });
       // tablist 的方向键导航：配合 roving tabindex，键盘也能切换页面
       $("#nav").addEventListener("keydown", (e) => {
@@ -3539,18 +2563,6 @@
         if (document.hidden) return;
         if (weekData && !$("#tab-today").classList.contains("hidden")) renderNextClass();
       }, 30000);
-      $("#chatSend").addEventListener("click", () => sendChat());
-      bindImeSafeEnter($("#chatInput"), () => sendChat());
-      $("#chatChips").addEventListener("click", (e) => {
-        const btn = e.target.closest("button");
-        if (!btn) return;
-        if (btn.dataset.prefill) {
-          $("#chatInput").value = btn.dataset.prefill;
-          $("#chatInput").focus();
-          return;
-        }
-        sendChat(btn.textContent.trim());
-      });
       $("#importCurlBtn").addEventListener("click", async () => {
         const text = $("#curlInput").value.trim();
         if (!text) {
@@ -3612,63 +2624,6 @@
         }
       });
 
-      /* ---------- 可插拔模型服务 ---------- */
-      const AI_PRESETS = {
-        qwen: {
-          base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-          model: "qwen-plus",
-        },
-        deepseek: {
-          base_url: "https://api.deepseek.com/v1",
-          model: "deepseek-chat",
-        },
-        ollama: { base_url: "http://127.0.0.1:11434/v1", model: "qwen2.5:7b" },
-      };
-      function showAiDiag(t) {
-        const el = $("#aiDiag");
-        el.classList.remove("hidden");
-        el.textContent = t;
-      }
-      async function saveThenProbe(path, method) {
-        await api("/api/settings", {
-          method: "POST",
-          body: JSON.stringify(collectSettings()),
-        });
-        return api(path, { method });
-      }
-      $$("[data-ai-preset]").forEach((btn) =>
-        btn.addEventListener("click", () => {
-          const p = AI_PRESETS[btn.dataset.aiPreset];
-          if (!p) return;
-          $('[name="ai.base_url"]').value = p.base_url;
-          $('[name="ai.model"]').value = p.model;
-          toast("已填入预设，记得点保存", 2500);
-        }),
-      );
-      $("#aiModelsBtn").addEventListener("click", async () => {
-        try {
-          const r = await saveThenProbe("/api/ai/models", "GET");
-          showAiDiag(
-            r.models?.length
-              ? `可用模型（${r.models.length}）：\n${r.models.join("\n")}\n\n复制想要的模型名填到「模型」框即可。`
-              : "该服务未返回模型列表（部分网关不提供 /models 接口）。",
-          );
-          toast("模型探测完成", 2500, "success");
-        } catch (e) {
-          showAiDiag("探测失败：" + e.message);
-          toast(e.message, 5000, "error");
-        }
-      });
-      $("#aiTestBtn").addEventListener("click", async () => {
-        try {
-          const r = await saveThenProbe("/api/ai/test", "POST");
-          showAiDiag(`连接正常\n模型：${r.model}\n回复：${r.reply}`);
-          toast("模型连接正常", 2500, "success");
-        } catch (e) {
-          showAiDiag("连接失败：" + e.message);
-          toast(e.message, 5000, "error");
-        }
-      });
       $("#saveSettingsBtn").addEventListener("click", () =>
         saveSettings(false),
       );
@@ -3694,7 +2649,12 @@
           out.textContent = r.message;
           out.style.color = r.ok ? "var(--ok)" : "var(--warn)";
           if (r.ok) {
-            toast("正方已保存，课表已切换为教务数据", 4500);
+            toast(
+              r.resolved === "zhengfang"
+                ? "正方已保存，课表已切换为教务数据"
+                : "正方已保存，考试与空教室已接入",
+              4500,
+            );
             await loadSources();
             await loadStatus();
             await loadToday();
@@ -3721,7 +2681,7 @@
                     ok ? "成功" : x.status === "skip" ? "跳过" : "失败";
                   const detail = ok ? "" : `：${x.error || ""}`;
                   const time = esc((x.ts || "").slice(5, 16));
-                  return `<div class="memory-row"><div>
+                  return `<div class="push-row"><div>
                       <div class="m-content">${esc(x.title || "推送")} · ${esc(pushChannelName(x.channel))}</div>
                       <div class="m-date">${time} · ${
                         ok
@@ -3772,7 +2732,6 @@
         settingsAccount: ["settingsAccount"],
         settingsSync: ["settingsSync"],
         settingsPush: ["settingsPush", "settingsBark", "settingsPushLog"],
-        settingsAi: ["settingsAi"],
       };
       function isPhoneLayout() { return window.matchMedia("(max-width: 720px)").matches; }
 
@@ -3782,7 +2741,7 @@
       const settingsBack = $("#settingsBack");
       const SETTINGS_TITLES = {
         settingsAppearance: "外观", settingsAccount: "账号安全", settingsSync: "同步",
-        settingsPush: "推送", settingsAi: "AI 助手",
+        settingsPush: "推送",
       };
       let currentSettingsSection = "settingsAppearance";
 
@@ -3886,7 +2845,7 @@
       }
 
       const SETTINGS_SECTION_IDS = [
-        "settingsAppearance", "settingsAccount", "settingsSync", "settingsPush", "settingsAi",
+        "settingsAppearance", "settingsAccount", "settingsSync", "settingsPush",
       ];
       let settingsObserver = null;
       let settingsObserverInset = -1;
@@ -4197,7 +3156,6 @@
           await loadStatus();
           await loadToday();
           loadWeather();
-          await loadChatHistory();
           pollBrowserLogin();
           if (currentUser.role === "admin") refreshInvites();
           // 刷新后停留在上一次的页面；首次未配置数据源时仍优先引导去「课表来源」
@@ -4207,15 +3165,12 @@
             let saved = readSavedTab();
             // 旧版本可能把已下线的页签（如已移除的「空教室」）存进 localStorage，
             // 落到不存在的 tab 会让所有页面都隐藏，这里统一回落到今日页
-            if (!["today", "week", "ai", "source", "admin", "settings"].includes(saved)) {
+            if (!["today", "week", "source", "admin", "settings"].includes(saved)) {
               saved = "today";
               saveTab("today");
             }
             // 非管理员不恢复「用户管理」，并清掉无效记录；today 是默认页且已加载，无需重复切换
             if (saved === "admin" && currentUser.role !== "admin") {
-              saveTab("today");
-            } else if (saved === "ai" && status && status.ai_show_in_nav === false) {
-              // AI 分块已隐藏，不落回 AI 页
               saveTab("today");
             } else if (saved && saved !== "today") {
               switchTab(saved);
@@ -4498,7 +3453,6 @@
         ["#eventEditor", () => closeEventEditor()],
         ["#courseEditor", () => closeCourseEditor()],
         ["#examEditor", () => closeExamEditor()],
-        ["#memorySheet", () => closeMemorySheet()],
         ["#deleteAccountSheet", () => closeDeleteSheet()],
         ["#editUserSheet", () => closeEditUser()],
         ["#changePwdSheet", () => $("#changePwdSheet").classList.add("hidden")],
