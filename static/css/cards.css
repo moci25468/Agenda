@@ -1,0 +1,178 @@
+/* ============================================================
+   全站卡片语言 · 把「今日页」的分块卡片风格推广到所有页面
+   —— 一模块一卡 / 卡内无直线 / 统一间距与圆角 / 深浅主题自适应
+   只改视觉：DOM、ID、事件、数据填充契约全部保留。
+   本表最后加载，逐页 scoped 覆盖；课表表格、聊天、表单结构不动。
+   ============================================================ */
+
+/* 与今日页同一套令牌，提升到全站 section 级 */
+:root {
+  --card-gap: 14px;   /* 模块之间 / 卡片之间的唯一间距 */
+  --card-pad: 18px;   /* 卡片内部四边等宽留白 */
+  --card-r: 18px;     /* 卡片统一圆角 */
+}
+
+/* ------------------------------------------------------------
+   通用卡片骨架：所有页面的 .card 统一圆角与内边距
+   今日页已有自己的 --td-* 骨架，这里跳过它避免互相覆盖
+   ------------------------------------------------------------ */
+#tab-week > .card,
+#tab-source > .card,
+#tab-admin > .card,
+#tab-settings .settings-body > .card,
+#tab-ai > .chat-box {
+  border: 1px solid var(--line);
+  border-radius: var(--card-r);
+  background: var(--card);
+  box-shadow: var(--shadow-1);
+  padding: var(--card-pad);
+}
+
+/* 卡片标题下的横线一律去掉（今日页风格：裸标题行） */
+#tab-week > .card > .day-head,
+#tab-source > .card > h2,
+#tab-admin > .card > h2,
+#tab-settings .settings-body > .card > h2 {
+  border-bottom: 0;
+}
+
+/* ------------------------------------------------------------
+   日程页：模块之间统一用 grid gap，取消 16/18px 的散落 margin
+   课表表格 (.week-grid) 保持原样，不做圆角小块
+   ------------------------------------------------------------ */
+#tab-week {
+  display: flex;
+  flex-direction: column;
+  gap: var(--card-gap);
+}
+#tab-week > .week-nav,
+#tab-week > .week-jump,
+#tab-week > .week-overview,
+#tab-week > .week-grid-scroll,
+#tab-week > .hint,
+#tab-week > .search-row,
+#tab-week > .search-results,
+#tab-week > .card,
+#tab-week > p.hint {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+/* 本周概览条：沿用卡片骨架 */
+#tab-week > .week-overview {
+  border-radius: var(--card-r);
+  padding: var(--card-pad);
+  box-shadow: var(--shadow-1);
+}
+
+/* ------------------------------------------------------------
+   用户管理页：模块之间统一 gap
+   ------------------------------------------------------------ */
+#tab-admin {
+  display: flex;
+  flex-direction: column;
+  gap: var(--card-gap);
+}
+#tab-admin > .card { margin-top: 0; }
+
+/* ------------------------------------------------------------
+   课表来源页：主卡 + 两张数据源卡，统一圆角/间距
+   ------------------------------------------------------------ */
+#tab-source {
+  display: flex;
+  flex-direction: column;
+  gap: var(--card-gap);
+}
+#tab-source > .card { margin-top: 0; }
+
+/* ------------------------------------------------------------
+   设置页：卡片之间统一 gap，覆盖原来的 16px/30px
+   ------------------------------------------------------------ */
+#tab-settings > .settings-body {
+  gap: var(--card-gap);
+}
+#tab-settings .settings-body > .card {
+  margin-top: 0;
+}
+
+/* ------------------------------------------------------------
+   列表项圆角小块：日程列表 / 考试安排 / 审计日志等卡内条目
+   把直线分隔的列表行改成独立小块，跟今日页课程小块一致
+   ------------------------------------------------------------ */
+#tab-week #weekEventList .course-row,
+#tab-week #examList .exam-row,
+#tab-admin .admin-user-row,
+#tab-admin .log-row,
+#tab-admin .invite-row,
+#tab-settings .memory-row {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--fill);
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+#tab-week #weekEventList .course-row:last-child,
+#tab-week #examList .exam-row:last-child,
+#tab-admin .admin-user-row:last-child,
+#tab-admin .log-row:last-child,
+#tab-admin .invite-row:last-child,
+#tab-settings .memory-row:last-child {
+  margin-bottom: 0;
+}
+#tab-week #weekEventList .course-row:hover,
+#tab-week #examList .exam-row:hover,
+#tab-admin .admin-user-row:hover,
+#tab-admin .log-row:hover,
+#tab-admin .invite-row:hover,
+#tab-settings .memory-row:hover {
+  border-color: var(--accent);
+}
+
+/* ------------------------------------------------------------
+   PC 端设置页侧栏：修复「切分区时整排菜单上下跳」
+   历史遗留：interaction.css 用 top:calc(12px + mainnav-h + 8px) 让侧栏躲开
+   顶部横条主导航。但 Apple 原生改版后 #nav 已移为左侧竖栏、顶部无吸顶栏，
+   而 syncStickyMetrics() 仍把左栏高度(~267px)写进 --mainnav-h，导致侧栏 top
+   被算成 ~287px；sticky 能否顶住又随分区内容高度变化，于是切换外观/同步时
+   侧栏在自然位与 sticky 位之间跳。改为固定 top:16px，与左侧主导航同一吸顶线。
+   ------------------------------------------------------------ */
+@media (min-width: 721px) {
+  #settingsNav {
+    top: 16px !important;
+  }
+  /* 锚点定位留白同样不再受 --mainnav-h 污染：侧栏高 228 + 16px 偏移 + 14px 呼吸 */
+  #tab-settings .card {
+    scroll-margin-top: calc(16px + 228px + 14px);
+  }
+}
+
+/* ------------------------------------------------------------
+   移动端：整套令牌一起缩放，跟今日页一致
+   ------------------------------------------------------------ */
+@media (max-width: 520px) {
+  :root {
+    --card-gap: 12px;
+    --card-pad: 15px;
+  }
+  #tab-week > .card,
+  #tab-source > .card,
+  #tab-admin > .card,
+  #tab-settings .settings-body > .card,
+  #tab-ai > .chat-box {
+    border-radius: var(--card-r);
+  }
+}
+
+/* ------------------------------------------------------------
+   尊重减少动效
+   ------------------------------------------------------------ */
+@media (prefers-reduced-motion: reduce) {
+  #tab-week #weekEventList .course-row,
+  #tab-week #examList .exam-row,
+  #tab-admin .admin-user-row,
+  #tab-admin .log-row,
+  #tab-admin .invite-row,
+  #tab-settings .memory-row {
+    transition: none;
+  }
+}
