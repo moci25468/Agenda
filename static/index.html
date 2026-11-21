@@ -11,30 +11,31 @@
     <meta name="apple-mobile-web-app-title" content="Agenda" />
     <title>Agenda · 知序</title>
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="apple-touch-icon" href="/static/icons/icon-180.png?v=2.0.0" />
+    <link rel="apple-touch-icon" href="/static/icons/icon-180.png?v=2.0.1" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%232A4358'/%3E%3Cstop offset='1' stop-color='%2318242F'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='url(%23g)'/%3E%3Cpath d='M18 25h28M18 34h28M18 43h14' stroke='%23F5F8FB' stroke-width='4.4' stroke-linecap='round'/%3E%3Ccircle cx='45' cy='43' r='4.2' fill='%237FA8C9'/%3E%3C/svg%3E" />
 
     <!-- 样式分块：按页面/职责拆分，加载顺序与原内联 style 块一致，保证层叠结果不变 -->
-    <link rel="stylesheet" href="/static/css/base.css?v=2.0.0" />
-    <link rel="stylesheet" href="/static/css/today.css?v=2.0.0" />
-    <link rel="stylesheet" href="/static/css/schedule.css?v=2.0.0" />
-    <link rel="stylesheet" href="/static/css/exam.css?v=2.0.0" />
-    <link rel="stylesheet" href="/static/css/week.css?v=2.0.0" />
-    <link rel="stylesheet" href="/static/css/log.css?v=2.0.0" />
-    <link rel="stylesheet" href="/static/css/settings.css?v=2.0.0" />
-    <link rel="stylesheet" href="/static/css/source.css?v=2.0.0" />
-    <link rel="stylesheet" href="/static/css/admin.css?v=2.0.0" />
-    <link rel="stylesheet" href="/static/css/edit.css?v=2.0.0" />
-    <link rel="stylesheet" href="/static/css/skin-paper.css?v=2.0.0" />
-    <link rel="stylesheet" href="/static/css/skin-restrained.css?v=2.0.0" />
-    <link rel="stylesheet" href="/static/css/skin-fresh.css?v=2.0.0" />
-    <link rel="stylesheet" href="/static/css/skin-cool.css?v=2.0.0" />
-    <link rel="stylesheet" id="darkThemeCss" href="/static/css/dark.css?v=2.0.0" />
-    <link rel="stylesheet" href="/static/css/brand.css?v=2.0.0" />
-    <link rel="stylesheet" href="/static/css/interaction.css?v=2.0.0" />
-    <link rel="stylesheet" href="/static/css/motion.css?v=2.0.0" />
-    <link rel="stylesheet" href="/static/css/native.css?v=2.0.0" />
-    <link rel="stylesheet" href="/static/css/cards.css?v=2.0.0" />
+    <link rel="stylesheet" href="/static/css/base.css?v=2.0.1" />
+    <link rel="stylesheet" href="/static/css/today.css?v=2.0.1" />
+    <link rel="stylesheet" href="/static/css/schedule.css?v=2.0.1" />
+    <link rel="stylesheet" href="/static/css/exam.css?v=2.0.1" />
+    <link rel="stylesheet" href="/static/css/grades.css?v=1.0.3" />
+    <link rel="stylesheet" href="/static/css/week.css?v=2.0.1" />
+    <link rel="stylesheet" href="/static/css/log.css?v=2.0.1" />
+    <link rel="stylesheet" href="/static/css/settings.css?v=2.0.1" />
+    <link rel="stylesheet" href="/static/css/source.css?v=2.0.1" />
+    <link rel="stylesheet" href="/static/css/admin.css?v=2.0.8" />
+    <link rel="stylesheet" href="/static/css/edit.css?v=2.0.1" />
+    <link rel="stylesheet" href="/static/css/skin-paper.css?v=2.0.1" />
+    <link rel="stylesheet" href="/static/css/skin-restrained.css?v=2.0.1" />
+    <link rel="stylesheet" href="/static/css/skin-fresh.css?v=2.0.1" />
+    <link rel="stylesheet" href="/static/css/skin-cool.css?v=2.0.1" />
+    <link rel="stylesheet" id="darkThemeCss" href="/static/css/dark.css?v=2.0.1" />
+    <link rel="stylesheet" href="/static/css/brand.css?v=2.0.1" />
+    <link rel="stylesheet" href="/static/css/interaction.css?v=2.0.1" />
+    <link rel="stylesheet" href="/static/css/motion.css?v=2.0.1" />
+    <link rel="stylesheet" href="/static/css/native.css?v=2.0.1" />
+    <link rel="stylesheet" href="/static/css/cards.css?v=2.0.1" />
     <script>
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", () => {
@@ -117,8 +118,13 @@
           <label class="field"><span>用户名</span><input id="regUsername" autocomplete="username" required></label>
           <label class="field"><span>密码（至少 8 位）</span><input id="regPassword" type="password" autocomplete="new-password" required></label>
           <label class="field"><span>显示名称（可选）</span><input id="regName"></label>
-          <label class="field"><span>学号（可选）</span><input id="regStudentId"></label>
           <label class="field" id="inviteField"><span>邀请码</span><input id="regInvite"></label>
+          <div class="reg-source-hint">
+            <b>推荐填写学号与正方密码</b>
+            <span>填了就能在注册成功后直接从正方教务拉取你的真实课表与考试；不填也能用，稍后可在「设置 → 课表来源」里补上。</span>
+          </div>
+          <label class="field"><span>学号（推荐填写）</span><input id="regStudentId" inputmode="numeric" autocomplete="off" /></label>
+          <label class="field"><span>正方教务密码（推荐填写）</span><input id="regZfPassword" type="password" autocomplete="new-password" /></label>
           <button class="primary" type="submit">注册</button>
         </form>
           <p class="hint" id="authError" style="color:var(--fail)"></p>
@@ -156,8 +162,7 @@
       <nav id="nav" role="tablist" aria-label="主导航">
         <button data-tab="today" class="active" role="tab" aria-selected="true" aria-controls="tab-today"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 9.5h17M8 3v4M16 3v4M8.5 14l2.2 2.2 4.3-4.4"/></svg>今日</button>
         <button data-tab="week" role="tab" aria-selected="false" aria-controls="tab-week"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M10 4v16"/></svg>日程</button>
-                <button data-tab="source" role="tab" aria-selected="false" aria-controls="tab-source"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 14.5l5-5M8.5 11.5l-2.2 2.2a3.6 3.6 0 0 0 5.1 5.1l2.1-2.2M15.5 12.5l2.2-2.2a3.6 3.6 0 0 0-5.1-5.1l-2.1 2.2"/></svg>课表来源</button>
-        <button data-tab="admin" id="adminNavBtn" class="hidden" role="tab" aria-selected="false" aria-controls="tab-admin"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="3"/><path d="M3.5 19.5c.6-3 2.7-4.5 5.5-4.5s4.9 1.5 5.5 4.5M16 5.7a2.8 2.8 0 0 1 0 5.6M17 15.2c2 .5 3.2 1.9 3.6 4.3"/></svg>用户管理</button>
+        <button data-tab="grades" role="tab" aria-selected="false" aria-controls="tab-grades"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20h14M6.5 16.5l4-5 3 3 4.5-6"/><path d="M14 8.5h4v4"/></svg>成绩</button>
         <button data-tab="settings" role="tab" aria-selected="false" aria-controls="tab-settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17.5 7H20M4 17h2.5M11 17h9"/><circle cx="15.2" cy="7" r="2.2"/><circle cx="8.7" cy="17" r="2.2"/></svg>设置</button>
       </nav>
 
@@ -269,143 +274,25 @@
         </p>
       </section>
 
-      <!-- 课表来源 -->
-      <section id="tab-source" class="hidden">
-        <div class="card">
-          <h2>课表数据来源</h2>
-          <p class="hint">
-            两套数据源各有取舍：门户能反映老师临时调课后的课表，但没有教师字段；正方教务是排课数据的源头，带任课教师和考试安排。默认以门户为准，需要看教务原始排课时可在这里切到正方；考试始终从正方获取。
-          </p>
-          <div class="source-primary" id="sourcePrimaryRow">
-            <span class="sp-label">课表主数据源</span>
-            <div class="seg" id="primarySeg" role="group" aria-label="课表主数据源">
-              <button type="button" data-primary="zhengfang" aria-pressed="false">正方教务</button>
-              <button type="button" data-primary="portal" aria-pressed="false">融合门户</button>
-              <button type="button" data-primary="auto" aria-pressed="false">自动</button>
+      <!-- 成绩 -->
+      <section id="tab-grades" class="hidden">
+        <div class="card grades-card">
+          <div class="day-head">
+            <div>
+              <div class="section-kicker">考试成绩</div>
+              <div class="grades-title-row">
+                <select id="gradesTerm" class="date grades-term" aria-label="选择成绩学期"></select>
+                <span class="grades-current" id="gradesCurrentBadge" hidden>本学期</span>
+              </div>
             </div>
-            <span class="hint" id="primaryState"></span>
+            <div class="day-meta"><span class="muted" id="gradesSub"></span></div>
           </div>
-          <div class="source-cards">
-            <!-- 门户卡片 -->
-            <div class="source-card" id="sourcePortalCard">
-              <div class="source-card-head">
-                <span class="sch-text"><strong>融合门户</strong><small>推荐 · 扫码登录 · 反映调课</small></span>
-                <span class="badge" id="portalBadge">未配置</span>
-              </div>
-              <p class="hint">扫码登录门户，自动发现并接入课表接口，无需抓包、无需填 Cookie。门户只提供课表数据，但能反映调课后的课表。</p>
-              <div class="form-actions">
-                <button class="primary" id="browserLoginBtn">一键扫码登录</button>
-                <button id="browserLoginStopBtn" class="hidden">取消</button>
-              </div>
-              <span id="browserLoginState" class="login-state muted"
-                >登录页二维码将显示在下方，用微信扫码即可自动获取课表；无需把密码交给程序</span
-              >
-              <img id="qrImage" class="qr-image hidden" alt="登录二维码" />
-              <pre id="browserLoginLog" class="log-box hidden"></pre>
-              <p class="hint login-result" id="browserLoginResult"></p>
-              <div class="section-divider" style="margin: 12px 0"></div>
-              <p class="hint">备用：从浏览器导入接口（门户课表页 → F12 Network → 右键课表请求 → Copy as cURL）</p>
-              <textarea id="curlInput" rows="3" placeholder="curl 'https://portal.qut.edu.cn/...' -H 'cookie: ...' ..."></textarea>
-              <div class="form-actions" style="margin-top: 8px">
-                <button id="importCurlBtn">导入并试拉取</button>
-              </div>
-              <pre id="importPreview" class="log-box tall hidden"></pre>
-            </div>
-            <!-- 正方卡片 -->
-            <div class="source-card" id="sourceZfCard">
-              <div class="source-card-head">
-                <span class="sch-text"><strong>正方教务</strong><small>考试与空教室 · 学号+密码</small></span>
-                <span class="badge" id="zfBadge">未配置</span>
-              </div>
-              <p class="hint">填学号+密码即可，后端自动模拟登录正方，无需 Cookie。考试与空教室查询始终使用正方；课表是排课原始数据，不包含临时调课，想看这份排课时可把主数据源切到正方。</p>
-              <div class="form-grid">
-                <label class="field full"><span>教务地址</span><input id="zfBase" placeholder="https://jxgl.qut.edu.cn/jwglxt" /></label>
-                <label class="field"><span>学号</span><input id="zfUsername" /></label>
-                <label class="field"><span>密码</span><input id="zfPassword" type="password" placeholder="留空则沿用已保存的密码" /></label>
-                <label class="field"><span>学年</span>
-                  <select id="zfYear"></select>
-                </label>
-                <label class="field"><span>学期</span>
-                  <select id="zfTerm">
-                    <option value="3">第一学期（秋季）</option>
-                    <option value="12">第二学期（春季）</option>
-                  </select>
-                </label>
-              </div>
-              <p class="hint">学年按教务的「2026-2027」显示；所选学期教务里还没有排课时，保存会自动切到教务当前学期。</p>
-              <p class="hint">正方登录已适配青岛理工 jxgl 实际页面（RSA 加密 + csrftoken）。连续输错 3 次会要求验证码，请稍后再试。</p>
-              <div class="form-actions">
-                <button id="zfSaveBtn">保存并测试登录</button>
-              </div>
-              <span class="hint" id="zfSaveResult"></span>
-            </div>
-          </div>
+          <div class="grades-stats" id="gradesStats"></div>
+          <div id="gradesList"></div>
         </div>
-      </section>
-
-      <!-- 用户管理 -->
-      <section id="tab-admin" class="hidden">
-        <div class="card">
-          <h2>用量概览</h2>
-          <div class="stats-grid" id="adminStats"></div>
-        </div>
-
-        <div class="card">
-          <h2>用户管理</h2>
-          <p class="hint">管理所有注册用户：启用/停用、调整角色、重置密码、编辑信息、删除。停用后该用户无法登录。</p>
-          <div class="admin-toolbar">
-            <input id="adminSearch" type="text" placeholder="搜索用户名 / 昵称 / 学号" aria-label="搜索用户" />
-            <select id="adminSort">
-              <option value="id">按注册顺序</option>
-              <option value="created">按注册时间</option>
-              <option value="login">按最后登录</option>
-              <option value="name">按用户名</option>
-            </select>
-            <button class="small" id="adminSelectAll">全选</button>
-            <button class="small" id="adminBatchDisable">批量停用</button>
-            <button class="small" id="adminBatchEnable">批量启用</button>
-          </div>
-          <div id="adminUserList"></div>
-        </div>
-
-        <div class="card">
-          <h2>数据源总览</h2>
-          <p class="hint">查看每个用户当前课表来源（门户 / 正方）与最后同步时间。</p>
-          <div id="adminSourceList"></div>
-        </div>
-
-        <div class="card">
-          <h2>邀请码</h2>
-          <p class="hint">新用户凭邀请码注册。生成时可指定「可用次数」：填 1 就是一次性码，填 N 就是同一个码最多能被 N 个人用来注册。有效期 7 天。「自定义邀请码」留空则随机生成；自己填可用中文、字母、数字、<code>_</code>、<code>-</code>，4–32 个字，不能有空格标点或表情（全角数字会自动转半角）。太短太简单的码容易被猜，公开传播建议 8 个字以上。</p>
-          <div class="form-actions" style="align-items:center;gap:8px;flex-wrap:wrap">
-            <label class="field invite-field">
-              <span>可用次数</span>
-              <input id="inviteMaxUses" type="number" min="1" max="999" step="1" value="1">
-            </label>
-            <label class="field invite-field wide">
-              <span>自定义邀请码（可选）</span>
-              <input id="inviteCustomCode" maxlength="32" placeholder="如 计科2301班级群" autocomplete="off" spellcheck="false">
-            </label>
-            <button id="genInviteBtn">生成邀请码</button>
-            <button id="genInviteBatchBtn">批量生成 5 个</button>
-            <button id="refreshInvitesBtn">刷新列表</button>
-          </div>
-          <div id="inviteList" class="invite-table-wrap"></div>
-        </div>
-
-        <div class="card">
-          <div class="log-head">
-            <h2>审计日志<span class="log-count" id="adminLogCount"></span></h2>
-            <button type="button" class="small log-toggle hidden" id="adminLogToggle" aria-expanded="false" aria-controls="adminLogCollapse">
-              <span id="adminLogToggleText">展开全部</span>
-              <svg class="log-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
-            </button>
-          </div>
-          <p class="hint">管理员的关键操作记录（停用/删除/改角色/重置密码/编辑信息/邀请码）。默认只显示最近几条，可展开查看完整记录。</p>
-          <div class="log-collapse collapsed" id="adminLogCollapse">
-            <div id="adminLogList"></div>
-          </div>
-        </div>
+        <p class="hint" id="gradesHint">
+          成绩从正方教务自动同步，随每日同步更新；发现新成绩或分数更新会推送提醒。以教务系统公布为准。
+        </p>
       </section>
 
       <!-- 编辑用户信息弹窗 -->
@@ -442,6 +329,8 @@
           <button type="button" data-target="settingsAccount"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg><span>账号</span></button>
           <button type="button" data-target="settingsSync"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 6.4M20 5v6h-6"/></svg><span>同步</span></button>
           <button type="button" data-target="settingsPush"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 8h18s-3-1-3-8M13.7 21a2 2 0 0 1-3.4 0"/></svg><span>推送</span></button>
+          <button type="button" data-target="settingsSource"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 14.5l5-5M8.5 11.5l-2.2 2.2a3.6 3.6 0 0 0 5.1 5.1l2.1-2.2M15.5 12.5l2.2-2.2a3.6 3.6 0 0 0-5.1-5.1l-2.1 2.2"/></svg><span>课表来源</span></button>
+          <button type="button" data-target="settingsAdmin" id="settingsAdminNavBtn" class="hidden"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="3"/><path d="M3.5 19.5c.6-3 2.7-4.5 5.5-4.5s4.9 1.5 5.5 4.5M16 5.7a2.8 2.8 0 0 1 0 5.6M17 15.2c2 .5 3.2 1.9 3.6 4.3"/></svg><span>用户管理</span></button>
           </nav>
         <!-- 手机 iOS 设置首页：大标题 + 分组列表；点行进入详情 -->
         <div class="settings-home" id="settingsHome">
@@ -466,6 +355,16 @@
               <span class="ios-row-label">推送</span><span class="ios-row-arrow">›</span>
             </button>
             </div>
+          <div class="ios-group">
+            <button type="button" class="ios-row" data-target="settingsSource">
+              <span class="ios-row-ic ic-sync"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 14.5l5-5M8.5 11.5l-2.2 2.2a3.6 3.6 0 0 0 5.1 5.1l2.1-2.2M15.5 12.5l2.2-2.2a3.6 3.6 0 0 0-5.1-5.1l-2.1 2.2"/></svg></span>
+              <span class="ios-row-label">课表来源</span><span class="ios-row-arrow">›</span>
+            </button>
+            <button type="button" class="ios-row hidden" data-target="settingsAdmin" id="settingsAdminRow">
+              <span class="ios-row-ic ic-account"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="3"/><path d="M3.5 19.5c.6-3 2.7-4.5 5.5-4.5s4.9 1.5 5.5 4.5M16 5.7a2.8 2.8 0 0 1 0 5.6M17 15.2c2 .5 3.2 1.9 3.6 4.3"/></svg></span>
+              <span class="ios-row-label">用户管理</span><span class="ios-row-arrow">›</span>
+            </button>
+          </div>
         </div>
         <!-- 详情返回栏（手机） -->
         <button type="button" class="settings-back" id="settingsBack"><span>‹</span> 设置</button>
@@ -681,6 +580,145 @@
             <button id="refreshPushLogBtn">刷新</button>
           </div>
         </div>
+
+      <!-- 课表来源 -->
+      <section id="tab-source" class="settings-page section-hidden">
+        <div class="card">
+          <h2>课表数据来源</h2>
+          <p class="hint">
+            两套数据源各有取舍：门户能反映老师临时调课后的课表，但没有教师字段；正方教务是排课数据的源头，带任课教师和考试安排。默认以门户为准，需要看教务原始排课时可在这里切到正方；考试始终从正方获取。
+          </p>
+          <div class="source-primary" id="sourcePrimaryRow">
+            <span class="sp-label">课表主数据源</span>
+            <div class="seg" id="primarySeg" role="group" aria-label="课表主数据源">
+              <button type="button" data-primary="zhengfang" aria-pressed="false">正方教务</button>
+              <button type="button" data-primary="portal" aria-pressed="false">融合门户</button>
+              <button type="button" data-primary="auto" aria-pressed="false">自动</button>
+            </div>
+            <span class="hint" id="primaryState"></span>
+          </div>
+          <div class="source-cards">
+            <!-- 门户卡片 -->
+            <div class="source-card" id="sourcePortalCard">
+              <div class="source-card-head">
+                <span class="sch-text"><strong>融合门户</strong><small>推荐 · 扫码登录 · 反映调课</small></span>
+                <span class="badge" id="portalBadge">未配置</span>
+              </div>
+              <p class="hint">扫码登录门户，自动发现并接入课表接口，无需抓包、无需填 Cookie。门户只提供课表数据，但能反映调课后的课表。</p>
+              <div class="form-actions">
+                <button class="primary" id="browserLoginBtn">一键扫码登录</button>
+                <button id="browserLoginStopBtn" class="hidden">取消</button>
+              </div>
+              <span id="browserLoginState" class="login-state muted"
+                >登录页二维码将显示在下方，用微信扫码即可自动获取课表；无需把密码交给程序</span
+              >
+              <img id="qrImage" class="qr-image hidden" alt="登录二维码" />
+              <pre id="browserLoginLog" class="log-box hidden"></pre>
+              <p class="hint login-result" id="browserLoginResult"></p>
+              <div class="section-divider" style="margin: 12px 0"></div>
+              <p class="hint">备用：从浏览器导入接口（门户课表页 → F12 Network → 右键课表请求 → Copy as cURL）</p>
+              <textarea id="curlInput" rows="3" placeholder="curl 'https://portal.qut.edu.cn/...' -H 'cookie: ...' ..."></textarea>
+              <div class="form-actions" style="margin-top: 8px">
+                <button id="importCurlBtn">导入并试拉取</button>
+              </div>
+              <pre id="importPreview" class="log-box tall hidden"></pre>
+            </div>
+            <!-- 正方卡片 -->
+            <div class="source-card" id="sourceZfCard">
+              <div class="source-card-head">
+                <span class="sch-text"><strong>正方教务</strong><small>考试与空教室 · 学号+密码</small></span>
+                <span class="badge" id="zfBadge">未配置</span>
+              </div>
+              <p class="hint">填学号+密码即可，后端自动模拟登录正方，无需 Cookie。考试与空教室查询始终使用正方；课表是排课原始数据，不包含临时调课，想看这份排课时可把主数据源切到正方。</p>
+              <div class="form-grid">
+                <label class="field full"><span>教务地址</span><input id="zfBase" placeholder="https://jxgl.qut.edu.cn/jwglxt" /></label>
+                <label class="field"><span>学号</span><input id="zfUsername" /></label>
+                <label class="field"><span>密码</span><input id="zfPassword" type="password" placeholder="留空则沿用已保存的密码" /></label>
+                <label class="field"><span>学年</span>
+                  <select id="zfYear"></select>
+                </label>
+                <label class="field"><span>学期</span>
+                  <select id="zfTerm">
+                    <option value="3">第一学期（秋季）</option>
+                    <option value="12">第二学期（春季）</option>
+                  </select>
+                </label>
+              </div>
+              <p class="hint">学年按教务的「2026-2027」显示；所选学期教务里还没有排课时，保存会自动切到教务当前学期。</p>
+              <p class="hint">正方登录已适配青岛理工 jxgl 实际页面（RSA 加密 + csrftoken）。连续输错 3 次会要求验证码，请稍后再试。</p>
+              <div class="form-actions">
+                <button id="zfSaveBtn">保存并测试登录</button>
+              </div>
+              <span class="hint" id="zfSaveResult"></span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 用户管理 -->
+      <section id="tab-admin" class="settings-page section-hidden">
+        <div class="card">
+          <h2>用量概览</h2>
+          <div class="stats-grid" id="adminStats"></div>
+        </div>
+
+        <div class="card">
+          <h2>用户管理</h2>
+          <p class="hint">管理所有注册用户：启用/停用、调整角色、重置密码、编辑信息、删除。停用后该用户无法登录。</p>
+          <div class="admin-toolbar">
+            <input id="adminSearch" type="text" placeholder="搜索用户名 / 昵称 / 学号" aria-label="搜索用户" />
+            <select id="adminSort">
+              <option value="id">按注册顺序</option>
+              <option value="created">按注册时间</option>
+              <option value="login">按最后登录</option>
+              <option value="name">按用户名</option>
+            </select>
+            <button class="small" id="adminSelectAll">全选</button>
+            <button class="small" id="adminBatchDisable">批量停用</button>
+            <button class="small" id="adminBatchEnable">批量启用</button>
+          </div>
+          <div id="adminUserList"></div>
+        </div>
+
+        <div class="card">
+          <h2>数据源总览</h2>
+          <p class="hint">查看每个用户当前课表来源（门户 / 正方）与最后同步时间。</p>
+          <div id="adminSourceList"></div>
+        </div>
+
+        <div class="card">
+          <h2>邀请码</h2>
+          <p class="hint">新用户凭邀请码注册。生成时可指定「可用次数」：填 1 就是一次性码，填 N 就是同一个码最多能被 N 个人用来注册。有效期 7 天。「自定义邀请码」留空则随机生成；自己填可用中文、字母、数字、<code>_</code>、<code>-</code>，4–32 个字，不能有空格标点或表情（全角数字会自动转半角）。太短太简单的码容易被猜，公开传播建议 8 个字以上。</p>
+          <div class="form-actions" style="align-items:center;gap:8px;flex-wrap:wrap">
+            <label class="field invite-field">
+              <span>可用次数</span>
+              <input id="inviteMaxUses" type="number" min="1" max="999" step="1" value="1">
+            </label>
+            <label class="field invite-field wide">
+              <span>自定义邀请码（可选）</span>
+              <input id="inviteCustomCode" maxlength="32" placeholder="如 计科2301班级群" autocomplete="off" spellcheck="false">
+            </label>
+            <button id="genInviteBtn">生成邀请码</button>
+            <button id="genInviteBatchBtn">批量生成 5 个</button>
+            <button id="refreshInvitesBtn">刷新列表</button>
+          </div>
+          <div id="inviteList" class="invite-table-wrap"></div>
+        </div>
+
+        <div class="card">
+          <div class="log-head">
+            <h2>审计日志<span class="log-count" id="adminLogCount"></span></h2>
+            <button type="button" class="small log-toggle hidden" id="adminLogToggle" aria-expanded="false" aria-controls="adminLogCollapse">
+              <span id="adminLogToggleText">展开全部</span>
+              <svg class="log-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+          </div>
+          <p class="hint">管理员的关键操作记录（停用/删除/改角色/重置密码/编辑信息/邀请码）。默认只显示最近几条，可展开查看完整记录。</p>
+          <div class="log-collapse collapsed" id="adminLogCollapse">
+            <div id="adminLogList"></div>
+          </div>
+        </div>
+      </section>
 
         </div><!-- /.settings-body -->
 
@@ -952,6 +990,6 @@
       </div>
     </div>
 
-    <script src="/static/js/app.js?v=2.0.0"></script>
+    <script src="/static/js/app.js?v=2.0.5"></script>
   </body>
 </html>

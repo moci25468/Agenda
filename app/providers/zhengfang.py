@@ -8,6 +8,7 @@
   3. POST /xtgl/login_slogin.html                 RSA 加密密码后提交
   4. POST /kbcx/xskbcx_cxXsKb.html?gnmkpath=N2151 课表（kbList）
   5. POST /kwgl/kscx_cxXsksxxIndex.html           考试（items）
+  6. POST /cjcx/cjcx_cxDgXscj.html                考试成绩（items）
 
 也可以跳过账号密码，直接把浏览器登录后的 Cookie 填到设置里。
 """
@@ -22,7 +23,7 @@ from datetime import date
 
 import httpx
 
-from ..models import Course, Exam, parse_weeks
+from ..models import Course, Exam, Score, parse_weeks
 from .base import AuthExpiredError, TimetableProvider
 
 UA = ("Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 "
@@ -147,6 +148,7 @@ def _to_day(value) -> int:
 class ZhengfangProvider(TimetableProvider):
     name = "zhengfang"
     supports_exams = True
+    supports_scores = True
 
     def __init__(self, cfg: dict):
         p = cfg.get("provider", {})
@@ -163,6 +165,15 @@ class ZhengfangProvider(TimetableProvider):
         self.year = normalize_year(zf.get("year") or p.get("zf_year", "")) or dy
         self.term = str(zf.get("term") or p.get("zf_term") or dt)
         self.last_detected_term: tuple[str, str] | None = None
+        # 成绩接口路径/菜单号可按本校实测结果覆盖（写配置，不必改代码）。
+        self.score_path = str(zf.get("score_path") or self.SCORE_PATH)
+        self.score_gnmk = str(zf.get("score_gnmk") or self.SCORE_GNMK)
+        self.score_years = max(1, min(8, _to_int(zf.get("score_years") or 4)))
+        # fetch_bundle / fetch_exams_and_scores 在同一次登录里抓完成绩后缓存，
+        # fetch_scores() 直接复用，避免账号密码模式重复登录触发正方风控。
+        self._scores_fetched = False
+        self.last_scores: list[Score] = []
+        self.last_score_error = ""
         if not self.base:
             raise ValueError("未配置正方教务地址（设置 → 课表来源 → 正方教务，填入学号密码）")
         # 与门户/推送统一走出站安全校验：正方地址也是用户可填配置，
@@ -373,6 +384,97 @@ class ZhengfangProvider(TimetableProvider):
             }))
         return exams
 
+    # ---------- 考试成绩（cjcx/cjcx_cxDgXscj，正方标准学生成绩查询） ----------
+    # 这是本项目首次接入成绩接口，仓库里没有实测记录，按正方 jwglxt 通用协议实现。
+    # 不同学校版本字段名略有差异，下面逐字段做多别名兜底；若本校菜单号/路径不同，
+    # 在配置的 provider.zhengfang 里覆盖 score_path / score_gnmk 即可，不必改代码。
+    SCORE_PATH = "/cjcx/cjcx_cxDgXscj.html"
+    SCORE_GNMK = "N305005"
+
+    @staticmethod
+    def _score_text(item: dict, *keys: str) -> str:
+        """取第一个非空字段并转成干净文本（成绩数值可能是 int/float）。"""
+        for k in keys:
+            v = item.get(k)
+            if v is None:
+                continue
+            if isinstance(v, float) and v.is_integer():
+                v = int(v)
+            text = str(v).strip()
+            if text:
+                return text
+        return ""
+
+    async def _fetch_scores(self, client: httpx.AsyncClient,
+                            year: str | None = None, term: str | None = None) -> list[Score]:
+        """抓一个学期的成绩。
+
+        响应异常一律抛错，绝不能返回空列表——那会被当成「真的没有成绩」而
+        清空历史快照，等接口恢复后全部成绩又变成「新增」，造成推送刷屏。
+        """
+        q_year = str(year if year is not None else self.year)
+        q_term = str(term if term is not None else self.term)
+        r = await client.post(
+            f"{self.base}{self.score_path}",
+            params={"doType": "query", "gnmkdm": self.score_gnmk},
+            headers={
+                "X-Requested-With": "XMLHttpRequest",
+                "Referer": f"{self.base}{self.score_path}"
+                           f"?gnmkdm={self.score_gnmk}&layout=default",
+            },
+            data={
+                "xnm": q_year,
+                "xqm": q_term,
+                "_search": "false",
+                "nd": int(time.time() * 1000),
+                "queryModel.showCount": "200",
+                "queryModel.currentPage": "1",
+                "queryModel.sortName": "",
+                "queryModel.sortOrder": "asc",
+            },
+            timeout=20,
+        )
+        r.raise_for_status()
+        try:
+            payload = r.json()
+        except ValueError:
+            raise AuthExpiredError(LOGIN_EXPIRED_MSG)
+        if not isinstance(payload, dict):
+            raise ValueError("成绩接口未返回有效数据（登录态失效、菜单号或路径不对）")
+        if "items" not in payload and "rows" not in payload:
+            raise ValueError("成绩接口响应缺少 items/rows 字段，可能接口已变更")
+        items = payload.get("items") or payload.get("rows") or []
+        scores = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            name = self._score_text(item, "kcmc", "kcmc_id", "courseName")
+            raw_score = self._score_text(item, "cj", "score", "zscore", "kscj")
+            if not name and not raw_score:
+                continue
+            year = normalize_year(self._score_text(item, "xnm", "xn", "xnxq", "year")) or q_year
+            term = self._score_text(item, "xqm", "xq", "term") or q_term
+            # 有些版本学年学期合在一个字段（如 xnxq='2025-2026-1'），term 可能是中文
+            if term not in ("3", "12"):
+                if "一" in term or term.endswith("1") or "秋" in term:
+                    term = "3"
+                elif "二" in term or term.endswith("2") or "春" in term:
+                    term = "12"
+            scores.append(Score(
+                name=name or "未命名课程",
+                score=raw_score,
+                credit=self._score_text(item, "xf", "credit"),
+                gpa=self._score_text(item, "jd", "jidian", "gpa"),
+                year=year,
+                term=term,
+                course_type=self._score_text(item, "kclbmc", "kcxzmc", "courseType"),
+                exam_type=self._score_text(item, "ksxz", "ksxzmc", "cxbsmc", "examType"),
+                teacher=self._score_text(item, "xm", "jsxm", "teacher"),
+                note=self._score_text(item, "bz", "remark", "note"),
+                source_id=self._score_text(item, "id", "jxb_id", "kch_id", "cj_id"),
+            ))
+        return scores
+
     async def fetch(self) -> list[Course]:
         async with self._session() as client:
             return await self._fetch_courses(client)
@@ -381,13 +483,55 @@ class ZhengfangProvider(TimetableProvider):
         async with self._session() as client:
             return await self._fetch_exams(client)
 
-    async def fetch_bundle(self) -> tuple[list[Course], list[Exam] | None]:
-        """一次登录同时拉课表和考试，避免重复登录触发风控。
+    async def _fetch_all_scores(self, client: httpx.AsyncClient) -> list[Score]:
+        """遍历最近若干个学年的两个学期，合并去重。
 
-        考试接口失败不影响课表：返回 None 并记录 last_exam_error，
-        由调度器保留上一次考试快照。
+        任一学期失败就整体失败：若只保存成功的一部分，接口恢复后其余学期
+        的成绩会被误判为「新增」并推送。连续失败两次即中止，避免路径错误时
+        把整个同步拖成十几次超时。
+        """
+        seen: dict[tuple, Score] = {}
+        errors: list[str] = []
+        start = int(default_term()[0])
+        consecutive = 0
+        for year in range(start, start - self.score_years, -1):
+            for term in ("12", "3"):
+                try:
+                    items = await self._fetch_scores(client, str(year), term)
+                except Exception as e:  # noqa: BLE001
+                    errors.append(f"{year}-{term}: {e}")
+                    consecutive += 1
+                    if consecutive >= 2:
+                        break
+                else:
+                    consecutive = 0
+                    for s in items:
+                        seen.setdefault(s.key(), s)
+            if consecutive >= 2:
+                break
+        if errors:
+            raise RuntimeError("成绩抓取失败：" + "；".join(errors[:3]))
+        return list(seen.values())
+
+    async def fetch_scores(self) -> list[Score]:
+        # fetch_bundle / fetch_exams_and_scores 已在同一次登录里抓过，直接复用
+        if self._scores_fetched:
+            if self.last_score_error:
+                raise RuntimeError(self.last_score_error)
+            return list(self.last_scores)
+        async with self._session() as client:
+            return await self._fetch_all_scores(client)
+
+    async def fetch_bundle(self) -> tuple[list[Course], list[Exam] | None]:
+        """一次登录同时拉课表、考试和成绩，避免重复登录触发风控。
+
+        考试/成绩接口失败不影响课表：失败记在 last_exam_error /
+        last_score_error，由调度器保留上一次快照。
         """
         self.last_exam_error = ""
+        self.last_score_error = ""
+        self.last_scores = []
+        self._scores_fetched = True
         async with self._session() as client:
             courses = await self._fetch_courses(client)
             try:
@@ -395,7 +539,32 @@ class ZhengfangProvider(TimetableProvider):
             except Exception as e:  # noqa: BLE001
                 self.last_exam_error = str(e)
                 exams = None
+            try:
+                self.last_scores = await self._fetch_all_scores(client)
+            except Exception as e:  # noqa: BLE001
+                self.last_score_error = str(e)
             return courses, exams
+
+    async def fetch_exams_and_scores(self) -> list[Exam] | None:
+        """门户主源 + 正方凭证场景：一次登录同时拉考试和成绩。
+
+        课表由门户提供，这里不重复拉；考试返回值与缓存的成绩供调度器写入。
+        """
+        self.last_exam_error = ""
+        self.last_score_error = ""
+        self.last_scores = []
+        self._scores_fetched = True
+        async with self._session() as client:
+            try:
+                exams = await self._fetch_exams(client)
+            except Exception as e:  # noqa: BLE001
+                self.last_exam_error = str(e)
+                exams = None
+            try:
+                self.last_scores = await self._fetch_all_scores(client)
+            except Exception as e:  # noqa: BLE001
+                self.last_score_error = str(e)
+            return exams
 
     async def detect_current_term(self, client: httpx.AsyncClient) -> tuple[str, str] | None:
         """读课表页里教务自己默认选中的学年/学期，即教务认定的当前学期。"""

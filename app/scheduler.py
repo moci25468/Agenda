@@ -12,9 +12,10 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from . import db
 from .config import load_config, resolve_course_source
-from .models import (Course, Event, Exam, apply_course_overrides, apply_exam_overrides,
+from .models import (Course, Event, Exam, Score, apply_course_overrides, apply_exam_overrides,
                      current_week,
-                     diff_courses, event_line, DEFAULT_SECTION_TIMES, DEFAULT_SECTION_ENDS)
+                     diff_courses, diff_scores, event_line, score_uid,
+                     DEFAULT_SECTION_TIMES, DEFAULT_SECTION_ENDS)
 from .providers import get_provider
 from .providers.base import AuthExpiredError
 from .push import push_all
@@ -115,9 +116,31 @@ def format_changes(cfg: dict, changes: dict) -> str:
     return "\n".join(lines)
 
 
+def format_score_changes(changes: dict) -> str:
+    """把新成绩/成绩更新格式化成推送文本。"""
+    lines = []
+    for s in changes.get("added", []):
+        score = s.get("score") or "成绩待公布"
+        term = Score.from_dict(s).term_label()
+        extra = " · ".join(x for x in (s.get("course_type"), s.get("credit")) if x)
+        lines.append(f"新成绩：{s.get('name') or '未命名课程'} {score}（{term}{'，' + extra if extra else ''}）")
+    for ch in changes.get("changed", []):
+        a = ch["after"]
+        fields = ch.get("fields", {})
+        detail = "、".join(
+            f"{ {'score': '成绩', 'gpa': '绩点', 'credit': '学分'}.get(k, k)} "
+            f"{v['before'] or '—'}→{v['after'] or '—'}"
+            for k, v in fields.items()
+        )
+        lines.append(f"成绩更新：{a.get('name') or '未命名课程'}（{detail}）")
+    return "\n".join(lines)
+
+
 async def apply_snapshot(cfg: dict, courses: list[Course], source: str,
                          push: bool = True, exams: list[Exam] | None = None,
-                         exam_source: str | None = None) -> dict:
+                         exam_source: str | None = None,
+                         scores: list[Score] | None = None,
+                         score_source: str | None = None) -> dict:
     """把一份课表数据走完整的 diff → 保存 → 推送链路。
 
     定时同步与外部注入（App WebView / 浏览器扩展）共用，换登录方式不动这段逻辑。
@@ -132,15 +155,35 @@ async def apply_snapshot(cfg: dict, courses: list[Course], source: str,
         else:
             changes = {"added": [], "removed": [], "changed": [], "has_change": False, "first_sync": True}
 
+        # 成绩 diff 也必须在同一把锁内：避免手动+定时同步基于同一旧成绩快照重复推送。
+        # scores 为 None 表示本次未拉到成绩（数据源不支持或抓取失败），保留已有快照。
+        score_changes = {"added": [], "changed": [], "has_change": False}
+        score_first_sync = False
+        if scores is not None:
+            old_scores = db.get_score_snapshot()
+            # 成绩首同步只看自己的快照，不借用课程的 first_sync：
+            # 用户可能早已同步课表，第一次拉成绩时课程快照并不为空，
+            # 若复用课程标志会把十几门历史成绩全判为「新增」并刷屏。
+            score_first_sync = old_scores is None
+            old_list = [Score.from_dict(d) for d in old_scores["scores"]] if old_scores else []
+            score_changes = diff_scores(old_list, scores)
+            db.save_score_snapshot([s.to_dict() for s in scores], score_source or source)
+
         db.save_snapshot([c.to_dict() for c in courses], source)
         if exams is not None:
             db.save_exam_snapshot([e.to_dict() for e in exams], exam_source or source)
         summary = f"同步成功：{len(courses)} 门课程" + ("（首次同步）" if changes.get("first_sync") else "")
         if exams is not None:
             summary += f"，{len(exams)} 场考试"
+        if scores is not None:
+            summary += f"，{len(scores)} 门成绩"
         if changes.get("has_change"):
             summary += f"，检测到变更：新增 {len(changes['added'])} / 取消 {len(changes['removed'])} / 调整 {len(changes['changed'])}"
-        db.add_sync_log("ok", summary, changes)
+        if score_changes.get("has_change"):
+            summary += f"，成绩新增 {len(score_changes['added'])} / 更新 {len(score_changes['changed'])}"
+        log_changes = dict(changes)
+        log_changes["scores"] = score_changes
+        db.add_sync_log("ok", summary, log_changes)
 
     pushed = []
     if push:
@@ -154,6 +197,11 @@ async def apply_snapshot(cfg: dict, courses: list[Course], source: str,
             parts.append("【课表变更】\n" + format_changes(cfg, changes))
         elif changes.get("first_sync"):
             parts.append(f"首次同步完成，共 {len(courses)} 门课程。")
+        # 新成绩推送：首次同步只建基线、不刷屏；之后有新成绩或分数更新才推。
+        # 成绩推送与课表变更共用一次 push_all，不占用 next_day 去重键。
+        if (score_changes.get("has_change") and not score_first_sync
+                and cfg.get("push", {}).get("new_score_enabled", True)):
+            parts.append("【考试成绩】\n" + format_score_changes(score_changes))
         # 同步后推送：只推「今天剩余课程」（同步时刻之后还没结束的课）与课表变更。
         # 明日课表/日程统一由每晚定时任务（各用户 daily_time，默认 22:00）推送。
         # 不在这里提前推明日课表：2026-11-18 线上实测，中午同步提前推会占用
@@ -260,20 +308,54 @@ async def _run_sync_inner(push: bool = True) -> dict:
     if exam_error:
         db.add_sync_log("fail", f"考试拉取失败（课表已正常更新）：{exam_error}")
         await _alert_auth_expired(cfg, "zhengfang", exam_error)
-    # 门户 / 通用接口只提供课表；若另填了正方凭证，额外拉考试，不影响课表同步。
+    # 门户 / 通用接口只提供课表；若另填了正方凭证，一次登录同时拉考试和成绩，
+    # 避免考试、成绩各登录一次触发正方风控。课表来源不受影响。
+    zf_shared = None
     if not provider.supports_exams:
         from .providers.zhengfang import ZhengfangProvider, zhengfang_configured
         if zhengfang_configured(cfg):
             try:
-                exam_payload = await ZhengfangProvider(cfg).fetch_exams()
+                zf_shared = ZhengfangProvider(cfg)
+                exam_payload = await zf_shared.fetch_exams_and_scores()
                 exam_source = "zhengfang"
             except Exception as e:  # noqa: BLE001
                 exam_error = str(e)
+                zf_shared = None
                 db.add_sync_log("fail", f"考试拉取失败（课表已正常更新）：{e}")
                 await _alert_auth_expired(cfg, "zhengfang", e)
 
+    # 成绩：优先用当前 provider；若它不提供成绩但配了正方凭证，额外从正方拉取。
+    # 成绩抓取失败完全隔离（不影响课表/考试），仅记录日志，保留上一次成绩快照。
+    from .config import zhengfang_configured as _zf_configured
+    score_payload = None
+    score_source = None
+    score_error = ""
+    if getattr(provider, "supports_scores", False):
+        try:
+            score_payload = await provider.fetch_scores()
+            score_source = provider.name
+        except Exception as e:  # noqa: BLE001
+            score_error = str(e)
+    elif zf_shared is not None:
+        # 考试抓取时已在同一次登录里拉过成绩，直接复用
+        if zf_shared.last_score_error:
+            score_error = zf_shared.last_score_error
+        else:
+            score_payload = zf_shared.last_scores
+            score_source = "zhengfang"
+    elif _zf_configured(cfg):
+        from .providers.zhengfang import ZhengfangProvider
+        try:
+            score_payload = await ZhengfangProvider(cfg).fetch_scores()
+            score_source = "zhengfang"
+        except Exception as e:  # noqa: BLE001
+            score_error = str(e)
+    if score_error:
+        db.add_sync_log("fail", f"成绩拉取失败（不影响课表）：{score_error}")
+
     result = await apply_snapshot(cfg, courses, provider.name, push,
-                                  exams=exam_payload, exam_source=exam_source)
+                                  exams=exam_payload, exam_source=exam_source,
+                                  scores=score_payload, score_source=score_source)
     if fallback_note:
         result["message"] += fallback_note
         result["fallback"] = True

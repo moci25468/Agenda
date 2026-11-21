@@ -31,6 +31,9 @@ class MockProvider(TimetableProvider):
     name = "mock"
     is_demo = True
     supports_exams = True
+    # 演示源不提供成绩：成绩是真实学业记录，假成绩会误导用户。
+    # 只有接入正方教务并真正拉到数据后，成绩页才显示内容。
+    supports_scores = False
 
     async def fetch(self) -> list[Course]:
         return _demo_courses()

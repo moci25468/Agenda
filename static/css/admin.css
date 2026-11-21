@@ -1,30 +1,79 @@
 /* 用户管理 */
-.admin-user-row {
+.admin-user-row,
+#tab-admin #adminUserList .admin-user-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 12px 0;
+  gap: 10px;
+  padding: 9px 12px;
+  border: none;
+  border-radius: 8px;
   border-bottom: 1px solid var(--line);
+  background: transparent;
+  margin-bottom: 0;
   flex-wrap: wrap;
 }
-.admin-user-row:last-child {
+.admin-user-row:last-child,
+#tab-admin #adminUserList .admin-user-row:last-child {
   border-bottom: none;
 }
 .admin-user-info {
   min-width: 200px;
+  flex: 1 1 260px;
+}
+.admin-user-title {
+  line-height: 1.6;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px 5px;
+}
+/* 用户行里的徽章/双标签压缩字号与内边距，避免标题行换行撑高 */
+.admin-user-title .badge {
+  padding: 1px 7px;
+  font-size: 11px;
+}
+.admin-user-title .src-tag {
+  margin-left: 0;
+  padding: 0 6px;
+  font-size: 10px;
+  line-height: 1.6;
+}
+.admin-user-sub {
+  color: var(--sub);
+  font-size: 11px;
+  line-height: 1.5;
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .admin-user-actions {
   display: flex;
-  gap: 8px;
+  gap: 5px;
   flex-wrap: wrap;
+}
+/* 用户管理紧凑按钮：比 small 更小，人多时一屏能看更多。
+   显式覆盖皮肤里的 button min-height(38px)，否则这里压不下去。 */
+.admin-user-actions button.mini {
+  min-height: 0;
+  padding: 3px 9px;
+  font-size: 12px;
+  line-height: 1.5;
+  border-radius: 7px;
 }
 .admin-user-actions button.danger {
   color: var(--fail);
   border-color: var(--fail);
 }
-.admin-user-row .admin-user-check {
-  margin-right: 8px;
+.admin-user-check {
+  width: 15px !important;
+  height: 15px;
+  min-height: 0;
+  padding: 0;
+  margin: 0 6px 0 0;
+  flex: 0 0 15px;
+  align-self: center;
 }
 .admin-toolbar {
   display: flex;
@@ -118,6 +167,30 @@
 .pill-portal { background: var(--accent-soft); color: var(--accent); }
 .pill-zhengfang { background: var(--warn-soft); color: var(--warn); }
 .pill-none { background: var(--fill); color: var(--sub); }
+/* 数据源双标签：配了就上色，没配就灰色描边，一眼看清每个用户配了哪些源 */
+.src-tag {
+  display: inline-block;
+  padding: 1px 8px;
+  margin-left: 3px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.7;
+  font-weight: 600;
+  border: 1px solid var(--line);
+  background: var(--fill);
+  color: var(--faint);
+  white-space: nowrap;
+}
+.src-tag.on-portal {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: transparent;
+}
+.src-tag.on-zf {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: transparent;
+}
 .log-row {
   padding: 8px 0;
   border-bottom: 1px solid var(--line);

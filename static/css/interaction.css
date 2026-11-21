@@ -278,9 +278,10 @@ input.invalid, select.invalid, textarea.invalid {
   .week-grid-scroll { overflow-x: visible; }
   .week-grid { display: none; }
   .week-days { display: block; }
-  /* 今天固定第一：日视图紧跟周导航，本周概览等统计挪到整周课表之后 */
+  /* 本周概览大卡置顶：紧跟周导航，位于整周课表之前（与桌面 DOM 顺序一致） */
   #tab-week > .week-nav,
   #tab-week > .week-jump,
+  #tab-week > .week-overview,
   #tab-week > .week-grid-scroll { order: -1; }
   /* iOS 聚焦 <16px 输入框会自动放大整页，导致布局跳动。
      用 !important 盖过各皮肤里的 ID 级字号（如 #curlInput / #adminSort）。 */

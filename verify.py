@@ -20,6 +20,7 @@ from app.browser_login import (
 from app.curl_import import analyze_payload, diagnose_url, parse_payload_text
 from app.providers.httpjson import check_auth_expired, PortalProvider, _to_day
 from app.providers.base import AuthExpiredError
+from app.providers.mock import MockProvider
 from app.providers.zhengfang import zhengfang_configured
 import httpx
 from app.curl_import import parse_curl, guess_mapping
@@ -28,7 +29,8 @@ from app import db as _db
 from datetime import date, datetime, timedelta
 from app.push import (push_all, send_wecom, _wecom_url, WECOM_API,
                       send_selected, wecom_input_error)
-from app.scheduler import (run_sync, format_changes, courses_on, section_time,
+from app.scheduler import (run_sync, format_changes, format_score_changes,
+                           courses_on, section_time,
                            free_sections, free_spans,
                            run_reminders, push_exam_reviews, TZ)
 import app.scheduler as _sched
@@ -39,8 +41,8 @@ from app.user_context import current_user_id, set_current_user
 from app.config import load_config, save_config
 from app import db
 from app.models import (
-    Course, Event, Exam, apply_course_overrides, course_uid, diff_courses,
-    current_week, parse_exam_time, parse_weeks,
+    Course, Event, Exam, Score, apply_course_overrides, course_uid, diff_courses,
+    diff_scores, score_uid, current_week, parse_exam_time, parse_weeks,
 )
 import asyncio
 import json
@@ -303,6 +305,87 @@ except TermEmptyError as e:
     _zf_same = str(e)
 check("正方.当前学期也无排课时不切换", "没有排课数据" in _zf_same, _zf_same)
 
+# 成绩：模型 / diff / 解析 / 快照落库
+_s1 = Score("数据结构", score="88", credit="4", year="2025", term="3", source_id="sc1")
+_s2 = Score("高等数学", score="92", credit="5", year="2025", term="3", source_id="sc2")
+check("成绩.学期标签", _s1.term_label() == "2025-2026 学年 第一学期", _s1.term_label())
+check("成绩.稳定标识", score_uid(_s1) == score_uid(Score.from_dict(_s1.to_dict())))
+_sd = diff_scores([_s1], [_s1, _s2])
+check("成绩.diff新出现", len(_sd["added"]) == 1 and _sd["added"][0]["name"] == "高等数学"
+      and _sd["has_change"], str(_sd)[:160])
+_sd2 = diff_scores(
+    [Score("数据结构", score="88", source_id="sc1")],
+    [Score("数据结构", score="95", source_id="sc1")])
+check("成绩.diff分数更新", len(_sd2["changed"]) == 1
+      and _sd2["changed"][0]["fields"]["score"]["after"] == "95", str(_sd2)[:160])
+check("成绩.diff无变化", not diff_scores([_s1], [_s1])["has_change"])
+check("成绩.变更文本格式化", "新成绩" in format_score_changes(_sd))
+# 正方成绩解析：多字段兜底 + 学期码归一化
+_zf_scores = asyncio.run(_zfp._fetch_scores(_ZfClient(_ZfResp({"items": [
+    {"kcmc": "数据结构", "cj": 88, "xf": "4", "jd": "3.7", "xnm": "2025", "xqm": "3",
+     "kclbmc": "必修", "ksxz": "正常考试", "id": "A1"},
+    {"kcmc": "英语", "score": "良好", "xnm": "2025", "xqm": "12", "id": "A2"},
+    {"bz": "无意义行"},
+]}))))
+check("正方.成绩解析多字段兜底", len(_zf_scores) == 2
+      and _zf_scores[0].name == "数据结构" and _zf_scores[0].score == "88"
+      and _zf_scores[0].gpa == "3.7" and _zf_scores[0].term == "3"
+      and _zf_scores[1].score == "良好" and _zf_scores[1].term == "12",
+      str([s.to_dict() for s in _zf_scores])[:200])
+# 异常响应必须抛错，不能静默返回 [] 清空历史快照（否则接口恢复后会全量误推）
+_zf_bad = ""
+try:
+    asyncio.run(_zfp._fetch_scores(_ZfClient(_ZfResp(None))))
+except ValueError:
+    _zf_bad = "raised"
+check("正方.成绩空响应抛错而非清空", _zf_bad == "raised")
+_zf_missing = ""
+try:
+    asyncio.run(_zfp._fetch_scores(_ZfClient(_ZfResp({"msg": "无权限"}))))
+except ValueError:
+    _zf_missing = "raised"
+check("正方.成绩缺items字段抛错", _zf_missing == "raised")
+# 全学期遍历：合并去重；任一学期失败则整体失败，不保存「成功的一部分」
+_orig_years = _zfp.score_years
+_zfp.score_years = 2
+try:
+    def _score_resp(name):
+        return _ZfResp({"items": [{"kcmc": name, "cj": 90, "id": name}]})
+    _multi = asyncio.run(_zfp._fetch_all_scores(_ZfClient(
+        _score_resp("A"), _score_resp("B"), _score_resp("C"), _score_resp("A"))))
+    check("正方.全学期成绩合并去重", len(_multi) == 3,
+          str([s.name for s in _multi])[:160])
+    _partial = ""
+    try:
+        asyncio.run(_zfp._fetch_all_scores(_ZfClient(
+            _score_resp("A"), _score_resp("B"), _ZfResp(None), _score_resp("C"))))
+    except RuntimeError:
+        _partial = "raised"
+    check("正方.部分学期失败整体失败", _partial == "raised")
+finally:
+    _zfp.score_years = _orig_years
+# 会话缓存复用：fetch_bundle 抓过之后不再开第二次登录
+_zfp._scores_fetched, _zfp.last_scores, _zfp.last_score_error = True, [_s1], ""
+_cached_scores = asyncio.run(_zfp.fetch_scores())
+check("正方.成绩会话缓存复用", len(_cached_scores) == 1
+      and _cached_scores[0].name == "数据结构")
+_zfp._scores_fetched = False
+# 成绩接口路径/菜单号可配置覆盖
+_override_cfg = load_config()
+_override_cfg.setdefault("provider", {}).setdefault("zhengfang", {})
+_override_cfg["provider"]["zhengfang"].update(
+    score_path="/cjcx/custom.html", score_gnmk="N999999")
+_zp_override = ZhengfangProvider(_override_cfg)
+check("正方.成绩路径可配置覆盖", _zp_override.score_path == "/cjcx/custom.html"
+      and _zp_override.score_gnmk == "N999999")
+db.save_score_snapshot([_s1.to_dict(), _s2.to_dict()], "test")
+_ssnap = db.get_score_snapshot()
+check("成绩.快照落库", bool(_ssnap) and _ssnap["source"] == "test"
+      and len(_ssnap["scores"]) == 2, str(_ssnap)[:160])
+# 还原：演示源不产生成绩快照，清掉本段测试写入的数据
+with db.get_conn() as _c:
+    _c.execute("DELETE FROM score_snapshot WHERE user_id = 1")
+
 db.save_exam_snapshot([exam.to_dict()], "test")
 esnap = db.get_exam_snapshot()
 check("考试.快照落库", bool(esnap) and esnap["source"] == "test"
@@ -511,7 +594,48 @@ async def _fake_weather(cfg, day_s, hhmm):
 _sched.weather_line = _fake_weather   # 提醒用例不访问真实天气接口
 _orig_snap = db.get_snapshot()
 _orig_esnap = db.get_exam_snapshot()
+_orig_ssnap = db.get_score_snapshot()
 _orig_cfg = load_config()
+
+# 新成绩推送：无课表变更、关闭明日课后，只有成绩段进入推送；首次同步建基线不推送
+_push_calls.clear()
+_scfg = load_config()
+_scfg["push_next_day"] = False
+_scfg["push"] = dict(_scfg.get("push") or {}, new_score_enabled=True)
+_cur_courses = [Course.from_dict(d) for d in _orig_snap["courses"]]
+db.save_score_snapshot([_s1.to_dict()], "test")  # 基线：只有数据结构
+_res = asyncio.run(_sched.apply_snapshot(
+    _scfg, _cur_courses, "test", push=True,
+    scores=[_s1, _s2], score_source="test"))  # 新增高等数学
+check("成绩.新成绩触发推送", any("【考试成绩】" in b and "新成绩" in b and "高等数学" in b
+                          for _, b in _push_calls), str(_push_calls)[:300])
+# 课程快照已存在、但成绩快照为空：第一次拉成绩仍应建基线，不能借课程的 first_sync
+with db.get_conn() as _c:
+    _c.execute("DELETE FROM score_snapshot WHERE user_id = 1")
+_push_calls.clear()
+asyncio.run(_sched.apply_snapshot(
+    _scfg, _cur_courses, "test", push=True,
+    scores=[_s1, _s2], score_source="test"))
+check("成绩.已有课程快照时首同步不刷屏",
+      not any("【考试成绩】" in b for _, b in _push_calls), str(_push_calls)[:300])
+# 首次同步（课程与成绩快照都为空）同样只建基线、不推成绩段
+with db.get_conn() as _c:
+    _c.execute("DELETE FROM score_snapshot WHERE user_id = 1")
+    _c.execute("DELETE FROM snapshot WHERE user_id = 1")
+_push_calls.clear()
+asyncio.run(_sched.apply_snapshot(
+    _scfg, _cur_courses, "test", push=True,
+    scores=[_s1, _s2], score_source="test"))
+check("成绩.首次同步不刷屏", not any("【考试成绩】" in b for _, b in _push_calls),
+      str(_push_calls)[:300])
+# 还原课程 + 成绩现场（演示模式下没有成绩快照，清掉即可）
+db.save_snapshot(_orig_snap["courses"], _orig_snap["source"])
+if _orig_ssnap:
+    _db.save_score_snapshot(_orig_ssnap["scores"], _orig_ssnap["source"])
+else:
+    with _db.get_conn() as _c:
+        _c.execute("DELETE FROM score_snapshot WHERE user_id = 1")
+_push_calls.clear()   # 成绩推送测试不应污染后续提醒用例的初始状态
 
 
 def _at(s):
@@ -816,6 +940,8 @@ if _orig_snap:
     db.save_snapshot(_orig_snap["courses"], _orig_snap["source"])
 if _orig_esnap:
     db.save_exam_snapshot(_orig_esnap["exams"], _orig_esnap["source"])
+if _orig_ssnap:
+    db.save_score_snapshot(_orig_ssnap["scores"], _orig_ssnap["source"])
 save_config(_orig_cfg)
 
 # 天气模块：WMO 中文、逐小时取数、关闭开关（不走真实网络）
@@ -1303,6 +1429,34 @@ async def http_tests(port: int):
             "username": "bob", "password": "BobPass123", "invite": code})
         check("注册.凭邀请码成功", rb.status_code == 200, str(rb.text)[:200])
         token_b = rb.cookies.get("qut_session")
+
+        # 注册选填正方凭证：写入该用户 provider 并设 primary=zhengfang；
+        # 验证脚本已置 AGENDA_SKIP_REGISTER_SYNC，不会触发真实网络同步。
+        inv_zf = (await ca.post(f"{base}/api/auth/invites")).json().get("code")
+        rz = await _hx.AsyncClient(timeout=30, trust_env=False).post(
+            f"{base}/api/auth/register", json={
+                "username": "zfnew", "password": "ZfnewPass123", "invite": inv_zf,
+                "student_id": "20239999", "zhengfang_password": "secret-pwd"})
+        check("注册.带正方凭证成功", rz.status_code == 200, str(rz.text)[:200])
+        token_zf = rz.cookies.get("qut_session")
+        async with _hx.AsyncClient(timeout=30, trust_env=False,
+                                   cookies={"qut_session": token_zf}) as cz:
+            sz = (await cz.get(f"{base}/api/settings")).json()
+            zp = sz.get("provider", {})
+            zfg = zp.get("zhengfang", zp)
+            check("注册.正方学号写入本人配置",
+                  zfg.get("username") == "20239999", str(zfg)[:200])
+            check("注册.正方主源已设定",
+                  zp.get("primary") == "zhengfang", str(zp)[:200])
+        sb_after = (await ca.get(f"{base}/api/settings")).json()
+        check("注册.正方凭证不污染管理员配置",
+              "20239999" not in json.dumps(sb_after, ensure_ascii=False))
+        # 清掉测试账号，避免影响后面「管理员注销转让权限」用例
+        _zf_users = (await ca.get(f"{base}/api/auth/users")).json().get("users", [])
+        for _u in _zf_users:
+            if _u["username"] == "zfnew":
+                await ca.delete(f"{base}/api/auth/users/{_u['id']}")
+
         # 一次性码用过即废
         again = await ca.post(f"{base}/api/auth/register", json={
             "username": "bob2", "password": "BobPass123", "invite": code})
@@ -1330,8 +1484,17 @@ async def http_tests(port: int):
               and row.get("remaining") == 0, str(row)[:200])
         check("邀请码.使用人可追溯",
               set(row.get("used_by_names") or []) == {"dave", "erin"}, str(row)[:200])
-        # 清掉测试账号，避免影响后面「管理员注销转让权限」用例
+        # 用户列表附带两个数据源配置状态（供管理页双标签上色），只给布尔不泄露凭据
         users_now = (await ca.get(f"{base}/api/auth/users")).json().get("users", [])
+        check("用户列表.附带双源配置状态",
+              bool(users_now) and all(
+                  isinstance(u.get("portal_configured"), bool)
+                  and isinstance(u.get("zhengfang_configured"), bool)
+                  for u in users_now), str(users_now)[:300])
+        check("用户列表.不泄露凭据内容",
+              all("password" not in u and "cookie" not in u and "headers" not in u
+                  for u in users_now), str(users_now)[:200])
+        # 清掉测试账号，避免影响后面「管理员注销转让权限」用例
         for u in users_now:
             if u["username"] in ("dave", "erin"):
                 await ca.delete(f"{base}/api/auth/users/{u['id']}")
@@ -1515,6 +1678,50 @@ async def http_tests(port: int):
                   for e in tt_d.get("tomorrow_exams", [])),
               str(tt_d.get("tomorrow_exams"))[:200])
         await ca.post(f"{base}/api/exams", json={"action": "reset"})
+        # 演示源不产生成绩：成绩页应为空，绝不能用假数据填充
+        gr = (await ca.get(f"{base}/api/grades")).json()
+        check("成绩.演示模式无假成绩", not gr.get("scores")
+              and not gr.get("supported"), str(gr)[:260])
+        # 兼容旧版遗留的演示快照：库里即使有 mock 成绩也必须返回空
+        db.save_score_snapshot([_s1.to_dict()], "mock")
+        gr_demo = (await ca.get(f"{base}/api/grades")).json()
+        check("成绩.旧演示快照不展示", not gr_demo.get("scores"), str(gr_demo)[:200])
+        check("成绩.空快照也提供当前学期选项",
+              (gr_demo.get("current_term") or {}).get("key")
+              == f"{default_term()[0]}|{default_term()[1]}"
+              and len(gr_demo.get("terms", [])) >= 1, str(gr_demo)[:200])
+        with db.get_conn() as _c:
+            _c.execute("DELETE FROM score_snapshot WHERE user_id = 1")
+        # 写入真实成绩快照后，验证分组 / 统计 / 稳定标识
+        db.save_score_snapshot([_s1.to_dict(), _s2.to_dict()], "zhengfang")
+        gr = (await ca.get(f"{base}/api/grades")).json()
+        check("成绩.接口返回真实成绩", len(gr.get("scores", [])) >= 2
+              and all(x.get("uid") and x.get("term_label") for x in gr["scores"]),
+              str(gr)[:260])
+        check("成绩.分组与统计", len(gr.get("groups", [])) >= 1
+              and gr.get("stats", {}).get("count", 0) >= 2
+              and gr["stats"].get("avg") is not None,
+              str(gr.get("stats"))[:160])
+        check("成绩.分组带学期均分", all("avg" in g for g in gr.get("groups", [])),
+              str(gr.get("groups", []))[:200])
+        _cur_y, _cur_t = default_term()
+        _cur_key = f"{_cur_y}|{_cur_t}"
+        check("成绩.默认学期元数据", gr.get("current_term", {}).get("key") == _cur_key
+              and any(t.get("key") == _cur_key and t.get("is_current")
+                      for t in gr.get("terms", [])),
+              str(gr.get("current_term"))[:200])
+        check("成绩.学期选项含历史成绩", any(t.get("year") == "2025"
+              and t.get("term") == "3" and t.get("count") == 2
+              for t in gr.get("terms", [])),
+              str(gr.get("terms"))[:240])
+        # 错误透传：写一条失败日志后接口应带 error，测完清理避免污染日志用例
+        db.add_sync_log("fail", "成绩拉取失败（不影响课表）：测试用接口错误")
+        gr_err = (await ca.get(f"{base}/api/grades")).json()
+        check("成绩.接口透传同步错误", "测试用接口错误" in (gr_err.get("error") or ""),
+              str(gr_err.get("error")))
+        with db.get_conn() as _c:
+            _c.execute("DELETE FROM sync_log WHERE message LIKE '%测试用接口错误%'")
+        check("成绩.演示同步不产生成绩", "门成绩" not in sr.get("message", ""), str(sr)[:220])
         # 手动改课表：添加 → 修改 → 隐藏 → 恢复 → 修改同步课 → 重置
         base_list = (await ca.get(f"{base}/api/courses")).json()
         check("课表.列表带稳定标识", base_list.get("count", 0) > 0

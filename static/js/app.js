@@ -1180,7 +1180,7 @@
             "/api/rooms/my-free?date_s=" + encodeURIComponent(roomPopState.date),
           );
           if (free.spans === null) {
-            roomPopMessage("课表还没同步", "先去「课表来源」同步课表，再来查空教室。");
+            roomPopMessage("课表还没同步", "先去「设置 → 课表来源」同步课表，再来查空教室。");
             return;
           }
           const freeBlocks = roomFreeBlocks(free.spans, roomMaxJc());
@@ -1736,8 +1736,8 @@
           box.innerHTML = examData.supported
             ? `<div class="empty">暂无考试安排，点「立即同步」从教务拉取</div>`
             : examData.provider === "portal"
-              ? `<div class="empty">门户只提供课表；填写正方账号后，同步会额外拉取考试<br><button class="small" id="examToSettings">去课表来源填写正方账号</button></div>`
-              : `<div class="empty">当前数据源不支持考试查询，请在课表来源接入正方教务<br><button class="small" id="examToSettings">去课表来源</button></div>`;
+              ? `<div class="empty">门户只提供课表；填写正方账号后，同步会额外拉取考试<br><button class="small" id="examToSettings">去设置填写正方账号</button></div>`
+              : `<div class="empty">当前数据源不支持考试查询，请在设置 → 课表来源接入正方教务<br><button class="small" id="examToSettings">去课表来源</button></div>`;
           $("#examHint").textContent = examData.supported
             ? "考试数据来自正方教务，随每次同步更新；点「编辑考试」可手动添加或调整，临时调考以教务系统为准。"
             : "";
@@ -1761,6 +1761,160 @@
           ? "当前为演示考试数据，接入正方教务后自动替换；点「编辑考试」可手动添加或调整。"
           : "考试数据来自正方教务，随每次同步更新；点「编辑考试」可手动添加或调整，临时调考以教务系统为准。";
         renderWeekOverview();
+      }
+
+      /* ---------- 成绩（只读） ---------- */
+      let gradesData = null;
+      function gradeRow(g) {
+        const raw = String(g.score || "").trim();
+        const num = parseFloat(raw);
+        const isFail = !isNaN(num) && num < 60;
+        const meta = [g.course_type, g.credit ? `${g.credit} 学分` : "",
+          g.exam_type && g.exam_type !== "正常考试" ? g.exam_type : "",
+          g.teacher].filter(Boolean).map(esc).join(" · ");
+        const sub = g.gpa ? `绩点 ${esc(g.gpa)}` : "";
+        return `<div class="grade-row">
+    <div class="grade-main">
+      <div class="grade-name">${esc(g.name || "未命名课程")}</div>
+      ${meta ? `<div class="grade-meta">${meta}</div>` : ""}
+      ${sub ? `<div class="grade-meta">${sub}</div>` : ""}
+    </div>
+    <div class="grade-val${isFail ? " fail" : ""}">${raw ? esc(raw) : "—"}</div>
+  </div>`;
+      }
+      const GRADES_ALL_TERM = "all";
+      // 默认展示当前学期；用户切换后仅在当前页面生效，刷新回到本学期
+      let gradesTermKey = "";
+      function gradeTermKey(row) {
+        return `${row.year || ""}|${row.term || ""}`;
+      }
+      function gradeTermOrder(group) {
+        const year = parseInt(group.year || "", 10) || 0;
+        const term = String(group.term || "") === "12" ? 2
+          : String(group.term || "") === "3" ? 1 : 9;
+        return [year, term];
+      }
+      function gradeNumbers(list) {
+        return list.map((r) => parseFloat(r.score))
+          .filter((v) => !isNaN(v) && v >= 0 && v <= 150);
+      }
+      function gradeStats(list) {
+        const nums = gradeNumbers(list);
+        return {
+          count: list.length,
+          avg: nums.length
+            ? Math.round(nums.reduce((a, b) => a + b, 0) / nums.length * 10) / 10
+            : null,
+          max: nums.length ? Math.max(...nums) : null,
+        };
+      }
+      function groupedGrades(list) {
+        const map = new Map();
+        list.forEach((r) => {
+          const key = gradeTermKey(r);
+          if (!map.has(key)) map.set(key, {
+            year: r.year || "", term: r.term || "",
+            label: r.term_label || r.year || "", scores: [],
+          });
+          map.get(key).scores.push(r);
+        });
+        const groups = Array.from(map.values());
+        groups.forEach((g) => {
+          g.scores.sort((a, b) =>
+            String(a.name || "").localeCompare(String(b.name || ""), "zh-CN"));
+          const nums = gradeNumbers(g.scores);
+          g.avg = nums.length
+            ? Math.round(nums.reduce((a, b) => a + b, 0) / nums.length * 10) / 10
+            : null;
+        });
+        groups.sort((a, b) => {
+          const [ya, ta] = gradeTermOrder(a);
+          const [yb, tb] = gradeTermOrder(b);
+          return yb - ya || tb - ta;
+        });
+        return groups;
+      }
+      function renderGradesTermOptions() {
+        const sel = $("#gradesTerm");
+        if (!sel || !gradesData) return;
+        const current = gradesData.current_term || null;
+        const terms = gradesData.terms || [];
+        const valid = [GRADES_ALL_TERM].concat(terms.map((t) => t.key));
+        sel.innerHTML = [`<option value="${GRADES_ALL_TERM}">全部学期</option>`]
+          .concat(terms.map((t) =>
+            `<option value="${escAttr(t.key)}">${esc(t.label || t.full_label || t.key)}</option>`))
+          .join("");
+        if (!gradesTermKey || valid.indexOf(gradesTermKey) < 0) {
+          gradesTermKey = current && valid.indexOf(current.key) >= 0
+            ? current.key : GRADES_ALL_TERM;
+        }
+        sel.value = gradesTermKey;
+        const badge = $("#gradesCurrentBadge");
+        if (badge) badge.hidden = !current || gradesTermKey !== current.key;
+      }
+      function renderGrades() {
+        if (!gradesData) return;
+        const box = $("#gradesList");
+        const sub = $("#gradesSub");
+        const stats = $("#gradesStats");
+        const hint = $("#gradesHint");
+        const err = gradesData.error || "";
+        const all = gradesData.scores || [];
+        const current = gradesData.current_term || null;
+        const badge = $("#gradesCurrentBadge");
+        if (badge) badge.hidden = !current || gradesTermKey !== current.key;
+        const scores = gradesTermKey === GRADES_ALL_TERM
+          ? all : all.filter((r) => gradeTermKey(r) === gradesTermKey);
+        if (!all.length) {
+          sub.textContent = "";
+          stats.innerHTML = "";
+          box.innerHTML = (gradesData.supported
+            ? `<div class="empty">暂未获取到成绩，点顶部「立即同步」从正方教务拉取</div>`
+            : `<div class="empty">成绩来自正方教务，请先到「设置 → 课表来源」接入正方账号</div>`)
+            + (err ? `<div class="empty"><small>成绩同步失败：${esc(err)}</small></div>` : "");
+          hint.textContent = err
+            ? "成绩同步失败，显示的是上次成功同步的结果；请检查正方配置或接口路径。"
+            : "成绩只从正方教务获取，不展示演示数据；以教务系统公布为准。";
+          return;
+        }
+        sub.textContent = gradesData.fetched_at ? `${gradesData.fetched_at} 同步` : "";
+        if (!scores.length) {
+          stats.innerHTML = "";
+          const selected = (gradesData.terms || []).find((t) => t.key === gradesTermKey);
+          box.innerHTML = `<div class="empty">${selected && selected.is_current ? "本学期" : "所选学期"}暂无成绩，可在顶部切换到其他学期</div>`
+            + (err ? `<div class="empty"><small>成绩同步失败：${esc(err)}</small></div>` : "");
+          hint.textContent = err
+            ? `成绩同步失败：${err}；当前显示上次成功同步的数据。`
+            : "成绩从正方教务自动同步，发现新成绩或分数更新会推送提醒；以教务系统公布为准。";
+          return;
+        }
+        const st = gradeStats(scores);
+        stats.innerHTML = `
+          <div class="gstat"><b>${esc(st.count)}</b><span>已出成绩</span></div>
+          ${st.avg != null ? `<div class="gstat"><b>${esc(st.avg)}</b><span>平均分</span></div>` : ""}
+          ${st.max != null ? `<div class="gstat"><b>${esc(st.max)}</b><span>最高分</span></div>` : ""}`;
+        box.innerHTML = groupedGrades(scores).map((grp) =>
+          `<div class="grade-group">${esc(grp.label || grp.year)} · ${grp.scores.length} 门`
+          + (grp.avg != null ? ` · 平均 ${esc(grp.avg)}` : "") + `</div>` +
+          `<div class="grade-list">${grp.scores.map(gradeRow).join("")}</div>`
+        ).join("");
+        hint.textContent = err
+          ? `成绩同步失败：${err}；当前显示上次成功同步的数据。`
+          : `成绩从正方教务自动同步，发现新成绩或分数更新会推送提醒；统计为${gradesTermKey === GRADES_ALL_TERM ? "全部学期" : "当前所选学期"}数值成绩的简单平均，以教务系统公布为准。`;
+      }
+      async function loadGrades() {
+        const box = $("#gradesList");
+        if (!box.children.length) box.innerHTML = skeletonRows(3);
+        gradesData = await api("/api/grades");
+        renderGradesTermOptions();
+        renderGrades();
+      }
+      const gradesTermSelect = $("#gradesTerm");
+      if (gradesTermSelect) {
+        gradesTermSelect.addEventListener("change", (e) => {
+          gradesTermKey = e.target.value || GRADES_ALL_TERM;
+          renderGrades();
+        });
       }
 
       /* ---------- 日志（已移除独立页，保留空实现避免引用报错） ---------- */
@@ -2061,6 +2215,18 @@
       function fmtTime(s) {
         return s ? s.slice(0, 16) : "—";
       }
+      // 紧凑日期：只留「月-日 时:分」，用于用户列表合并行
+      function fmtShort(s) {
+        return s ? s.slice(5, 16) : "从未";
+      }
+      // 用户名旁的两个数据源标签：配了哪个就给哪个上色，没配的灰色。
+      // 门户/正方各自独立显示，一眼看出是「只配了正方」「只配了门户」还是「两个都配了」。
+      function sourceTags(u) {
+        const p = u.portal_configured ? "on-portal" : "off";
+        const z = u.zhengfang_configured ? "on-zf" : "off";
+        return `<span class="src-tag ${p}" title="融合门户：${u.portal_configured ? "已配置" : "未配置"}">门户</span>`
+             + `<span class="src-tag ${z}" title="正方教务：${u.zhengfang_configured ? "已配置" : "未配置"}">正方</span>`;
+      }
       async function loadAdminStats() {
         if (!currentUser || currentUser.role !== "admin") return;
         try {
@@ -2086,17 +2252,16 @@
             return `
               <div class="admin-user-row" data-uid="${u.id}">
                 <div class="admin-user-info">
-                  <div><input type="checkbox" class="admin-user-check" data-uid="${u.id}" ${me ? "disabled" : ""} />
-                    <b>${esc(u.username)}</b>${u.role === "admin" ? ' <span class="badge real">管理员</span>' : ""}${inactive ? ' <span class="badge">已停用</span>' : ""}${me ? ' <span class="badge">我</span>' : ""}</div>
-                  <div class="muted" style="font-size:12px">${esc(u.display_name || "—")} · 学号 ${esc(u.student_id || "—")}</div>
-                  <div class="muted" style="font-size:11px">注册 ${fmtTime(u.created_at)} · 最后登录 ${fmtTime(u.last_login_at) || "从未登录"}</div>
+                  <div class="admin-user-title"><input type="checkbox" class="admin-user-check" data-uid="${u.id}" ${me ? "disabled" : ""} />
+                    <b>${esc(u.username)}</b>${u.role === "admin" ? ' <span class="badge real">管理员</span>' : ""}${inactive ? ' <span class="badge">已停用</span>' : ""}${me ? ' <span class="badge">我</span>' : ""} ${sourceTags(u)}</div>
+                  <div class="admin-user-sub">${esc(u.display_name || "—")} · 学号 ${esc(u.student_id || "—")} · 注册 ${fmtShort(u.created_at)} · 登录 ${fmtShort(u.last_login_at)}</div>
                 </div>
                 <div class="admin-user-actions">
-                  <button data-act="edit" data-id="${u.id}">编辑</button>
-                  <button data-act="toggle-active" data-id="${u.id}" ${me ? "disabled" : ""}>${inactive ? "启用" : "停用"}</button>
-                  <button data-act="role" data-id="${u.id}" data-role="${u.role}" ${me ? "disabled" : ""}>${u.role === "admin" ? "降为普通" : "设为管理"}</button>
-                  <button data-act="reset-pwd" data-id="${u.id}">重置密码</button>
-                  <button data-act="delete" data-id="${u.id}" class="danger" ${me ? "disabled" : ""}>删除</button>
+                  <button class="mini" data-act="edit" data-id="${u.id}">编辑</button>
+                  <button class="mini" data-act="toggle-active" data-id="${u.id}" ${me ? "disabled" : ""}>${inactive ? "启用" : "停用"}</button>
+                  <button class="mini" data-act="role" data-id="${u.id}" data-role="${u.role}" ${me ? "disabled" : ""}>${u.role === "admin" ? "降权" : "提权"}</button>
+                  <button class="mini" data-act="reset-pwd" data-id="${u.id}">重置密码</button>
+                  <button class="mini danger" data-act="delete" data-id="${u.id}" ${me ? "disabled" : ""}>删除</button>
                 </div>
               </div>`;
           });
@@ -2112,21 +2277,12 @@
         try {
           const r = await api("/api/auth/users/source-status");
           const rows = r.users.map((u) => {
-            let pill;
-            if (!u.portal_configured && !u.zhengfang_configured)
-              pill = '<span class="source-pill pill-none">未配置</span>';
-            else if (u.resolved === "portal")
-              pill = '<span class="source-pill pill-portal">门户</span>';
-            else if (u.resolved === "zhengfang")
-              pill = '<span class="source-pill pill-zhengfang">正方</span>';
-            else
-              pill = `<span class="source-pill pill-none">${esc(u.resolved)}</span>`;
             const snap = u.snapshot_source
-              ? `<span class="muted" style="font-size:11px">快照来源 ${esc(u.snapshot_source)} · 同步 ${fmtTime(u.fetched_at)}</span>`
-              : '<span class="muted" style="font-size:11px">尚未同步课表</span>';
+              ? `快照来源 ${esc(u.snapshot_source)} · 同步 ${fmtTime(u.fetched_at)}`
+              : "尚未同步课表";
             return `<div class="source-row">
-              <div><b>${esc(u.display_name || u.username)}</b> <span class="muted" style="font-size:12px">(${esc(u.username)})</span> ${pill}</div>
-              <div>${snap}</div>
+              <div><b>${esc(u.display_name || u.username)}</b> <span class="muted" style="font-size:12px">(${esc(u.username)})</span> ${sourceTags(u)}</div>
+              <div class="muted" style="font-size:11px">${snap}</div>
             </div>`;
           });
           $("#adminSourceList").innerHTML = rows.length
@@ -2252,7 +2408,7 @@
       /* ---------- Tab 切换 ---------- */
       // 记住当前页面，刷新后停留在原 tab（按浏览器本地保存，不含任何隐私数据）
       const TAB_KEY = "qut.currentTab";
-      const TAB_IDS = ["today", "week", "rooms", "source", "admin", "settings"];
+      const TAB_IDS = ["today", "week", "grades", "settings"];
       function readSavedTab() {
         try {
           const t = localStorage.getItem(TAB_KEY);
@@ -2277,7 +2433,7 @@
           b.setAttribute("aria-selected", on ? "true" : "false");
           b.tabIndex = on ? 0 : -1;
         });
-        ["today", "week", "source", "admin", "settings"].forEach((t) =>
+        ["today", "week", "grades", "settings"].forEach((t) =>
           $("#tab-" + t).classList.toggle("hidden", t !== tab),
         );
         if (tab === "today") safeLoad(loadToday());
@@ -2285,14 +2441,7 @@
           safeLoad(loadWeek(viewWeek ?? Math.max(status?.week || 1, 1)));
           safeLoad(loadExams());
         }
-        if (tab === "source") safeLoad(loadSources());
-        if (tab === "admin") {
-          safeLoad(loadAdminStats());
-          safeLoad(loadAdminUsers());
-          safeLoad(loadAdminSources());
-          safeLoad(loadAdminLog());
-          safeLoad(refreshInvites());
-        }
+        if (tab === "grades") safeLoad(loadGrades());
         if (tab === "settings") {
           safeLoad(loadSettings());
           safeLoad(loadPushLog());
@@ -2513,7 +2662,8 @@
       $("#syncBtn").addEventListener("click", doSync);
       $("#examList").addEventListener("click", (e) => {
         if (!e.target.closest("#examToSettings")) return;
-        switchTab("source");
+        switchTab("settings");
+        showSettingsSection("settingsSource");
         setTimeout(() => {
           const f = $("#zfUsername");
           if (f) {
@@ -2732,6 +2882,8 @@
         settingsAccount: ["settingsAccount"],
         settingsSync: ["settingsSync"],
         settingsPush: ["settingsPush", "settingsBark", "settingsPushLog"],
+        settingsSource: ["tab-source"],
+        settingsAdmin: ["tab-admin"],
       };
       function isPhoneLayout() { return window.matchMedia("(max-width: 720px)").matches; }
 
@@ -2741,7 +2893,7 @@
       const settingsBack = $("#settingsBack");
       const SETTINGS_TITLES = {
         settingsAppearance: "外观", settingsAccount: "账号安全", settingsSync: "同步",
-        settingsPush: "推送",
+        settingsPush: "推送", settingsSource: "课表来源", settingsAdmin: "用户管理",
       };
       let currentSettingsSection = "settingsAppearance";
 
@@ -2750,10 +2902,21 @@
         const show = SETTINGS_GROUP_CARDS[target] || [target];
         if (!SETTINGS_GROUP_CARDS[target]) return;
         currentSettingsSection = target;
-        document.querySelectorAll("#tab-settings .card").forEach((c) =>
+        // 只看 settings-body 的直接子节点：课表来源/用户管理内部还有嵌套 .card，
+        // 若用后代选择器会把它们一并误隐藏。
+        $$("#tab-settings .settings-body > *").forEach((c) =>
           c.classList.toggle("section-hidden", !show.includes(c.id)));
         settingsNav.querySelectorAll("button[data-target]").forEach((b) =>
           b.classList.toggle("active", b.dataset.target === target));
+        // 迁入的设置分区按需加载（原来在独立 tab 打开时加载）
+        if (target === "settingsSource") safeLoad(loadSources());
+        if (target === "settingsAdmin" && currentUser?.role === "admin") {
+          safeLoad(loadAdminStats());
+          safeLoad(loadAdminUsers());
+          safeLoad(loadAdminSources());
+          safeLoad(loadAdminLog());
+          safeLoad(refreshInvites());
+        }
         // 手机：进入详情页
         if (isPhoneLayout()) {
           settingsRoot.classList.add("detail-mode");
@@ -2846,6 +3009,7 @@
 
       const SETTINGS_SECTION_IDS = [
         "settingsAppearance", "settingsAccount", "settingsSync", "settingsPush",
+        "settingsSource", "settingsAdmin",
       ];
       let settingsObserver = null;
       let settingsObserverInset = -1;
@@ -3152,29 +3316,26 @@
             (currentUser.role === "admin" ? "（管理员）" : "");
           renderAccountInfo();
           $("#inviteBtn").classList.toggle("hidden", currentUser.role !== "admin");
-          $("#adminNavBtn").classList.toggle("hidden", currentUser.role !== "admin");
+          $("#settingsAdminNavBtn").classList.toggle("hidden", currentUser.role !== "admin");
+          $("#settingsAdminRow").classList.toggle("hidden", currentUser.role !== "admin");
           await loadStatus();
           await loadToday();
           loadWeather();
           pollBrowserLogin();
           if (currentUser.role === "admin") refreshInvites();
-          // 刷新后停留在上一次的页面；首次未配置数据源时仍优先引导去「课表来源」
+          // 刷新后停留在上一次的页面；首次未配置数据源时引导去设置→课表来源
           if (status && status.is_demo && !status.has_source) {
-            switchTab("source");
+            switchTab("settings");
+            showSettingsSection("settingsSource");
           } else {
             let saved = readSavedTab();
-            // 旧版本可能把已下线的页签（如已移除的「空教室」）存进 localStorage，
+            // 旧版本可能把已下线的页签（课表来源/用户管理/空教室）存进 localStorage，
             // 落到不存在的 tab 会让所有页面都隐藏，这里统一回落到今日页
-            if (!["today", "week", "source", "admin", "settings"].includes(saved)) {
+            if (!TAB_IDS.includes(saved)) {
               saved = "today";
               saveTab("today");
             }
-            // 非管理员不恢复「用户管理」，并清掉无效记录；today 是默认页且已加载，无需重复切换
-            if (saved === "admin" && currentUser.role !== "admin") {
-              saveTab("today");
-            } else if (saved && saved !== "today") {
-              switchTab(saved);
-            }
+            if (saved && saved !== "today") switchTab(saved);
           }
         } catch (e) {
           toast("加载失败：" + e.message, 5000, "error");
@@ -3203,6 +3364,7 @@
             password: $("#regPassword").value,
             display_name: $("#regName").value.trim(),
             student_id: $("#regStudentId").value.trim(),
+            zhengfang_password: $("#regZfPassword").value,
             invite: $("#regInvite").value.trim() }) });
           location.reload();
         } catch (err) { authError(err.message); }
@@ -3220,7 +3382,10 @@
       $("#deleteAccountSheet").addEventListener("click", (e) => {
         if (e.target.id === "deleteAccountSheet") closeDeleteSheet();
       });
-      $("#inviteBtn").addEventListener("click", () => switchTab("admin"));
+      $("#inviteBtn").addEventListener("click", () => {
+        switchTab("settings");
+        showSettingsSection("settingsAdmin");
+      });
       function inviteMaxUses() {
         const v = parseInt(($("#inviteMaxUses").value || "1").trim(), 10);
         return (!v || v < 1) ? 1 : Math.min(v, 999);

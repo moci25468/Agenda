@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import secrets
 import sqlite3
@@ -27,12 +28,12 @@ from .config import (
 from .user_context import current_user_id, get_current_user, set_current_user
 from .netguard import UnsafeURLError, assert_safe_outbound_url
 from .models import (
-    Course, Event, Exam, apply_course_overrides, apply_exam_overrides,
-    course_uid, current_week, exam_uid, parse_weeks,
+    Course, Event, Exam, Score, apply_course_overrides, apply_exam_overrides,
+    course_uid, current_week, exam_uid, parse_weeks, score_uid,
     week_dates, DEFAULT_SECTION_TIMES, DEFAULT_SECTION_ENDS,
 )
 from .providers import get_provider
-from .providers.zhengfang import ZhengfangProvider, zhengfang_configured
+from .providers.zhengfang import ZhengfangProvider, default_term, zhengfang_configured
 from .push import push_all, send_selected, wecom_input_error
 from .scheduler import (
     WEEKDAY_CN, apply_snapshot, courses_on, free_sections, next_run_time,
@@ -904,6 +905,146 @@ async def exams():
     }
 
 
+def _score_term_key(year, term) -> str:
+    return f"{str(year or '')}|{str(term or '')}"
+
+
+def _score_term_meta(year, term, count: int = 0, current: bool = False) -> dict:
+    """成绩学期下拉项：短标签用于标题，完整标签用于提示/分组。"""
+    year, term = str(year or ""), str(term or "")
+    name = {"3": "第一学期", "12": "第二学期"}.get(
+        term, f"第 {term} 学期" if term else "学期")
+    try:
+        short = f"{int(year)}-{int(year) + 1} {name}"
+    except (TypeError, ValueError):
+        short = name
+    return {
+        "key": _score_term_key(year, term),
+        "year": year,
+        "term": term,
+        "label": short,
+        "full_label": Score(name="", year=year, term=term).term_label(),
+        "count": count,
+        "is_current": current,
+    }
+
+
+def _score_term_sort(meta: dict) -> tuple:
+    try:
+        year = int(meta.get("year") or 0)
+    except (TypeError, ValueError):
+        year = 0
+    order = {"3": 1, "12": 2}.get(str(meta.get("term") or ""), 9)
+    return year, order
+
+
+def _score_term_options(items: list[dict], current: dict) -> list[dict]:
+    """当前学期即使还没出成绩也要出现在下拉框里，否则用户无法确认「本学期」。"""
+    counts: dict[str, int] = {}
+    for row in items:
+        key = _score_term_key(row.get("year"), row.get("term"))
+        counts[key] = counts.get(key, 0) + 1
+    metas = {current["key"]: dict(current)}
+    for key in counts:
+        if key not in metas:
+            year, term = key.split("|", 1)
+            metas[key] = _score_term_meta(year, term)
+    for key, meta in metas.items():
+        meta["count"] = counts.get(key, 0)
+        meta["is_current"] = key == current["key"]
+    return sorted(metas.values(), key=_score_term_sort, reverse=True)
+
+
+@app.get("/api/grades")
+async def grades():
+    """考试成绩（只读）：从正方教务同步，按学期分组展示。"""
+    cfg = load_config()
+    p = cfg.get("provider", {})
+    ptype = p.get("type", "mock")
+    # 演示源不提供成绩：只有正方（配了凭证）才算「能出成绩」
+    supported = ptype == "zhengfang" or zhengfang_configured(cfg)
+    cur_year, cur_term = default_term()
+    current_term = _score_term_meta(cur_year, cur_term, current=True)
+    # 最近一次成绩同步失败原因。同步日志按当前用户隔离、按时间倒序：
+    # 若比失败更新的日志里已有「N 门成绩」，说明接口已恢复，不再提示错误。
+    score_error = ""
+    for row in (db.get_logs(limit=30).get("sync") or []):
+        msg = str(row.get("message") or "")
+        if "门成绩" in msg:
+            break
+        if "成绩拉取失败" in msg:
+            score_error = msg.split("成绩拉取失败", 1)[1].strip("（ ）:：")
+            break
+    snap = db.get_score_snapshot()
+    # 兼容旧版本遗留的演示快照：一律不展示，等同「还没拉到真实成绩」
+    demo_snap = bool(snap) and snap.get("source") == "mock"
+    if not snap or demo_snap:
+        return {
+            "scores": [], "groups": [], "source": None, "fetched_at": None,
+            "provider": ptype, "is_demo": demo_snap or ptype == "mock",
+            "supported": supported,
+            "current_term": current_term, "terms": [current_term],
+            "stats": {"count": 0, "avg": None, "max": None}, "error": score_error,
+        }
+    items = []
+    for d in snap["scores"]:
+        s = Score.from_dict(d)
+        row = s.to_dict()
+        row["uid"] = score_uid(s)
+        row["term_label"] = s.term_label()
+        items.append(row)
+    # 按学年+学期倒序分组（新学期在前），组内按课程名排序
+    terms = sorted({(r.get("year", ""), r.get("term", "")) for r in items},
+                   key=lambda t: _score_term_sort({"year": t[0], "term": t[1]}),
+                   reverse=True)
+    groups = []
+    for year, term in terms:
+        sub = [r for r in items if r.get("year") == year and r.get("term") == term]
+        sub.sort(key=lambda r: r.get("name", ""))
+        group_nums = []
+        for r in sub:
+            try:
+                v = float(r.get("score", ""))
+            except (TypeError, ValueError):
+                continue
+            if 0 <= v <= 150:
+                group_nums.append(v)
+        groups.append({
+            "year": year, "term": term,
+            "label": sub[0]["term_label"] if sub else "",
+            "scores": sub,
+            "avg": round(sum(group_nums) / len(group_nums), 1) if group_nums else None,
+        })
+    # 数值成绩的简单统计（等级制如「优秀」不计入）
+    nums = []
+    for r in items:
+        try:
+            v = float(r.get("score", ""))
+        except (TypeError, ValueError):
+            continue
+        if 0 <= v <= 150:
+            nums.append(v)
+    stats = {
+        "count": len(items),
+        "avg": round(sum(nums) / len(nums), 1) if nums else None,
+        "max": max(nums) if nums else None,
+    }
+    return {
+        "scores": items,
+        "groups": groups,
+        "today": date.today().isoformat(),
+        "provider": ptype,
+        "source": snap["source"],
+        "fetched_at": snap["fetched_at"],
+        "is_demo": snap["source"] == "mock",
+        "supported": supported,
+        "current_term": current_term,
+        "terms": _score_term_options(items, current_term),
+        "stats": stats,
+        "error": score_error,
+    }
+
+
 def _exam_overrides(cfg: dict) -> dict:
     ov = cfg.get("exam_overrides") or {}
     return {
@@ -1435,11 +1576,28 @@ def _session_cookie(resp: JSONResponse, request: Request, token: str):
                     secure=request.url.scheme == "https")
 
 
+async def _sync_after_register(uid: int) -> None:
+    """注册选填了正方凭证时，在新用户上下文里后台同步一次课表。
+
+    注册接口本身没有会话上下文（current_user_id 为 None），必须显式 set，
+    否则 load_config / 快照会落到全局配置或 uid=1，造成串号。
+    """
+    ctx = set_current_user(uid)
+    try:
+        await run_sync(push=False)
+    except Exception:  # noqa: BLE001  # 同步失败只记日志，不影响已创建的账号
+        import logging
+        logging.getLogger(__name__).exception("注册后首次同步失败 uid=%s", uid)
+    finally:
+        current_user_id.reset(ctx)
+
+
 class RegisterRequest(BaseModel):
     username: str
     password: str
     display_name: str = ""
     student_id: str = ""
+    zhengfang_password: str = ""
     invite: str = ""
 
 
@@ -1486,15 +1644,41 @@ async def auth_register(req: RegisterRequest, request: Request):
     template = global_config()
     if first:
         # 第一个账号继承现有的单用户配置与课表（快照 user_id=1 已迁移）
-        db.save_user_config(uid, template)
+        clean = template
     else:
         clean = json.loads(json.dumps(DEFAULT_CONFIG))
         for key in ("school", "semester_start", "total_weeks", "section_times"):
             clean[key] = template.get(key, clean.get(key))
         clean["security"] = {"enabled": False, "token": "", "allowed_origins": []}
-        db.save_user_config(uid, clean)
+
+    # 注册时选填了学号 + 正方密码：直接写进该用户的正方 provider，
+    # 并显式设 primary=zhengfang，保证首次同步走正方（即使日后配了门户也不被抢回）。
+    # 只在两项都填了时才配置，避免「有密码没学号」产生半成品凭证。
+    sid = (req.student_id or "").strip()
+    zf_pwd = (req.zhengfang_password or "").strip()
+    has_zf = bool(sid and zf_pwd)
+    if has_zf:
+        provider = dict(clean.get("provider") or {})
+        zf = dict(provider.get("zhengfang") or {})
+        zf["username"] = sid
+        zf["password"] = zf_pwd
+        zf["cookie"] = ""  # 账号密码模式，清掉可能残留的 Cookie
+        zf["base"] = zf.get("base") or "https://jxgl.qut.edu.cn/jwglxt"
+        zf["year"], zf["term"] = default_term()
+        provider["zhengfang"] = zf
+        if provider.get("type") == "mock":
+            provider["type"] = "zhengfang"
+        provider["primary"] = "zhengfang"
+        clean["provider"] = provider
+    db.save_user_config(uid, clean)
+
     token = auth.new_token()
     db.create_session(uid, token, auth.SESSION_TTL_SECONDS)
+    if has_zf and not os.environ.get("AGENDA_SKIP_REGISTER_SYNC"):
+        # 只在注册成功后才拉数据：用新用户上下文后台同步一次，不阻塞注册响应。
+        # 失败由 run_sync 自己记录日志，不影响账号已创建这一结果。
+        # 验证脚本置 AGENDA_SKIP_REGISTER_SYNC=1，避免测试触发真实正方网络请求。
+        asyncio.create_task(_sync_after_register(uid))
     resp = JSONResponse({"ok": True, "user": _public_user(db.get_user_by_id(uid))})
     _session_cookie(resp, request, token)
     return resp
@@ -1567,7 +1751,15 @@ def _require_admin() -> dict:
 @app.get("/api/auth/users")
 async def auth_users(q: str = "", sort: str = "id"):
     _require_admin()
-    return {"users": db.list_users(q, sort)}
+    from .config import portal_configured, zhengfang_configured
+    users = db.list_users(q, sort)
+    # 附带每个用户「配了哪些数据源」，供管理列表在用户名旁上色显示，
+    # 不返回任何凭据内容，只给布尔状态。
+    for u in users:
+        cfg = db.get_user_config(u["id"])
+        u["portal_configured"] = portal_configured(cfg)
+        u["zhengfang_configured"] = zhengfang_configured(cfg)
+    return {"users": users}
 
 
 @app.get("/api/auth/invites")

@@ -467,6 +467,17 @@ nav button.active::after { content: none; }
   .wrap { max-width: calc(100vw - 64px); }
 }
 
+/* 注册页：正方凭证推荐填写的说明块 */
+.reg-source-hint {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--fill, color-mix(in srgb, var(--card) 70%, transparent));
+}
+.reg-source-hint b { font-size: 12px; font-weight: 600; color: var(--text); }
+.reg-source-hint span { font-size: 11px; line-height: 1.6; color: var(--sub); }
+
 /* 登录页背景：苹果灰画布 + 底部巨型衬线水印（所有屏宽都显示，字号自适应） */
 .auth-screen {
   position: relative;
@@ -587,12 +598,13 @@ html[data-theme="dark"] .auth-screen::before { color: rgba(250, 250, 248, 0.045)
     flex-direction: column;
     align-items: stretch;
     gap: 3px;
-    /* 锁定导航尺寸：切换「外观/账号」等分区时高度/位置恒定，不随内容或选中态变化 */
+    /* 锁定导航尺寸：切换「外观/账号」等分区时高度/位置恒定，不随内容或选中态变化。
+       6 个分区（外观/账号/同步/推送/课表来源/用户管理），每项 38px + 3px 间距 + 16px 内边距 ≈ 262px */
     box-sizing: border-box;
-    height: 228px;
-    min-height: 228px;
-    max-height: 228px;
-    flex: 0 0 228px;
+    height: 262px;
+    min-height: 262px;
+    max-height: 262px;
+    flex: 0 0 262px;
     padding: 8px;
     margin: 0;
     border: 0;
@@ -703,8 +715,10 @@ html[data-theme="dark"] .auth-screen::before { color: rgba(250, 250, 248, 0.045)
   #tab-settings:not(.detail-mode) > .form-actions { display: none !important; }
 }
 
-/* 分区切换：非当前分区卡片由 JS 加 .section-hidden 隐藏 */
-#tab-settings .card.section-hidden { display: none !important; }
+/* 分区切换：非当前分区卡片由 JS 加 .section-hidden 隐藏
+   课表来源 / 用户管理作为 settings-page 分区一并纳入（原独立页迁入设置） */
+#tab-settings .card.section-hidden,
+#tab-settings .settings-page.section-hidden { display: none !important; }
 
 /* === iOS 风格开关（外观卡：深色模式 / 自动切换）=== */
 .switch-list { display: flex; flex-direction: column; }

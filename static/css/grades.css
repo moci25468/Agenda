@@ -1,0 +1,140 @@
+/* 考试成绩（只读展示） */
+/* 标题区：学期选择器作为主标题，右侧保留同步时间 */
+.grades-card .day-head { align-items: flex-start; gap: 8px; }
+.grades-card .day-head > div:first-child { flex: 1 1 auto; min-width: 0; }
+.grades-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.grades-term {
+  width: auto;
+  flex: 0 1 auto;
+  max-width: min(100%, 360px);
+  min-width: 0;
+  padding: 0 20px 0 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' fill='none' stroke='%23888' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    no-repeat right center;
+  background-size: 12px;
+  color: var(--text);
+  font-family: inherit;
+  line-height: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.grades-term:hover { color: var(--accent); }
+.grades-term:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.grades-term option { color: var(--text); background: var(--card); }
+.grades-current {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--card-2, rgba(127, 127, 127, 0.08));
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.grades-current[hidden] { display: none; }
+.grades-card .day-meta { flex: 0 0 auto; min-width: 0; max-width: 45%; text-align: right; }
+.grades-card .day-meta .muted {
+  white-space: nowrap;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.grades-stats {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 4px 0 6px;
+}
+.grades-stats .gstat {
+  flex: 1 1 88px;
+  min-width: 88px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--card-2, rgba(127, 127, 127, 0.08));
+  border: 1px solid var(--line);
+}
+.grades-stats .gstat b {
+  display: block;
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  line-height: 1.2;
+}
+.grades-stats .gstat span {
+  display: block;
+  font-size: 11px;
+  color: var(--sub);
+  margin-top: 3px;
+}
+.grade-group {
+  font-size: 12px;
+  color: var(--sub);
+  margin: 18px 0 2px;
+}
+.grade-group:first-child { margin-top: 4px; }
+.grade-list .grade-row:first-child { border-top: none; }
+.grade-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.grade-main { flex: 1; min-width: 0; }
+.grade-name {
+  font-size: 15px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.grade-meta {
+  font-size: 12px;
+  color: var(--sub);
+  margin-top: 3px;
+}
+.grade-val {
+  flex: 0 0 auto;
+  text-align: right;
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  line-height: 1.1;
+}
+.grade-val.fail { color: var(--fail, #d64545); }
+.grade-val small {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--sub);
+  margin-top: 2px;
+}
+/* 手机端让学期选择器独占标题行，避免同步时间把学期文字挤到省略 */
+@media (max-width: 720px) {
+  .grades-card .day-head { flex-wrap: wrap; }
+  .grades-card .day-head > div:first-child { flex: 1 1 100%; }
+  .grades-card .day-meta {
+    flex: 1 1 100%;
+    max-width: none;
+    text-align: left;
+    margin-top: -2px;
+  }
+  .grades-card .day-head .grades-term {
+    max-width: calc(100% - 52px);
+    font-size: 21px;
+    letter-spacing: -0.01em;
+  }
+}

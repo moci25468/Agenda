@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from ..models import Course, Exam
+from ..models import Course, Exam, Score
 
 
 class AuthExpiredError(ValueError):
@@ -14,6 +14,7 @@ class TimetableProvider(ABC):
     name = "base"
     is_demo = False
     supports_exams = False   # 数据源是否提供考试安排
+    supports_scores = False  # 数据源是否提供考试成绩
 
     @abstractmethod
     async def fetch(self) -> list[Course]:
@@ -22,6 +23,10 @@ class TimetableProvider(ABC):
 
     async def fetch_exams(self) -> list[Exam]:
         """拉取考试安排；不支持的数据源返回空列表。"""
+        return []
+
+    async def fetch_scores(self) -> list[Score]:
+        """拉取考试成绩；不支持的数据源返回空列表。"""
         return []
 
     async def fetch_bundle(self) -> tuple[list[Course], list[Exam]]:

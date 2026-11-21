@@ -421,3 +421,85 @@ def diff_courses(old: list[Course], new: list[Course]) -> dict:
         "changed": changed,
         "has_change": bool(added or removed or changed),
     }
+
+
+@dataclass
+class Score:
+    """一门课的考试成绩。成绩保留原始文本（可能是数字，也可能是等级）。"""
+    name: str
+    score: str = ""            # 成绩：数字或「优秀/良好/及格/不及格」等
+    credit: str = ""           # 学分
+    gpa: str = ""              # 绩点
+    year: str = ""             # 学年（起始年份）
+    term: str = ""             # 学期码：3=秋 12=春
+    course_type: str = ""      # 课程性质：必修/选修等
+    exam_type: str = ""        # 考试性质：正常考试/补考/重修等
+    teacher: str = ""
+    note: str = ""
+    source_id: str = ""
+    uid: str = ""              # 稳定标识（不参与同步 diff）
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @staticmethod
+    def from_dict(d: dict) -> "Score":
+        return Score(
+            name=str(d.get("name", "") or ""),
+            score=str(d.get("score", "") or ""),
+            credit=str(d.get("credit", "") or ""),
+            gpa=str(d.get("gpa", "") or ""),
+            year=str(d.get("year", "") or ""),
+            term=str(d.get("term", "") or ""),
+            course_type=str(d.get("course_type", "") or ""),
+            exam_type=str(d.get("exam_type", "") or ""),
+            teacher=str(d.get("teacher", "") or ""),
+            note=str(d.get("note", "") or ""),
+            source_id=str(d.get("source_id", "") or ""),
+            uid=str(d.get("uid", "") or ""),
+        )
+
+    def key(self) -> tuple:
+        """成绩的稳定标识：优先教务给出的 id，否则用 课程名+学年+学期+考试性质。"""
+        if self.source_id:
+            # 补考/重修可能与正常考试共用教务 id，带上考试性质避免被覆盖成一条
+            return ("id", self.source_id, self.exam_type)
+        return ("raw", self.name, self.year, self.term, self.exam_type)
+
+    def term_label(self) -> str:
+        """人类可读的学期，如「2025-2026 学年 第一学期」。"""
+        label = {"3": "第一学期", "12": "第二学期"}.get(self.term, f"第 {self.term} 学期")
+        try:
+            start = int(self.year)
+        except (TypeError, ValueError):
+            return label
+        return f"{start}-{start + 1} 学年 {label}"
+
+
+def score_uid(s: Score) -> str:
+    return hashlib.sha1("|".join(str(x) for x in s.key()).encode("utf-8")).hexdigest()[:16]
+
+
+def diff_scores(old: list[Score], new: list[Score]) -> dict:
+    """对比两次成绩快照，只关心「新出现」与「分数被更新」。
+
+    成绩不会像课程那样「取消」，所以不返回 removed；教务回滚导致某条消失时也
+    不推送删除，仅在下一次快照里不再展示。
+    """
+    old_map = {s.key(): s for s in old}
+    new_map = {s.key(): s for s in new}
+    added = [s for k, s in new_map.items() if k not in old_map]
+    changed = []
+    for k in old_map.keys() & new_map.keys():
+        o, n = old_map[k], new_map[k]
+        fields = {}
+        for f in ("score", "gpa", "credit"):
+            if getattr(o, f) != getattr(n, f):
+                fields[f] = {"before": getattr(o, f), "after": getattr(n, f)}
+        if fields:
+            changed.append({"before": o.to_dict(), "after": n.to_dict(), "fields": fields})
+    return {
+        "added": [s.to_dict() for s in added],
+        "changed": changed,
+        "has_change": bool(added or changed),
+    }

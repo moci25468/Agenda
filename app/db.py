@@ -58,6 +58,12 @@ def init_db():
             source TEXT NOT NULL,
             fetched_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS score_snapshot (
+            user_id INTEGER PRIMARY KEY,
+            data TEXT NOT NULL,
+            source TEXT NOT NULL,
+            fetched_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS sync_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL DEFAULT 1,
@@ -260,6 +266,38 @@ def save_exam_snapshot(exams: list[dict], source: str):
                ON CONFLICT(user_id) DO UPDATE SET
                  data=excluded.data, source=excluded.source, fetched_at=excluded.fetched_at""",
             (_uid(), json.dumps(exams, ensure_ascii=False), source, now_str()),
+        )
+
+
+def get_score_snapshot() -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM score_snapshot WHERE user_id = ?", (_uid(),)).fetchone()
+    if not row:
+        return None
+    return {"scores": json.loads(row["data"]), "source": row["source"],
+            "fetched_at": row["fetched_at"]}
+
+
+def get_score_snapshot_for(user_id: int) -> dict | None:
+    """按指定用户读成绩快照（供无 Cookie 上下文的场景）。"""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM score_snapshot WHERE user_id = ?", (user_id,)).fetchone()
+    if not row:
+        return None
+    return {"scores": json.loads(row["data"]), "source": row["source"],
+            "fetched_at": row["fetched_at"]}
+
+
+def save_score_snapshot(scores: list[dict], source: str):
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO score_snapshot (user_id, data, source, fetched_at)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(user_id) DO UPDATE SET
+                 data=excluded.data, source=excluded.source, fetched_at=excluded.fetched_at""",
+            (_uid(), json.dumps(scores, ensure_ascii=False), source, now_str()),
         )
 
 
@@ -554,7 +592,7 @@ def delete_user_sessions(user_id: int, except_token: str = ""):
 def delete_user(user_id: int):
     """注销账号：用户行和各表里属于他的数据一起删除，避免留孤儿数据。"""
     with get_conn() as conn:
-        for table in ("sessions", "snapshot", "exam_snapshot",
+        for table in ("sessions", "snapshot", "exam_snapshot", "score_snapshot",
                       "sync_log", "push_log", "user_config", "events",
                       "reminders"):
             conn.execute(f"DELETE FROM {table} WHERE user_id = ?", (user_id,))

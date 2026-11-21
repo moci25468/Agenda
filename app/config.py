@@ -80,6 +80,7 @@ DEFAULT_CONFIG = {
         "reminder_advance": 15,     # 提前多少分钟
         "exam_review_enabled": True,  # 考试前推送复习提醒
         "exam_review_days": 15,     # 提前多少天
+        "new_score_enabled": True,  # 同步发现新成绩/成绩更新时推送
         "daily_time": "22:00",      # 每日「明日安排」推送时间（HH:MM）
         "daily_courses": True,      # 明日安排内容：课表
         "daily_events": True,       # 明日安排内容：日程与考试
