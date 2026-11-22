@@ -7,7 +7,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 
-from .config import DATA_DIR
+from .config import DATA_DIR, demo_allowed
 from .user_context import current_user_id
 
 DB_PATH = DATA_DIR / "campus.db"
@@ -210,12 +210,19 @@ def _dt(seconds: int) -> str:
 
 # ---------- 课表快照与日志（按当前用户） ----------
 
+def _no_demo(snap: dict | None) -> dict | None:
+    """生产环境不展示演示快照：遗留的 mock 数据一律视为「还没有数据」。"""
+    if snap and snap.get("source") == "mock" and not demo_allowed():
+        return None
+    return snap
+
+
 def get_snapshot() -> dict | None:
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM snapshot WHERE user_id = ?", (_uid(),)).fetchone()
     if not row:
         return None
-    return {"courses": json.loads(row["data"]), "source": row["source"], "fetched_at": row["fetched_at"]}
+    return _no_demo({"courses": json.loads(row["data"]), "source": row["source"], "fetched_at": row["fetched_at"]})
 
 
 def get_snapshot_for(user_id: int) -> dict | None:
@@ -224,7 +231,7 @@ def get_snapshot_for(user_id: int) -> dict | None:
         row = conn.execute("SELECT * FROM snapshot WHERE user_id = ?", (user_id,)).fetchone()
     if not row:
         return None
-    return {"courses": json.loads(row["data"]), "source": row["source"], "fetched_at": row["fetched_at"]}
+    return _no_demo({"courses": json.loads(row["data"]), "source": row["source"], "fetched_at": row["fetched_at"]})
 
 
 def save_snapshot(courses: list[dict], source: str):
@@ -243,8 +250,8 @@ def get_exam_snapshot() -> dict | None:
             "SELECT * FROM exam_snapshot WHERE user_id = ?", (_uid(),)).fetchone()
     if not row:
         return None
-    return {"exams": json.loads(row["data"]), "source": row["source"],
-            "fetched_at": row["fetched_at"]}
+    return _no_demo({"exams": json.loads(row["data"]), "source": row["source"],
+                     "fetched_at": row["fetched_at"]})
 
 
 def get_exam_snapshot_for(user_id: int) -> dict | None:
@@ -254,8 +261,8 @@ def get_exam_snapshot_for(user_id: int) -> dict | None:
             "SELECT * FROM exam_snapshot WHERE user_id = ?", (user_id,)).fetchone()
     if not row:
         return None
-    return {"exams": json.loads(row["data"]), "source": row["source"],
-            "fetched_at": row["fetched_at"]}
+    return _no_demo({"exams": json.loads(row["data"]), "source": row["source"],
+                     "fetched_at": row["fetched_at"]})
 
 
 def save_exam_snapshot(exams: list[dict], source: str):
@@ -275,8 +282,8 @@ def get_score_snapshot() -> dict | None:
             "SELECT * FROM score_snapshot WHERE user_id = ?", (_uid(),)).fetchone()
     if not row:
         return None
-    return {"scores": json.loads(row["data"]), "source": row["source"],
-            "fetched_at": row["fetched_at"]}
+    return _no_demo({"scores": json.loads(row["data"]), "source": row["source"],
+                     "fetched_at": row["fetched_at"]})
 
 
 def get_score_snapshot_for(user_id: int) -> dict | None:
@@ -286,8 +293,8 @@ def get_score_snapshot_for(user_id: int) -> dict | None:
             "SELECT * FROM score_snapshot WHERE user_id = ?", (user_id,)).fetchone()
     if not row:
         return None
-    return {"scores": json.loads(row["data"]), "source": row["source"],
-            "fetched_at": row["fetched_at"]}
+    return _no_demo({"scores": json.loads(row["data"]), "source": row["source"],
+                     "fetched_at": row["fetched_at"]})
 
 
 def save_score_snapshot(scores: list[dict], source: str):

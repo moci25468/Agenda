@@ -111,3 +111,11 @@
   color: var(--sub);
   font-variant-numeric: tabular-nums;
 }
+
+/* 未接入数据源时的整块空状态：跨满网格宽度，不画格子 */
+.week-empty {
+  grid-column: 1 / -1;
+}
+.week-empty .empty {
+  --empty-pad: 48px;
+}

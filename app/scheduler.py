@@ -11,7 +11,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from . import db
-from .config import load_config, resolve_course_source
+from .config import load_config, resolve_course_source, demo_allowed
 from .models import (Course, Event, Exam, Score, apply_course_overrides, apply_exam_overrides,
                      current_week,
                      diff_courses, diff_scores, event_line, score_uid,
@@ -254,6 +254,12 @@ async def run_sync(push: bool = True) -> dict:
         return {"ok": False, "message": "已有一个同步在进行中，请稍后再试",
                 "changes": {}, "pushed": []}
     try:
+        # 生产环境未配置任何真实数据源时不跑同步：不写空快照、不刷「0 门课程」日志。
+        # 前端会据 has_source=false 显示「暂无数据 + 去设置配置」引导。
+        cfg = load_config()
+        if not demo_allowed() and resolve_course_source(cfg) == "mock":
+            return {"ok": False, "message": "尚未配置数据源，请到「设置 → 课表来源」接入正方教务或融合门户",
+                    "changes": {}, "pushed": [], "no_source": True}
         return await _run_sync_inner(push)
     finally:
         _sync_lock.release()

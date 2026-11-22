@@ -186,6 +186,15 @@ def normalize_provider(p: dict | None) -> dict:
     return {"type": ptype, "primary": primary, "zhengfang": zhengfang, "portal": portal}
 
 
+def demo_allowed() -> bool:
+    """是否允许演示数据。仅验证脚本（AGENDA_ALLOW_DEMO=1）开启，生产默认关闭。
+
+    产品本身不提供假数据：未配置任何真实数据源时，各页面显示「暂无数据 +
+    去设置配置」引导，而不是虚构的课表/考试。测试夹具需要演示快照时显式开启。
+    """
+    return os.environ.get("AGENDA_ALLOW_DEMO", "") == "1"
+
+
 def zhengfang_configured(cfg: dict) -> bool:
     """是否填了可用于拉课表/考试的正方凭证（Cookie 或账号密码）。"""
     p = (cfg.get("provider") or {}).get("zhengfang") or {}

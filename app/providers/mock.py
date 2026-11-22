@@ -1,11 +1,13 @@
-"""演示数据 Provider。
+"""演示数据 Provider（仅测试夹具使用，生产环境不产出任何数据）。
 
-注意：这是虚构的示例课表，仅用于演示与开发，不是真实教务数据。
+注意：这是虚构的示例课表，仅用于验证脚本（AGENDA_ALLOW_DEMO=1），不是真实教务数据。
+生产环境未配置数据源时，本 Provider 返回空，各页面显示「暂无数据 + 去设置配置」。
 """
 from __future__ import annotations
 
 from datetime import date, timedelta
 
+from ..config import demo_allowed
 from ..models import Course, Exam
 from .base import TimetableProvider
 
@@ -36,9 +38,12 @@ class MockProvider(TimetableProvider):
     supports_scores = False
 
     async def fetch(self) -> list[Course]:
-        return _demo_courses()
+        # 生产环境不产出假数据：只有验证脚本显式开启演示模式才有内容。
+        return _demo_courses() if demo_allowed() else []
 
     async def fetch_exams(self) -> list[Exam]:
+        if not demo_allowed():
+            return []
         d1 = date.today() + timedelta(days=6)
         d2 = date.today() + timedelta(days=20)
         return [

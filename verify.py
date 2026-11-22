@@ -1,11 +1,14 @@
 """核心链路验证脚本：不依赖真实外部服务，全程使用隔离的临时数据目录。"""
 import base64
 import os
+import shutil
 import sys
 import tempfile
 
 _TEST_DATA_DIR = tempfile.mkdtemp(prefix="qut_verify_")
 os.environ["CAMPUS_DATA_DIR"] = _TEST_DATA_DIR
+# 验证脚本用演示源做测试夹具：生产默认关闭演示数据，这里显式开启以保留原有测试场景。
+os.environ["AGENDA_ALLOW_DEMO"] = "1"
 sys.path.insert(0, ".")
 
 from pathlib import Path
@@ -2078,7 +2081,55 @@ finally:
             except subprocess.TimeoutExpired:
                 pass
 
-import shutil
+# ---- 生产模式：未配置数据源时绝不展示演示数据 ----
+# 演示开关只在上面夹具段开启；这里关闭后模拟「库里有遗留 mock 假快照」，
+# 验证各 API 一律当空数据，且同步给出「去配置」引导。
+os.environ["AGENDA_ALLOW_DEMO"] = "0"
+_prod_dir = tempfile.mkdtemp(prefix="qut_verify_prod_")
+os.environ["CAMPUS_DATA_DIR"] = _prod_dir
+try:
+    from fastapi.testclient import TestClient as _TC
+    import app.config as _cfgmod
+    _cfgmod.DATA_DIR = Path(_prod_dir)
+    import app.db as _dbmod
+    _dbmod.DB_PATH = Path(_prod_dir) / "campus.db"
+    _dbmod.init_db()
+    from app.main import app as _app
+    from app.models import Course as _C, Exam as _E
+    with _TC(_app) as _pc:
+        _pc.post("/api/auth/register", json={"username": "admin", "password": "AdminPass123"})
+        _dbmod.save_snapshot([_C("假高等数学", day=1, start=1, end=2).to_dict()], "mock")
+        _dbmod.save_exam_snapshot([_E("假考试", date="2026-12-01", start="09:00", end="11:00").to_dict()], "mock")
+        _dbmod.save_score_snapshot([], "mock")
+        _st = _pc.get("/api/status").json()
+        _tt = _pc.get("/api/timetable").json()
+        _ex = _pc.get("/api/exams").json()
+        _gr = _pc.get("/api/grades").json()
+        check("无演示.状态无假数据", _st.get("is_demo") is False
+              and _st.get("has_source") is False and _st.get("course_count") == 0,
+              str(_st)[:160])
+        check("无演示.课表无假数据", not _tt.get("courses")
+              and _tt.get("is_demo") is False, str(_tt)[:160])
+        check("无演示.考试无假数据且提示配置", not _ex.get("exams")
+              and _ex.get("supported") is False, str(_ex)[:160])
+        check("无演示.成绩无假数据", not _gr.get("scores")
+              and _gr.get("is_demo") is False, str(_gr)[:160])
+        _sr = _pc.post("/api/sync").json()
+        check("无演示.同步引导去配置", _sr.get("ok") is False
+              and _sr.get("no_source") is True and "设置" in _sr.get("message", ""),
+              str(_sr)[:160])
+        # 前端也不允许再出现「演示数据」：数据为空就显示空状态 + 去设置配置
+        _appjs = Path("static/js/app.js").read_text(encoding="utf-8")
+        _html = Path("static/index.html").read_text(encoding="utf-8")
+        check("无演示.前端无演示文案与徽标", "演示数据" not in _appjs
+              and "演示数据" not in _html and "demoBadge" not in _html
+              and "data-go-source" in _appjs and "has_source" in _appjs,
+              "app.js/index.html 仍含演示文案或缺少空状态入口")
+finally:
+    os.environ["AGENDA_ALLOW_DEMO"] = "1"
+    os.environ["CAMPUS_DATA_DIR"] = _TEST_DATA_DIR
+    shutil.rmtree(_prod_dir, ignore_errors=True)
+
 shutil.rmtree(_TEST_DATA_DIR, ignore_errors=True)   # 清理隔离数据目录，全程不碰真实 config/DB
 
 fails = [n for n, ok in passed if not ok]

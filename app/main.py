@@ -23,7 +23,7 @@ from pydantic import BaseModel
 
 from . import auth, browser_login, db
 from .config import (
-    DEFAULT_CONFIG, MASK, global_config, load_config, masked_config, save_config,
+    DEFAULT_CONFIG, MASK, demo_allowed, global_config, load_config, masked_config, save_config,
 )
 from .user_context import current_user_id, get_current_user, set_current_user
 from .netguard import UnsafeURLError, assert_safe_outbound_url
@@ -293,7 +293,7 @@ async def status():
         "portal_configured": portal_ok,
         "zhengfang_configured": zf_ok,
         "has_source": bool(portal_ok or zf_ok),
-        "is_demo": resolved == "mock",
+        "is_demo": demo_allowed() and resolved == "mock",
         "course_count": len(all_courses),
         "exam_count": len(all_exams) if exam_snap else 0,
         "upcoming_exam_count": len(upcoming_exams),
@@ -312,6 +312,7 @@ async def status():
 
 @app.get("/api/timetable")
 async def timetable(week: int | None = None):
+    from .config import portal_configured
     cfg = load_config()
     today = date.today()
     cur_week = current_week(cfg.get("semester_start", ""),
@@ -355,6 +356,7 @@ async def timetable(week: int | None = None):
         "today": today.isoformat(),
         "tomorrow": tomorrow_s,
         "is_demo": (snap or {}).get("source") == "mock",
+        "has_source": bool(portal_configured(cfg) or zhengfang_configured(cfg)),
         "fetched_at": (snap or {}).get("fetched_at"),
         "section_times": {str(i): section_time(cfg, i) for i in range(1, 13)},
         "section_ends": {str(i): section_time(cfg, i, end=True) for i in range(1, 13)},
@@ -852,10 +854,14 @@ async def rooms_my_free(date_s: str = ""):
 @app.get("/api/exams")
 async def exams():
     """考试安排：未结束的按时间升序在前，已结束的置后（含手动调整）。"""
+    from .config import portal_configured
     cfg = load_config()
     p = cfg.get("provider", {})
     ptype = p.get("type", "mock")
-    supported = ptype in ("zhengfang", "mock") or zhengfang_configured(cfg)
+    # 演示源不算「能出考试」：没配真实来源就引导去设置，而不是提示「点同步拉取」。
+    supported = ptype == "zhengfang" or zhengfang_configured(cfg) or (
+        demo_allowed() and ptype == "mock")
+    has_source = bool(zhengfang_configured(cfg) or portal_configured(cfg))
     overrides = _exam_overrides(cfg)
     snap = db.get_exam_snapshot()
     if not snap:
@@ -863,8 +869,9 @@ async def exams():
             "exams": [], "upcoming": [], "finished": [],
             "source": None, "fetched_at": None,
             "provider": ptype,
-            "is_demo": ptype == "mock",
+            "is_demo": demo_allowed() and ptype == "mock",
             "supported": supported,
+            "has_source": has_source,
             "hidden_count": len(overrides["hidden"]),
             "edited_count": len(overrides["edited"]),
             "added_count": len(overrides["added"]),
@@ -895,8 +902,9 @@ async def exams():
         "provider": ptype,
         "source": snap["source"],
         "fetched_at": snap["fetched_at"],
-        "is_demo": snap["source"] == "mock",
+        "is_demo": demo_allowed() and snap["source"] == "mock",
         "supported": supported,
+        "has_source": has_source,
         "hidden_count": len(overrides["hidden"]),
         "edited_count": len(overrides["edited"]),
         "added_count": len(overrides["added"]),
@@ -962,7 +970,9 @@ async def grades():
     p = cfg.get("provider", {})
     ptype = p.get("type", "mock")
     # 演示源不提供成绩：只有正方（配了凭证）才算「能出成绩」
+    from .config import portal_configured
     supported = ptype == "zhengfang" or zhengfang_configured(cfg)
+    has_source = bool(zhengfang_configured(cfg) or portal_configured(cfg))
     cur_year, cur_term = default_term()
     current_term = _score_term_meta(cur_year, cur_term, current=True)
     # 最近一次成绩同步失败原因。同步日志按当前用户隔离、按时间倒序：
@@ -981,8 +991,8 @@ async def grades():
     if not snap or demo_snap:
         return {
             "scores": [], "groups": [], "source": None, "fetched_at": None,
-            "provider": ptype, "is_demo": demo_snap or ptype == "mock",
-            "supported": supported,
+            "provider": ptype, "is_demo": demo_allowed() and (demo_snap or ptype == "mock"),
+            "supported": supported, "has_source": has_source,
             "current_term": current_term, "terms": [current_term],
             "stats": {"count": 0, "avg": None, "max": None}, "error": score_error,
         }
@@ -1036,8 +1046,9 @@ async def grades():
         "provider": ptype,
         "source": snap["source"],
         "fetched_at": snap["fetched_at"],
-        "is_demo": snap["source"] == "mock",
+        "is_demo": demo_allowed() and snap["source"] == "mock",
         "supported": supported,
+        "has_source": has_source,
         "current_term": current_term,
         "terms": _score_term_options(items, current_term),
         "stats": stats,

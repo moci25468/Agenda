@@ -160,20 +160,44 @@
       const escAttr = (s) => esc(s).replace(/"/g, "&quot;");
 
       /* ---------- 状态与今日 ---------- */
+      // 未配置数据源时的统一空状态：明确「暂无数据」并引导去设置，绝不展示演示内容
+      function noSourceEmpty(title = "还没有数据") {
+        return `<div class="empty"><div class="empty-title">${esc(title)}</div>`
+          + `<div class="empty-sub">请在「设置 → 课表来源」接入正方教务或融合门户，`
+          + `同步后这里就会显示你的真实数据。</div>`
+          + `<button class="small primary" data-go-source>去设置配置</button></div>`;
+      }
+
+      // 已接入数据源但还没拉到东西：提示「没有数据」+ 触发同步，不再给假数据
+      function noDataEmpty(title = "暂无数据", sub = "点「立即同步」从数据源拉取，或稍后再看。") {
+        return `<div class="empty"><div class="empty-title">${esc(title)}</div>`
+          + `<div class="empty-sub">${esc(sub)}</div>`
+          + `<button class="small primary" data-sync-now>立即同步</button></div>`;
+      }
+
+      // 跳转到设置里的「课表来源」分区（今日/日程/考试/成绩的空状态共用）
+      function goSourceSettings() {
+        switchTab("settings");
+        if (typeof showSettingsSection === "function") {
+          showSettingsSection("settingsSource");
+        }
+        setTimeout(() => {
+          const f = $("#zfUsername");
+          if (f) f.scrollIntoView({ block: "center" });
+        }, 60);
+      }
+
       async function loadStatus() {
         status = await api("/api/status");
         $("#headerSub").textContent =
           `${status.school} · ${status.week > 0 ? "第 " + status.week + " 周" : "假期"} · ${status.weekday}`;
-        const badge = $("#demoBadge");
-        badge.classList.toggle("hidden", !status.is_demo);
-        badge.textContent = "演示数据";
-        const providerName =
-          {
-            mock: "演示数据",
+        const providerName = status.has_source === false
+          ? "未配置"
+          : ({
             zhengfang: "正方教务",
             httpjson: "自定义接口",
             portal: "校门户",
-          }[status.provider] || status.provider;
+          }[status.provider] || status.provider);
         // 手机端用单行摘要，避免多条小字折行堆叠；两种格式同时输出，由 CSS 按断点切换
         const hm = /(\d{2}:\d{2})/.exec(status.last_sync || "");
         const mini = [
@@ -294,12 +318,15 @@
           if (el) el.textContent = text || "";
         };
         // 今日课程 / 日程；考试卡统计全部未考完的场次，而不只是今天
+        const noSource = wd.has_source === false;
         const courses = wd.today_courses || [];
         const events = wd.today_events || [];
         setVal("#tbCourseVal", courses.length, "门");
-        setSub("#tbCourseSub", courses.length
-          ? courses.map((c) => c.start_time).filter(Boolean).sort().slice(0, 3).join(" · ") + " 开课"
-          : "今天没有课");
+        setSub("#tbCourseSub", noSource
+          ? "未接入数据源"
+          : courses.length
+            ? courses.map((c) => c.start_time).filter(Boolean).sort().slice(0, 3).join(" · ") + " 开课"
+            : "今天没有课");
         setVal("#tbEventVal", events.length, "项");
         setSub("#tbEventSub", events.length
           ? `${events[0].start || ""} ${events[0].title || "日程"}`.trim()
@@ -424,6 +451,11 @@
       // 今日页顶部：正在上 / 下一节课 + 倒计时，点一下直达周课表
       function renderNextClass() {
         const bar = $("#nextClassBar");
+        // 没有接数据源时这张卡不编「今日无课」；空状态由下方列表统一说明，避免重复提示
+        if (weekData && weekData.has_source === false) {
+          bar.classList.add("hidden");
+          return;
+        }
         const courses = (weekData?.today_courses || [])
           .filter((c) => c.start_time && c.end_time)
           .sort((a, b) => a.start_time.localeCompare(b.start_time));
@@ -515,7 +547,8 @@
           events.length ? `${events.length} 项日程` : "",
           exams.length ? `${exams.length} 场考试` : "",
         ].filter(Boolean).join(" · ");
-        $("#todayCount").textContent = countText || "今日无安排";
+        $("#todayCount").textContent = countText ||
+          (weekData.has_source === false ? "尚未接入数据源" : "今日无安排");
         const tmHasItems =
           (weekData.tomorrow_courses || []).length +
           (weekData.tomorrow_events || []).length +
@@ -523,13 +556,17 @@
         if (items.length) {
           $("#todayList").innerHTML = composeTimeline(items);
           applyTodayStates();
+        } else if (weekData.has_source === false) {
+          // 没接数据源：明确说「没有数据」并给入口，不拿演示内容凑数
+          $("#todayList").innerHTML = noSourceEmpty("还没有今日数据");
         } else {
           $("#todayList").innerHTML =
             `<div class="empty"><div class="empty-title">今天没有课程和日程</div><div class="empty-sub">可以安心安排自己的时间；要提前规划，可在下方「明日安排」里添加日程。</div></div>`;
         }
         // 明天有安排时保持「明日安排」可见并刷新内容（含刚添加的日程），
         // 今日无安排时也照常展示方便规划；避免添加明日日程后模块被隐藏
-        if (tmHasItems || !items.length) renderTomorrow();
+        if (weekData.has_source === false) $("#tomorrowBlock").classList.add("hidden");
+        else if (tmHasItems || !items.length) renderTomorrow();
         else $("#tomorrowBlock").classList.add("hidden");
         // 今日页同时承载个人日程与未考完的考试；考试卡要用完整待考列表
         await Promise.all([loadEvents().catch(() => {}), loadExams().catch(() => {})]);
@@ -638,6 +675,8 @@
             );
           });
           box.innerHTML = parts.join("");
+        } else if (weekRender && weekRender.has_source === false) {
+          box.innerHTML = `<div class="empty"><div class="empty-title">这一周还没有日程</div><div class="empty-sub">接入数据源后课表会自动带出；也可以先用「添加日程」安排自己的任务。</div></div>`;
         } else {
           box.innerHTML = `<div class="empty"><div class="empty-title">这一周还没有个人日程</div><div class="empty-sub">点没课时段里的「加日程」，或用右上角「添加日程」快速安排本周任务。</div></div>`;
         }
@@ -650,6 +689,8 @@
         if (!box) return;
         const wr = weekRender;
         if (!wr || !Array.isArray(wr.dates) || !wr.dates.length) return;
+        // 没接数据源时统计只会是 0，容易误读成「本周没课」，直接留空
+        if (wr.has_source === false) { box.innerHTML = ""; return; }
         const inWeek = new Set(wr.dates);
         const courseCount = Array.isArray(wr.courses) ? wr.courses.length : 0;
         const eventCount = (eventsCache || []).filter((e) => e.date && inWeek.has(e.date)).length;
@@ -849,9 +890,21 @@
           : `第 ${data.week} 周 <span class="back-hint">· 回到本周</span>`;
         label.classList.toggle("clickable", !isCurrent);
         label.title = isCurrent ? "" : "点击回到本周";
-        $("#weekHint").textContent = data.is_demo
-          ? "当前为演示课表，接入真实数据源后自动替换。"
-          : `数据来源：${data.fetched_at || ""} 同步`;
+        $("#weekHint").textContent = data.has_source === false
+          ? "尚未接入数据源"
+          : data.fetched_at
+            ? `数据来源：${data.fetched_at} 同步`
+            : "还没有同步过，点「立即同步」拉取";
+        // 没接数据源就没有真实课表：整块换成空状态，不再画一片「可加日程」的空格子
+        if (data.has_source === false) {
+          const tip = noSourceEmpty("还没有课表数据");
+          $("#weekGrid").innerHTML = `<div class="week-empty">${tip}</div>`;
+          const emptyBox = $("#weekDays");
+          if (emptyBox) emptyBox.innerHTML = tip;
+          renderWeekEvents();
+          renderWeekOverview();
+          return;
+        }
         // 固定五大节（1-2、3-4、5-6、7-8、9-10），课程按节次落格，跨午别也不会错位
         const blocks = [
           { s: 1, e: 2 }, { s: 3, e: 4 }, { s: 5, e: 6 },
@@ -1735,21 +1788,19 @@
           sub.textContent = "";
           box.innerHTML = examData.supported
             ? `<div class="empty">暂无考试安排，点「立即同步」从教务拉取</div>`
-            : examData.provider === "portal"
-              ? `<div class="empty">门户只提供课表；填写正方账号后，同步会额外拉取考试<br><button class="small" id="examToSettings">去设置填写正方账号</button></div>`
-              : `<div class="empty">当前数据源不支持考试查询，请在设置 → 课表来源接入正方教务<br><button class="small" id="examToSettings">去课表来源</button></div>`;
+            : examData.has_source === false
+              // 整页已有「去设置配置」入口，这里只说明状态，不重复放按钮
+              ? `<div class="empty"><div class="empty-title">还没有考试数据</div><div class="empty-sub">接入正方教务后，考试安排会随同步自动带出。</div></div>`
+              : examData.provider === "portal"
+                ? `<div class="empty">门户只提供课表；填写正方账号后，同步会额外拉取考试<br><button class="small" data-go-source>去设置填写正方账号</button></div>`
+                : `<div class="empty">当前数据源不支持考试查询，请在设置 → 课表来源接入正方教务<br><button class="small" data-go-source>去课表来源</button></div>`;
           $("#examHint").textContent = examData.supported
             ? "考试数据来自正方教务，随每次同步更新；点「编辑考试」可手动添加或调整，临时调考以教务系统为准。"
             : "";
           renderWeekOverview();
           return;
         }
-        sub.textContent = [
-          examData.is_demo ? "演示数据" : "",
-          examData.fetched_at ? `${examData.fetched_at} 同步` : "",
-        ]
-          .filter(Boolean)
-          .join(" · ");
+        sub.textContent = examData.fetched_at ? `${examData.fetched_at} 同步` : "";
         const group = (title, list) =>
           list.length
             ? `<div class="exam-group">${title} · ${list.length} 场</div><div class="exam-list">${list.map(examRow).join("")}</div>`
@@ -1757,9 +1808,8 @@
         box.innerHTML =
           group("即将进行", examData.upcoming) +
           group("已结束", examData.finished);
-        $("#examHint").textContent = examData.is_demo
-          ? "当前为演示考试数据，接入正方教务后自动替换；点「编辑考试」可手动添加或调整。"
-          : "考试数据来自正方教务，随每次同步更新；点「编辑考试」可手动添加或调整，临时调考以教务系统为准。";
+        $("#examHint").textContent =
+          "考试数据来自正方教务，随每次同步更新；点「编辑考试」可手动添加或调整，临时调考以教务系统为准。";
         renderWeekOverview();
       }
 
@@ -1870,11 +1920,13 @@
           stats.innerHTML = "";
           box.innerHTML = (gradesData.supported
             ? `<div class="empty">暂未获取到成绩，点顶部「立即同步」从正方教务拉取</div>`
-            : `<div class="empty">成绩来自正方教务，请先到「设置 → 课表来源」接入正方账号</div>`)
+            : gradesData.has_source === false
+              ? noSourceEmpty("还没有成绩数据")
+              : `<div class="empty">成绩来自正方教务，请先到「设置 → 课表来源」接入正方账号<br><button class="small" data-go-source>去设置配置</button></div>`)
             + (err ? `<div class="empty"><small>成绩同步失败：${esc(err)}</small></div>` : "");
           hint.textContent = err
             ? "成绩同步失败，显示的是上次成功同步的结果；请检查正方配置或接口路径。"
-            : "成绩只从正方教务获取，不展示演示数据；以教务系统公布为准。";
+            : "成绩只从正方教务获取，以教务系统公布为准。";
           return;
         }
         sub.textContent = gradesData.fetched_at ? `${gradesData.fetched_at} 同步` : "";
@@ -2170,7 +2222,7 @@
           b.classList.toggle("active", on);
           b.setAttribute("aria-pressed", on ? "true" : "false");
         });
-        const cn = { zhengfang: "正方教务", portal: "融合门户", mock: "演示数据" };
+        const cn = { zhengfang: "正方教务", portal: "融合门户", mock: "未接入" };
         const chosen = { zhengfang: "正方教务", portal: "融合门户", auto: "自动（门户优先）" }[active];
         const resolved = cn[s.resolved] || s.resolved || "未配置";
         const snap = cn[s.snapshot_source] || s.snapshot_source || "未同步";
@@ -2660,17 +2712,13 @@
         switchTab(tabs[next].dataset.tab);
       });
       $("#syncBtn").addEventListener("click", doSync);
-      $("#examList").addEventListener("click", (e) => {
-        if (!e.target.closest("#examToSettings")) return;
-        switchTab("settings");
-        showSettingsSection("settingsSource");
-        setTimeout(() => {
-          const f = $("#zfUsername");
-          if (f) {
-            f.scrollIntoView({ block: "center" });
-            f.focus();
-          }
-        }, 60);
+      // 今日/日程/考试/成绩的空状态共用：点「去设置配置」直接落在课表来源分区
+      document.addEventListener("click", (e) => {
+        if (e.target.closest("[data-go-source]")) {
+          goSourceSettings();
+          return;
+        }
+        if (e.target.closest("[data-sync-now]")) doSync();
       });
       $("#prevWeek").addEventListener("click", () =>
         loadWeek(Math.max(1, viewWeek - 1)),
@@ -2682,7 +2730,10 @@
         if (!$("#weekLabel").classList.contains("clickable")) return;
         loadWeek(Math.max(weekRender?.current_week || status?.week || 1, 1));
       });
-      $("#nextClassBar").addEventListener("click", () => switchTab("week"));
+      $("#nextClassBar").addEventListener("click", () => {
+        if (weekData && weekData.has_source === false) goSourceSettings();
+        else switchTab("week");
+      });
       $("#tbTomorrow").addEventListener("click", () => {
         const block = $("#tomorrowBlock");
         if (!block || block.classList.contains("hidden")) return;
@@ -3324,7 +3375,7 @@
           pollBrowserLogin();
           if (currentUser.role === "admin") refreshInvites();
           // 刷新后停留在上一次的页面；首次未配置数据源时引导去设置→课表来源
-          if (status && status.is_demo && !status.has_source) {
+          if (status && !status.has_source) {
             switchTab("settings");
             showSettingsSection("settingsSource");
           } else {
