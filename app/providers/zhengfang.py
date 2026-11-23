@@ -165,7 +165,8 @@ class ZhengfangProvider(TimetableProvider):
     supports_exams = True
     supports_scores = True
 
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, *, shared_rooms: bool = False):
+        self._shared_rooms = shared_rooms
         p = cfg.get("provider", {})
         zf = p.get("zhengfang") or {}
         if not isinstance(zf, dict):
@@ -216,7 +217,7 @@ class ZhengfangProvider(TimetableProvider):
         if self.cookie:
             headers["Cookie"] = self.cookie
         async with httpx.AsyncClient(
-            follow_redirects=True, trust_env=False, headers=headers, timeout=30,
+            follow_redirects=not self._shared_rooms, trust_env=False, headers=headers, timeout=30,
             event_hooks={"request": [_check_zhengfang_request]},
         ) as client:
             if not self.cookie:

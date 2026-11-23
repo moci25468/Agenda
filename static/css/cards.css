@@ -17,6 +17,7 @@
    今日页已有自己的 --td-* 骨架，这里跳过它避免互相覆盖
    ------------------------------------------------------------ */
 #tab-week > .card,
+#tab-notifications > .card,
 #tab-source > .card,
 #tab-admin > .card,
 #tab-settings .settings-body > .card {
@@ -159,6 +160,89 @@
   #tab-settings .settings-body > .card {
     border-radius: var(--card-r);
   }
+}
+
+/* 学习通通知与账号 */
+#notificationsTab { position: relative; }
+.notifications-badge {
+  position: absolute;
+  top: 3px;
+  right: 6px;
+  min-width: 17px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--card);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.notifications-head, .notifications-actions, .notifications-filters,
+.notifications-feedback, .notification-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.notifications-head { justify-content: space-between; align-items: flex-start; }
+.notifications-head h2 { margin: 0; }
+#notificationsSummary, #notificationsMessage { margin: 0; }
+.notifications-head #notificationsSummary:not(:empty) { margin-top: 6px; }
+.notifications-filters, .notifications-feedback, .notifications-list { margin-top: 14px; }
+.notifications-filters button.active {
+  background: var(--fill-strong);
+  color: var(--text);
+  border-color: var(--line);
+}
+.notifications-feedback {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--fill);
+  overflow-wrap: anywhere;
+}
+.notifications-list { display: grid; gap: 10px; }
+.notification-item {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--fill);
+  overflow-wrap: anywhere;
+}
+.notification-item.is-unread { border-inline-start: 3px solid var(--accent); }
+.notification-item h3 { margin: 5px 0 6px; font-size: 15px; }
+.notification-meta { color: var(--sub); font-size: 12px; }
+.notification-item-top { display: flex; align-items: flex-start; gap: 10px; }
+.notification-item-top .notification-meta { flex: 1 1 0; min-width: 0; }
+.homework-remaining {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 4px 7px;
+  border-radius: 8px;
+  background: var(--fill-strong);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.homework-remaining.is-urgent { color: var(--warn); background: var(--warn-soft); }
+.notification-body { margin: 8px 0; white-space: pre-wrap; }
+.notification-item .notifications-actions { margin-top: 8px; }
+.notification-item a { color: var(--accent); }
+#settingsChaoxing { overflow-wrap: anywhere; }
+#settingsChaoxing .form-actions { flex-wrap: wrap; }
+#chaoxingLoginForm { margin-top: 14px; }
+#chaoxingLoginForm .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+#chaoxingUsername, #chaoxingPassword { min-width: 0; }
+@media (max-width: 720px) {
+  #nav button { flex: 1 1 0; min-width: 0; padding-inline: 0; }
+  .notifications-badge { right: max(2px, calc(50% - 24px)); }
+}
+@media (max-width: 420px) {
+  #chaoxingLoginForm .form-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* ------------------------------------------------------------

@@ -41,6 +41,7 @@
             ...opts,
           });
           const data = await r.json().catch(() => ({}));
+          if (opts.signal?.aborted) throw new DOMException("请求已取消", "AbortError");
           if (r.status === 401 && !path.startsWith("/api/auth/")) {
             showAuthScreen();
             throw new Error("登录已失效，请重新登录");
@@ -163,7 +164,7 @@
       // 未配置数据源时的统一空状态：明确「暂无数据」并引导去设置，绝不展示演示内容
       function noSourceEmpty(title = "还没有数据") {
         return `<div class="empty"><div class="empty-title">${esc(title)}</div>`
-          + `<div class="empty-sub">请在「设置 → 课表来源」接入正方教务或融合门户，`
+          + `<div class="empty-sub">请在「设置 → 账号」接入正方教务或融合门户，`
           + `同步后这里就会显示你的真实数据。</div>`
           + `<button class="small primary" data-go-source>去设置配置</button></div>`;
       }
@@ -1137,7 +1138,8 @@
               ),
             )
             .join("");
-        bSel.value = "";
+        bSel.value = m.default_building || "";
+        if (bSel.selectedIndex < 0) bSel.value = "";
       }
       async function roomPopQuery() {
         const st = roomPopState;
@@ -1158,7 +1160,7 @@
           const data = await api("/api/rooms/free?" + params.toString());
           if (!roomPopIsCurrent(st, seq)) return;
           st.rooms = data.rooms || [];
-          st.updatedAt = data.cache_source === "shared_week" ? data.updated_at : null;
+          st.updatedAt = data.updated_at || null;
           roomPopRender();
         } catch (e) {
           if (roomPopIsCurrent(st, seq)) roomPopMessage("查询失败", e.message || "请稍后重试");
@@ -1245,17 +1247,18 @@
         $("#roomPopCount").textContent = "";
         $("#roomPopList").innerHTML = skeletonRows(3);
         try {
-          const meta = roomMeta || await api("/api/rooms/meta");
+          const meta = await api("/api/rooms/meta");
           if (!roomPopIsCurrent(st, seq)) return;
           roomMeta = meta;
           roomPopFillFilters(meta);
           st.campus = campusSel.value;
+          st.building = $("#rpBuilding").value;
           const free = await api(
             "/api/rooms/my-free?date_s=" + encodeURIComponent(st.date),
           );
           if (!roomPopIsCurrent(st, seq)) return;
           if (free.spans === null) {
-            roomPopMessage("课表还没同步", "先去「设置 → 课表来源」同步课表，再来查空教室。");
+            roomPopMessage("课表还没同步", "先去「设置 → 账号」同步课表，再来查空教室。");
             return;
           }
           const freeBlocks = roomFreeBlocks(free.spans, roomMaxJc());
@@ -1326,7 +1329,7 @@
           if (!roomPopIsCurrent(st, seq)) return;
           roomPopFillFilters(meta);
           st.campus = campusSel.value;
-          st.building = "";
+          st.building = bSel.value;
           roomPopMessage("请选择教学楼或直接点击「查询」");
         } catch (err) {
           if (!roomPopIsCurrent(st, seq)) return;
@@ -1828,7 +1831,7 @@
               ? `<div class="empty"><div class="empty-title">还没有考试数据</div><div class="empty-sub">接入正方教务后，考试安排会随同步自动带出。</div></div>`
               : examData.provider === "portal"
                 ? `<div class="empty">门户只提供课表；填写正方账号后，同步会额外拉取考试<br><button class="small" data-go-source>去设置填写正方账号</button></div>`
-                : `<div class="empty">当前数据源不支持考试查询，请在设置 → 课表来源接入正方教务<br><button class="small" data-go-source>去课表来源</button></div>`;
+                : `<div class="empty">当前数据源不支持考试查询，请在设置 → 账号接入正方教务<br><button class="small" data-go-source>前往账号设置</button></div>`;
           $("#examHint").textContent = examData.supported
             ? "考试数据来自正方教务，随每次同步更新；点「编辑考试」可手动添加或调整，临时调考以教务系统为准。"
             : "";
@@ -1957,7 +1960,7 @@
             ? `<div class="empty">暂未获取到成绩，点顶部「立即同步」从正方教务拉取</div>`
             : gradesData.has_source === false
               ? noSourceEmpty("还没有成绩数据")
-              : `<div class="empty">成绩来自正方教务，请先到「设置 → 课表来源」接入正方账号<br><button class="small" data-go-source>去设置配置</button></div>`)
+              : `<div class="empty">成绩来自正方教务，请先到「设置 → 账号」接入正方账号<br><button class="small" data-go-source>去设置配置</button></div>`)
             + (err ? `<div class="empty"><small>成绩同步失败：${esc(err)}</small></div>` : "");
           hint.textContent = err
             ? "成绩同步失败，显示的是上次成功同步的结果；请检查正方配置或接口路径。"
@@ -2139,7 +2142,7 @@
         if (!root) return;
         const onChange = (e) => {
           const t = e.target;
-          if (t.closest("#themeSwitches, #tab-source, #tab-admin")) return;
+          if (t.closest("#themeSwitches, #tab-source, #tab-admin, #settingsChaoxing")) return;
           if (t.matches("[name], input.switch-input")) setSettingsDirty(true);
         };
         root.addEventListener("input", onChange);
@@ -2230,6 +2233,56 @@
           .join("");
         $("#zfYear").value = saved || String(current);
       }
+      let roomDefaultsSeq = 0;
+      function roomDefaultOptions(select, items, label, value) {
+        select.replaceChildren(new Option(label, ""),
+          ...items.filter((item) => item.id).map((item) => new Option(item.name, item.id)));
+        select.value = value || "";
+        if (select.selectedIndex < 0) select.value = "";
+      }
+      async function loadRoomDefaults(campus = "", initial = false) {
+        const seq = ++roomDefaultsSeq;
+        const c = $("#roomDefaultCampus"), b = $("#roomDefaultBuilding");
+        const save = $("#roomDefaultsSave"), status = $("#roomDefaultsStatus");
+        c.disabled = b.disabled = save.disabled = true;
+        status.textContent = "正在加载校区和教学楼…";
+        try {
+          const meta = await api("/api/rooms/meta?campus=" + encodeURIComponent(campus));
+          if (seq !== roomDefaultsSeq) return;
+          roomDefaultOptions(c, meta.campuses || [], "不指定校区", initial ? meta.default_campus : campus);
+          roomDefaultOptions(b, c.value ? (meta.buildings || []) : [], "全部教学楼", meta.default_building);
+          b.disabled = !c.value;
+          save.disabled = false;
+          status.textContent = "";
+        } catch (e) {
+          if (seq === roomDefaultsSeq) status.textContent = e.message || "加载失败，请重试";
+        } finally {
+          if (seq === roomDefaultsSeq) c.disabled = false;
+        }
+      }
+      $("#roomDefaultCampus").addEventListener("change", (e) => loadRoomDefaults(e.target.value));
+      $("#roomDefaultsSave").addEventListener("click", async () => {
+        const c = $("#roomDefaultCampus"), b = $("#roomDefaultBuilding");
+        const save = $("#roomDefaultsSave"), status = $("#roomDefaultsStatus");
+        const seq = ++roomDefaultsSeq;
+        save.disabled = c.disabled = b.disabled = true;
+        try {
+          await api("/api/settings", { method: "POST", body: JSON.stringify({ rooms: {
+            default_campus: c.value, default_campus_name: c.value ? c.selectedOptions[0].text : "",
+            default_building: c.value ? b.value : "",
+          } }) });
+          roomMeta = null;
+          if (seq === roomDefaultsSeq) status.textContent = "查询偏好已保存";
+        } catch (e) {
+          if (seq === roomDefaultsSeq) status.textContent = e.message || "保存失败，请重试";
+        } finally {
+          if (seq === roomDefaultsSeq) {
+            save.disabled = c.disabled = false;
+            b.disabled = !c.value;
+          }
+        }
+      });
+
       async function loadSources() {
         try {
           const s = await api("/api/provider/sources");
@@ -2323,6 +2376,16 @@
         return `<span class="src-tag ${p}" title="融合门户：${u.portal_configured ? "已配置" : "未配置"}">门户</span>`
              + `<span class="src-tag ${z}" title="正方教务：${u.zhengfang_configured ? "已配置" : "未配置"}">正方</span>`;
       }
+      // 推送配置状态标签：已配置且启用的高亮，仅配置未启用的普通色，未配置的灰色。
+      function pushTags(u) {
+        const ps = u.push_status || {};
+        return Object.keys(ps).map(ch => {
+          const s = ps[ch];
+          const cls = s.configured && s.enabled ? "on-push" : s.configured ? "on-push-cfg" : "off";
+          const st = s.enabled ? "已启用" : s.configured ? "已配置未启用" : "未配置";
+          return `<span class="src-tag ${cls}" title="${esc(s.name || ch)}：${st}">${esc(s.name || ch)}</span>`;
+        }).join("");
+      }
       async function loadAdminStats() {
         if (!currentUser || currentUser.role !== "admin") return;
         try {
@@ -2350,7 +2413,7 @@
               <div class="admin-user-row" data-uid="${u.id}">
                 <div class="admin-user-info">
                   <div class="admin-user-title"><input type="checkbox" class="admin-user-check" data-uid="${u.id}" ${me ? "disabled" : ""} />
-                    <b>${esc(u.username)}</b>${u.role === "admin" ? ' <span class="badge real">管理员</span>' : ""}${inactive ? ' <span class="badge">已停用</span>' : ""}${me ? ' <span class="badge">我</span>' : ""} ${sourceTags(u)}</div>
+                    <b>${esc(u.username)}</b>${u.role === "admin" ? ' <span class="badge real">管理员</span>' : ""}${inactive ? ' <span class="badge">已停用</span>' : ""}${me ? ' <span class="badge">我</span>' : ""} ${sourceTags(u)} ${pushTags(u)}</div>
                   <div class="admin-user-sub">${esc(u.display_name || "—")} · 学号 ${esc(u.student_id || "—")} · 注册 ${fmtShort(u.created_at)} · 登录 ${fmtShort(u.last_login_at)}</div>
                 </div>
                 <div class="admin-user-actions">
@@ -2503,10 +2566,558 @@
       else if (themeMq.addListener) themeMq.addListener(onSystemThemeChange);
       applyTheme(readThemeChoice());
 
+      /* ---------- 学习通账号与通知 ---------- */
+      const NOTIFICATION_STATUSES = {
+        pending: "待交", submitted: "已提交", graded: "已批阅", expired: "已截止", unknown: "状态未知",
+      };
+      function freshNotificationState() {
+        return {
+          controller: new AbortController(), account: null, accountRequest: null, accountError: "",
+          accountMessage: "", relogin: false, filter: "homework", lists: new Map(),
+          meta: null, listSeq: 0, loading: false, noticeError: "", noticeMessage: "", busy: "",
+        };
+      }
+      let notifications = freshNotificationState();
+
+      function resetNotifications() {
+        clearTimeout(chaoxingSmsTimer);
+        chaoxingSmsPending = null;
+        notifications.controller.abort();
+        notifications = freshNotificationState();
+        $("#chaoxingLoginForm").reset();
+        $("#chaoxingUsername").value = $("#chaoxingSmsCode").value = "";
+        renderChaoxingAccount();
+        renderNotifications();
+      }
+      function notificationApi(s, path, data) {
+        const opts = { signal: s.controller.signal, cache: "no-store" };
+        if (data !== undefined) {
+          opts.method = "POST";
+          opts.body = JSON.stringify(data);
+        }
+        return api(path, opts);
+      }
+      function notificationError(error, fallback) {
+        if (error instanceof TypeError) return "网络连接失败，请检查网络后重试。";
+        return error?.message || fallback;
+      }
+      function needsChaoxingLogin(result) {
+        return ["expired", "auth_expired", "login_required", "needs_login", "captcha"].includes(result?.state)
+          || /登录.{0,8}(失效|过期)|重新登录|验证码|安全验证/.test(result?.error || "");
+      }
+      const notificationClock = new Intl.DateTimeFormat("zh-CN", {
+        timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+      });
+      function notificationTime(value) {
+        if (!value) return "";
+        const text = String(value);
+        if (/(?:Z|[+-]\d{2}:?\d{2})$/i.test(text) && !Number.isNaN(Date.parse(text))) {
+          return notificationClock.format(new Date(text));
+        }
+        return fmtTime(text.replace("T", " "));
+      }
+      function chaoxingLink(value) {
+        if (typeof value !== "string") return "";
+        try {
+          const url = new URL(value);
+          const host = url.hostname;
+          return url.protocol === "https:" && !url.username && !url.password
+            && (host === "chaoxing.com" || host.endsWith(".chaoxing.com")) ? url.href : "";
+        } catch (_) {
+          return "";
+        }
+      }
+      function renderChaoxingAccount() {
+        const s = notifications, a = s.account;
+        const configured = a?.configured === true;
+        const canEdit = !!a && (!configured || s.relogin || needsChaoxingLogin(a));
+        const summary = configured
+          ? [a.name || a.username ? `已绑定 · ${[a.name, a.username].filter(Boolean).join(" · ")}` : "已绑定",
+              a.last_sync && `最近同步 ${notificationTime(a.last_sync)}`,
+              a.last_attempt && a.last_attempt !== a.last_sync && `最近尝试 ${notificationTime(a.last_attempt)}`].filter(Boolean).join(" · ")
+          : a ? "尚未绑定学习通" : s.accountError || !currentUser ? "" : "正在加载绑定状态…";
+        $("#chaoxingSummary").textContent = summary;
+        const feedback = $("#chaoxingFeedback");
+        const statusError = [a?.error, a?.warning].filter(Boolean).join(" · ") || (needsChaoxingLogin(a) ? "学习通登录已失效，请重新登录。" : "");
+        feedback.textContent = s.accountError || [s.accountMessage, statusError].filter(Boolean).join(" · ");
+        feedback.classList.toggle("hidden", !feedback.textContent);
+        $("#chaoxingStatusRetry").classList.toggle("hidden", !!a || !s.accountError || !!s.accountRequest);
+        $("#chaoxingOptions").classList.toggle("hidden", !configured);
+        $("#chaoxingLoginForm").classList.toggle("hidden", !canEdit);
+        $("#chaoxingLogin").textContent = s.busy === "sms/login" ? "正在登录…" : "验证码登录并绑定";
+        $("#chaoxingLogin").disabled = !canEdit || !!s.busy;
+        const remaining = Math.max(0, Math.ceil(((s.smsRetryAt || 0) - Date.now()) / 1000));
+        $("#chaoxingSendCode").disabled = !canEdit || !!s.busy || remaining > 0;
+        $("#chaoxingSendCode").textContent = s.busy === "sms/send" ? "正在发送…" : s.busy === "sms/verify" ? "关闭安全验证" : remaining ? `${remaining} 秒后重新获取` : "获取短信验证码";
+        if (s.busy === "sms/verify") $("#chaoxingSendCode").disabled = false;
+        $("#chaoxingUsername").disabled = !!s.busy;
+        $("#chaoxingLoginCancel").classList.toggle("hidden", !configured || needsChaoxingLogin(a));
+        $("#chaoxingLoginCancel").disabled = !!s.busy;
+        $("#chaoxingRelogin").classList.toggle("hidden", canEdit);
+        $("#chaoxingRelogin").disabled = !!s.busy;
+        const enabled = $("#chaoxingEnabled"), push = $("#chaoxingPushEnabled");
+        enabled.checked = a?.enabled === true;
+        push.checked = a?.push_enabled === true;
+        enabled.disabled = push.disabled = $("#chaoxingDisconnect").disabled = !!s.busy || !configured;
+        const minutes = Number(a?.poll_minutes);
+        $("#chaoxingPollHint").textContent = minutes > 0 ? `约每 ${minutes} 分钟检查一次` : "";
+      }
+      function loadChaoxingStatus() {
+        const s = notifications;
+        if (!currentUser) return Promise.resolve(null);
+        if (s.accountRequest) return s.accountRequest;
+        s.accountRequest = (async () => {
+          try {
+            const a = await notificationApi(s, "/api/chaoxing/status");
+            if (s !== notifications) return null;
+            s.account = a;
+            s.accountError = "";
+            return a;
+          } catch (e) {
+            if (s === notifications) s.accountError = notificationError(e, "绑定状态加载失败。");
+            return null;
+          } finally {
+            if (s === notifications) {
+              s.accountRequest = null;
+              renderChaoxingAccount();
+              renderNotifications();
+            }
+          }
+        })();
+        renderChaoxingAccount();
+        return s.accountRequest;
+      }
+      function homeworkRemaining(dueAt, now = Date.now()) {
+        const due = dueAt ? Date.parse(dueAt) : NaN;
+        if (!Number.isFinite(due)) return { text: "截止时间未知", urgent: false };
+        const remaining = due - now;
+        if (remaining <= 0) return { text: "已截止", urgent: true };
+        if (remaining < 60000) return { text: "剩余不足 1 分钟", urgent: true };
+        if (remaining < 3600000) return { text: `剩余 ${Math.floor(remaining / 60000)} 分钟`, urgent: true };
+        if (remaining < 86400000) return { text: `剩余 ${Math.floor(remaining / 3600000)} 小时`, urgent: true };
+        const days = Math.floor(remaining / 86400000);
+        const hours = Math.floor((remaining % 86400000) / 3600000);
+        return { text: `剩余 ${days} 天${hours ? ` ${hours} 小时` : ""}`, urgent: false };
+      }
+      function refreshHomeworkCountdowns() {
+        $$(".homework-remaining[data-due-at]").forEach((badge) => {
+          const value = badge.dataset.expired === "true" ? { text: "已截止", urgent: true } : homeworkRemaining(badge.dataset.dueAt);
+          badge.textContent = value.text;
+          badge.classList.toggle("is-urgent", value.urgent);
+        });
+      }
+      setInterval(() => {
+        if (!document.hidden) refreshHomeworkCountdowns();
+      }, 60000);
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) refreshHomeworkCountdowns();
+      });
+      function notificationRow(item) {
+        const homework = item.kind === "homework";
+        const status = Object.prototype.hasOwnProperty.call(NOTIFICATION_STATUSES, item.status)
+          ? NOTIFICATION_STATUSES[item.status] : item.status;
+        const published = item.published_at || item.created_at;
+        const when = homework ? (item.due_at ? `截止 ${notificationTime(item.due_at)}` : "截止时间暂未获取")
+          : published ? `${item.published_at ? "发布" : "收录"} ${notificationTime(published)}` : "";
+        const localStatus = homework && ({ completed: "本地：已完成", pending: "本地：仍待处理" })[item.local_status];
+        const meta = [homework ? "作业" : "通知", item.course, status, localStatus, when, !homework && !item.is_read && "未读"]
+          .filter(Boolean).map((value) => `<span>${esc(value)}</span>`).join("");
+        const link = chaoxingLink(item.url);
+        const read = !homework && !item.is_read && Number.isSafeInteger(item.id) && item.id > 0;
+        const remaining = homework ? (item.is_expired ? { text: "已截止", urgent: true } : homeworkRemaining(item.due_at)) : null;
+        const manage = homework && item.can_manage === true && Number.isSafeInteger(item.id) && item.id > 0;
+        const disabled = notifications.busy ? " disabled" : "";
+        const management = manage ? [
+          item.local_status !== "completed" ? `<button type="button" class="small" data-homework-id="${escAttr(item.id)}" data-homework-status="completed"${disabled}>标记已完成</button>` : "",
+          item.local_status !== "pending" && !["submitted", "graded"].includes(item.status) ? `<button type="button" class="small" data-homework-id="${escAttr(item.id)}" data-homework-status="pending"${disabled}>仍待处理</button>` : "",
+          item.local_status ? `<button type="button" class="small" data-homework-id="${escAttr(item.id)}" data-homework-status=""${disabled}>恢复学习通状态</button>` : "",
+        ].join("") : "";
+        return `<article class="notification-item${!homework && !item.is_read ? " is-unread" : ""}">
+          <div class="notification-item-top">
+            <div class="notification-meta">${meta}</div>
+            ${remaining ? `<span class="homework-remaining${remaining.urgent ? " is-urgent" : ""}" data-due-at="${escAttr(item.due_at || "")}" data-expired="${item.is_expired === true}">${esc(remaining.text)}</span>` : ""}
+          </div>
+          <h3>${esc(item.title || (homework ? "未命名作业" : "未命名通知"))}</h3>
+          ${item.body ? `<p class="notification-body">${esc(item.body)}</p>` : ""}
+          ${link || read || management ? `<div class="notifications-actions">
+            ${link ? `<a href="${escAttr(link)}" target="_blank" rel="noopener noreferrer">在学习通查看</a>` : ""}
+            ${read ? `<button type="button" class="small" data-notification-id="${escAttr(item.id)}"${notifications.busy ? " disabled" : ""}>标为已读</button>` : ""}
+            ${management}
+          </div>` : ""}
+        </article>`;
+      }
+      function renderNotifications() {
+        const s = notifications, m = s.meta;
+        const items = s.lists.get(s.filter);
+        const configured = m?.configured ?? s.account?.configured;
+        const relogin = configured && (needsChaoxingLogin(m ?? s.account)
+          || needsChaoxingLogin({ error: s.noticeMessage }));
+        const unread = m?.unread_count || 0;
+        const badge = $("#notificationsBadge");
+        const pending = m?.pending_count || 0;
+        badge.textContent = pending > 99 ? "99+" : pending || "";
+        badge.classList.toggle("hidden", pending <= 0);
+        $("#notificationsTab").setAttribute("aria-label", pending > 0 ? `通知，${pending} 项未完成作业` : "通知");
+        $("#notificationsSummary").textContent = m && (configured || items?.length)
+          ? [`未完成作业 ${pending} 项`, !["homework", "expired"].includes(s.filter) && `未读 ${unread} 条`, m.last_sync && `最近同步 ${notificationTime(m.last_sync)}`]
+              .filter(Boolean).join(" · ") : "";
+        const sync = $("#notificationsSync");
+        sync.textContent = s.busy === "sync" ? "正在同步…" : "立即同步";
+        sync.disabled = !configured || !!s.busy;
+        $("#notificationsReadAll").disabled = !unread || !!s.busy;
+        $("#notificationsReadAll").classList.toggle("hidden", ["homework", "expired"].includes(s.filter));
+        $$("#notificationsFilters button").forEach((button) => {
+          const active = button.dataset.filter === s.filter;
+          button.classList.toggle("active", active);
+          button.setAttribute("aria-pressed", String(active));
+        });
+        const feedback = $("#notificationsFeedback");
+        const serverError = [m?.error || s.account?.error, m?.warning || s.account?.warning].filter(Boolean).join(" · ");
+        const message = s.noticeError || (s.busy === "sync" ? "正在从学习通同步作业和通知…"
+          : [...new Set([s.noticeMessage, serverError || (!s.noticeMessage && relogin ? "学习通登录已失效，请重新登录。" : "")].filter(Boolean))].join(" · "));
+        $("#notificationsMessage").textContent = message;
+        $("#notificationsRelogin").classList.toggle("hidden", !relogin);
+        feedback.classList.toggle("hidden", !message && !relogin);
+        $("#notificationsLimitHint").classList.toggle("hidden", !configured);
+        const list = $("#notificationsList");
+        list.setAttribute("aria-busy", String(s.loading));
+        if (items?.length) list.innerHTML = items.map(notificationRow).join("");
+        else if (s.loading || (s.busy === "sync" && configured)) list.innerHTML = skeletonRows(2);
+        else if (configured === false) list.innerHTML = `<div class="empty">
+          <div class="empty-title">尚未绑定学习通</div>
+          <div class="empty-sub">在「设置 → 账号」登录后，可以在这里查看作业和课程通知。</div>
+          <button type="button" class="small primary" data-go-chaoxing>前往账号设置</button></div>`;
+        else if (s.noticeError && !items) list.innerHTML = `<div class="empty">
+          <div class="empty-title">无法加载通知</div>
+          <button type="button" class="small" data-retry-notifications>重新加载</button></div>`;
+        else if (items) {
+          const empty = { all: "暂无作业或通知", homework: "暂无未提交或未完成的作业", expired: "暂无本学期已截止的作业", notice: "暂无课程通知", unread: "没有未读通知" };
+          list.innerHTML = `<div class="empty"><div class="empty-title">${esc(empty[s.filter])}</div></div>`;
+        } else list.innerHTML = "";
+      }
+      async function loadNotifications() {
+        const s = notifications;
+        if (!currentUser) return;
+        const filter = s.filter, seq = ++s.listSeq;
+        const params = new URLSearchParams({
+          kind: filter === "unread" ? "all" : filter, unread: String(filter === "unread"), limit: "100",
+        });
+        s.loading = true;
+        s.noticeError = "";
+        renderNotifications();
+        try {
+          const result = await notificationApi(s, "/api/notifications?" + params);
+          if (s !== notifications || seq !== s.listSeq) return;
+          const { items, ...meta } = result;
+          s.lists.set(filter, items);
+          s.meta = meta;
+        } catch (e) {
+          if (s === notifications && seq === s.listSeq) s.noticeError = notificationError(e, "通知加载失败，请重试。");
+        } finally {
+          if (s === notifications && seq === s.listSeq) {
+            s.loading = false;
+            renderNotifications();
+          }
+        }
+      }
+      function renderNotificationFeature() {
+        renderChaoxingAccount();
+        renderNotifications();
+      }
+      async function syncNotifications() {
+        const s = notifications;
+        if (!currentUser || s.busy || !(s.meta?.configured ?? s.account?.configured)) return;
+        s.busy = "sync";
+        s.noticeError = s.noticeMessage = "";
+        renderNotificationFeature();
+        try {
+          const result = await notificationApi(s, "/api/notifications/sync", {});
+          if (s !== notifications) return;
+          if (!result.ok) throw new Error(result.error || "同步失败，请稍后重试。");
+          const summary = result.new_count > 0 ? `同步完成，新增 ${result.new_count} 条` : "同步完成，没有新增通知";
+          s.noticeMessage = summary;
+        } catch (e) {
+          if (s === notifications) s.noticeMessage = notificationError(e, "同步失败，请稍后重试。");
+        } finally {
+          if (s === notifications) {
+            await Promise.all([loadNotifications(), loadChaoxingStatus()]);
+            if (s === notifications) {
+              s.busy = "";
+              renderNotificationFeature();
+            }
+          }
+        }
+      }
+      async function markNotificationsRead(id) {
+        const s = notifications;
+        if (!currentUser || s.busy) return;
+        s.busy = "read";
+        renderNotificationFeature();
+        try {
+          await notificationApi(s, "/api/notifications/read", id ? { ids: [id] } : { all: true });
+          if (s !== notifications) return;
+          for (const [filter, items] of s.lists) {
+            if (!items) continue;
+            const updated = items.map((item) => !id || item.id === id ? { ...item, is_read: true } : item);
+            s.lists.set(filter, filter === "unread" ? updated.filter((item) => !item.is_read) : updated);
+          }
+          if (s.meta) s.meta.unread_count = id ? Math.max(0, s.meta.unread_count - 1) : 0;
+          await loadNotifications();
+        } catch (e) {
+          if (s === notifications) s.noticeError = notificationError(e, "标记已读失败，请重试。");
+        } finally {
+          if (s === notifications) {
+            s.busy = "";
+            renderNotificationFeature();
+          }
+        }
+      }
+      async function setHomeworkStatus(id, status) {
+        const s = notifications;
+        if (!currentUser || s.busy || !["completed", "pending", ""].includes(status)) return;
+        s.busy = "homework-status";
+        s.noticeError = s.noticeMessage = "";
+        renderNotificationFeature();
+        try {
+          await notificationApi(s, "/api/notifications/homework-status", { id, status });
+          if (s !== notifications) return;
+          s.lists.clear();
+          s.noticeMessage = status === "completed" ? "已在知序中标记完成，可在「已截止作业」中恢复。"
+            : status === "pending" ? "已标记仍待处理，已加入「我的作业」。" : "已恢复按学习通状态展示。";
+          await loadNotifications();
+        } catch (e) {
+          if (s === notifications) s.noticeError = notificationError(e, "修改作业状态失败，请重试。");
+        } finally {
+          if (s === notifications) {
+            s.busy = "";
+            renderNotificationFeature();
+          }
+        }
+      }
+      async function goChaoxingSettings() {
+        const s = notifications;
+        switchTab("settings");
+        showSettingsSection("settingsAccount");
+        s.relogin = needsChaoxingLogin(s.meta ?? s.account) || needsChaoxingLogin({ error: s.noticeMessage });
+        renderChaoxingAccount();
+        $("#settingsChaoxing").scrollIntoView({ block: "start" });
+        await loadChaoxingStatus();
+        if (s === notifications && !$("#tab-settings").classList.contains("hidden")
+          && !$("#settingsChaoxing").classList.contains("section-hidden")
+          && $("#chaoxingLoginForm").getClientRects().length) {
+          $("#chaoxingUsername").focus({ preventScroll: true });
+        }
+      }
+      async function updateChaoxing(action, data = {}) {
+        const s = notifications;
+        if (!currentUser || s.busy) return;
+        s.busy = action;
+        s.accountError = s.accountMessage = "";
+        renderNotificationFeature();
+        let syncAfterLogin = false;
+        try {
+          if (s.accountRequest) await s.accountRequest;
+          if (s !== notifications) return;
+          const result = await notificationApi(s, "/api/chaoxing/" + action, data);
+          if (s !== notifications) return;
+          if (action === "sms/login" && (!result.configured || needsChaoxingLogin(result))) {
+            throw new Error(result.error || "学习通登录失败，请检查手机号和短信验证码后重试。");
+          }
+          if (action === "sms/login" || action === "disconnect") {
+            // 新的绑定状态生效后，旧列表和在途响应都不能再用于渲染。
+            s.listSeq += 1;
+            s.loading = false;
+            s.lists.clear();
+            s.meta = null;
+            s.noticeError = s.noticeMessage = "";
+            s.relogin = false;
+            $("#chaoxingUsername").value = $("#chaoxingSmsCode").value = "";
+            chaoxingSmsPending = null;
+            clearTimeout(chaoxingSmsTimer);
+            s.smsRetryAt = 0;
+          }
+          if (action === "sms/login") {
+            s.account = result;
+            s.accountMessage = "已绑定。可前往「通知」查看同步结果。";
+            syncAfterLogin = true;
+          } else if (action === "disconnect") {
+            s.account = { configured: false };
+            s.accountMessage = "已解除绑定";
+            await loadChaoxingStatus();
+          } else {
+            s.account = { ...s.account, ...data, ...result };
+            s.accountMessage = "设置已保存";
+          }
+        } catch (e) {
+          if (s === notifications) s.accountError = notificationError(e, "操作失败，请稍后重试。");
+        } finally {
+          if (s === notifications) {
+            s.busy = "";
+            renderNotificationFeature();
+            if (syncAfterLogin) syncNotifications();
+          }
+        }
+      }
+      $("#notificationsFilters").addEventListener("click", (e) => {
+        const filter = e.target.closest("button[data-filter]")?.dataset.filter;
+        if (!filter || filter === notifications.filter) return;
+        notifications.filter = filter;
+        loadNotifications();
+      });
+      $("#notificationsList").addEventListener("click", (e) => {
+        const action = e.target.closest("[data-homework-id][data-homework-status]");
+        if (action && !action.disabled) {
+          const homeworkId = Number(action.dataset.homeworkId);
+          if (Number.isSafeInteger(homeworkId) && homeworkId > 0) setHomeworkStatus(homeworkId, action.dataset.homeworkStatus);
+          return;
+        }
+        const id = Number(e.target.closest("[data-notification-id]")?.dataset.notificationId);
+        if (Number.isSafeInteger(id) && id > 0) markNotificationsRead(id);
+        if (e.target.closest("[data-retry-notifications]")) loadNotifications();
+      });
+      $("#tab-notifications").addEventListener("click", (e) => {
+        if (e.target.closest("[data-go-chaoxing]")) goChaoxingSettings();
+      });
+      $("#notificationsSync").addEventListener("click", syncNotifications);
+      $("#notificationsReadAll").addEventListener("click", () => markNotificationsRead());
+      $("#chaoxingStatusRetry").addEventListener("click", loadChaoxingStatus);
+      $("#chaoxingRelogin").addEventListener("click", () => {
+        notifications.relogin = true;
+        $("#chaoxingUsername").value = notifications.account?.username || "";
+        renderChaoxingAccount();
+        $("#chaoxingUsername").focus();
+      });
+      let chaoxingSmsScript = null, chaoxingSmsPending = null, chaoxingSmsTimer = null;
+      function loadChaoxingSmsChallenge() {
+        if (typeof window.initCXCaptcha === "function") return Promise.resolve();
+        if (chaoxingSmsScript) return chaoxingSmsScript;
+        const loadScript = (url) => new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          const timer = setTimeout(fail, 15000);
+          function fail() {
+            clearTimeout(timer);
+            script.remove();
+            reject(new Error("官方安全验证加载失败，请检查网络或拦截插件后重试。"));
+          }
+          script.src = url;
+          script.referrerPolicy = "no-referrer";
+          script.onload = () => { clearTimeout(timer); resolve(); };
+          script.onerror = fail;
+          document.head.appendChild(script);
+        });
+        chaoxingSmsScript = (async () => {
+          if (!window.jQuery) await loadScript("https://passport2-static.chaoxing.com/js/jquery.min.js");
+          await loadScript("https://captcha.chaoxing.com/load.min.js");
+          if (typeof window.initCXCaptcha !== "function") throw new Error("官方安全验证初始化失败，请重试。");
+        })().catch((error) => { chaoxingSmsScript = null; throw error; });
+        return chaoxingSmsScript;
+      }
+      function tickChaoxingSms(s) {
+        clearTimeout(chaoxingSmsTimer);
+        if (s !== notifications) return;
+        renderChaoxingAccount();
+        if (s.smsRetryAt > Date.now()) chaoxingSmsTimer = setTimeout(() => tickChaoxingSms(s), 1000);
+      }
+      $("#chaoxingSendCode").addEventListener("click", async () => {
+        const s = notifications;
+        if (s.busy === "sms/verify") {
+          chaoxingSmsPending = null;
+          s.busy = "";
+          $("#chaoxingSmsChallenge").replaceChildren();
+          renderChaoxingAccount();
+          return;
+        }
+        if (!currentUser || s.busy || s.smsRetryAt > Date.now()) return;
+        const username = $("#chaoxingUsername").value.trim();
+        if (!/^1\d{10}$/.test(username)) {
+          s.accountError = "请填写学习通绑定的 11 位手机号。";
+          renderChaoxingAccount();
+          return;
+        }
+        const pending = { s, username };
+        chaoxingSmsPending = pending;
+        s.busy = "sms/verify";
+        s.accountError = "";
+        s.accountMessage = "请完成弹出的学习通官方安全验证。若已关闭弹窗，请点击关闭安全验证后重试。";
+        renderChaoxingAccount();
+        const fail = (message) => {
+          if (chaoxingSmsPending !== pending || s !== notifications) return;
+          chaoxingSmsPending = null;
+          s.busy = "";
+          s.accountMessage = "";
+          s.accountError = message;
+          renderChaoxingAccount();
+        };
+        try {
+          await loadChaoxingSmsChallenge();
+          if (chaoxingSmsPending !== pending || s !== notifications) return;
+          $("#chaoxingSmsChallenge").replaceChildren();
+          window.initCXCaptcha({
+            captchaId: "GcXX5vewqE7DezKGlyvleKCnkTglvGpL",
+            element: "#chaoxingSmsChallenge", mode: "popup", language: "CN", type: "textclick",
+            onVerify: async (err, data) => {
+              if (err || chaoxingSmsPending !== pending || s !== notifications) return;
+              if (typeof data?.validate !== "string" || !data.validate) return fail("安全验证未返回有效结果，请重试。");
+              chaoxingSmsPending = null;
+              s.busy = "sms/send";
+              s.accountMessage = "";
+              s.smsRetryAt = Date.now() + 60000;
+              renderChaoxingAccount();
+              try {
+                const result = await notificationApi(s, "/api/chaoxing/sms/send", { username, validate: data.validate });
+                if (s !== notifications) return;
+                if (result.sent !== true) throw new Error("短信未发送成功，请稍后重试。");
+                s.accountMessage = "短信验证码已发送，请输入收到的 6 位验证码。";
+                $("#chaoxingSmsCode").focus();
+              } catch (error) {
+                if (s === notifications) s.accountError = notificationError(error, "发送短信失败，请稍后重试。");
+              } finally {
+                if (s === notifications) {
+                  s.busy = "";
+                  tickChaoxingSms(s);
+                }
+              }
+            },
+          }, (instance) => {
+            if (chaoxingSmsPending === pending && s === notifications) instance.popUp();
+          }, () => fail("官方安全验证暂不可用，请检查网络后重试。"));
+        } catch (error) { fail(notificationError(error, "无法打开官方安全验证，请重试。")); }
+      });
+      $("#chaoxingLoginCancel").addEventListener("click", () => {
+        chaoxingSmsPending = null;
+        $("#chaoxingSmsChallenge").replaceChildren();
+        notifications.relogin = false;
+        notifications.accountError = "";
+        $("#chaoxingUsername").value = $("#chaoxingSmsCode").value = "";
+        renderChaoxingAccount();
+      });
+      $("#chaoxingLoginForm").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const username = $("#chaoxingUsername").value.trim();
+        const code = $("#chaoxingSmsCode").value.trim();
+        if (!/^1\d{10}$/.test(username) || !/^\d{6}$/.test(code)) {
+          notifications.accountError = "请填写 11 位手机号和 6 位短信验证码。";
+          renderChaoxingAccount();
+          return;
+        }
+        $("#chaoxingSmsCode").value = "";
+        updateChaoxing("sms/login", { username, code });
+      });
+      $("#chaoxingEnabled").addEventListener("change", (e) => updateChaoxing("options", { enabled: e.target.checked }));
+      $("#chaoxingPushEnabled").addEventListener("change", (e) => updateChaoxing("options", { push_enabled: e.target.checked }));
+      $("#chaoxingDisconnect").addEventListener("click", async () => {
+        const s = notifications;
+        const confirmed = await confirmDialog("解除绑定后将停止学习通同步，并移除本应用中的学习通通知和作业。", {
+          title: "解除学习通绑定", ok: "解除绑定", danger: true,
+        });
+        if (confirmed && s === notifications) updateChaoxing("disconnect");
+      });
+
       /* ---------- Tab 切换 ---------- */
       // 记住当前页面，刷新后停留在原 tab（按浏览器本地保存，不含任何隐私数据）
       const TAB_KEY = "qut.currentTab";
-      const TAB_IDS = ["today", "week", "grades", "settings"];
+      const TAB_IDS = ["today", "week", "grades", "notifications", "settings"];
       function readSavedTab() {
         try {
           const t = localStorage.getItem(TAB_KEY);
@@ -2521,8 +3132,9 @@
         console.error(e);
         if (typeof toast === "function") toast("加载失败：" + ((e && e.message) || "网络异常"));
       });
-      function switchTab(tab) {
+      function switchTab(tab, refreshNotifications = true) {
         saveTab(tab);
+        if (tab !== "settings") $("#chaoxingSmsCode").value = "";
         // 移动端底部导航切页后回到顶部，避免停在上一页的滚动位置
         if (window.matchMedia("(max-width: 720px)").matches) window.scrollTo(0, 0);
         $$("#nav button").forEach((b) => {
@@ -2531,7 +3143,7 @@
           b.setAttribute("aria-selected", on ? "true" : "false");
           b.tabIndex = on ? 0 : -1;
         });
-        ["today", "week", "grades", "settings"].forEach((t) =>
+        TAB_IDS.forEach((t) =>
           $("#tab-" + t).classList.toggle("hidden", t !== tab),
         );
         if (tab === "today") safeLoad(loadToday());
@@ -2540,6 +3152,7 @@
           safeLoad(loadExams());
         }
         if (tab === "grades") safeLoad(loadGrades());
+        if (tab === "notifications" && refreshNotifications) loadNotifications();
         if (tab === "settings") {
           safeLoad(loadSettings());
           safeLoad(loadPushLog());
@@ -2981,10 +3594,9 @@
       // 设置分区卡片 -> 导航按钮的映射（一个分区可能对应多张卡片）
       const SETTINGS_GROUP_CARDS = {
         settingsAppearance: ["settingsAppearance"],
-        settingsAccount: ["settingsAccount"],
+        settingsAccount: ["settingsAccount", "settingsChaoxing", "tab-source"],
         settingsSync: ["settingsSync"],
         settingsPush: ["settingsPush", "settingsBark", "settingsPushLog"],
-        settingsSource: ["tab-source"],
         settingsAdmin: ["tab-admin"],
       };
       function isPhoneLayout() { return window.matchMedia("(max-width: 720px)").matches; }
@@ -2993,16 +3605,16 @@
       const settingsRoot = $("#tab-settings");
       const settingsHome = $("#settingsHome");
       const settingsBack = $("#settingsBack");
-      const SETTINGS_TITLES = {
-        settingsAppearance: "外观", settingsAccount: "账号安全", settingsSync: "同步",
-        settingsPush: "推送", settingsSource: "课表来源", settingsAdmin: "用户管理",
-      };
       let currentSettingsSection = "settingsAppearance";
 
       // 切到某个分区：显示对应卡片 + 同步两侧导航的选中态
       function showSettingsSection(target) {
-        const show = SETTINGS_GROUP_CARDS[target] || [target];
-        if (!SETTINGS_GROUP_CARDS[target]) return;
+        if (target === "settingsSource") target = "settingsAccount";
+        const show = SETTINGS_GROUP_CARDS[target];
+        if (!show) return;
+        if (currentSettingsSection === "settingsAccount" && target !== "settingsAccount") {
+          $("#chaoxingSmsCode").value = "";
+        }
         currentSettingsSection = target;
         // 只看 settings-body 的直接子节点：课表来源/用户管理内部还有嵌套 .card，
         // 若用后代选择器会把它们一并误隐藏。
@@ -3011,7 +3623,11 @@
         settingsNav.querySelectorAll("button[data-target]").forEach((b) =>
           b.classList.toggle("active", b.dataset.target === target));
         // 迁入的设置分区按需加载（原来在独立 tab 打开时加载）
-        if (target === "settingsSource") safeLoad(loadSources());
+        if (target === "settingsAccount") {
+          loadChaoxingStatus();
+          safeLoad(loadSources());
+          safeLoad(loadRoomDefaults("", true));
+        }
         if (target === "settingsAdmin" && currentUser?.role === "admin") {
           safeLoad(loadAdminStats());
           safeLoad(loadAdminUsers());
@@ -3027,6 +3643,7 @@
       }
       // 手机：回设置首页
       function showSettingsHome() {
+        $("#chaoxingSmsCode").value = "";
         settingsRoot.classList.remove("detail-mode");
         settingsBack.classList.remove("show");
         settingsNav.querySelectorAll("button[data-target]").forEach((b) => b.classList.remove("active"));
@@ -3109,10 +3726,6 @@
         return Math.round(top + h) + 12;
       }
 
-      const SETTINGS_SECTION_IDS = [
-        "settingsAppearance", "settingsAccount", "settingsSync", "settingsPush",
-        "settingsSource", "settingsAdmin",
-      ];
       let settingsObserver = null;
       let settingsObserverInset = -1;
       /** 分区切换模式下高亮完全由点击驱动，取消滚动观察器，避免隐藏/显示卡片时误改 active */
@@ -3308,6 +3921,8 @@
       let currentUser = null;
 
       function showAuthScreen() {
+        currentUser = null;
+        resetNotifications();
         $("#authScreen").classList.remove("hidden");
         $("#app").classList.add("hidden");
       }
@@ -3391,6 +4006,8 @@
             method: "POST",
             body: JSON.stringify({ username, password }),
           });
+          currentUser = null;
+          resetNotifications();
           toast(r.promoted
             ? `账号已注销，管理员已转交给 ${r.promoted}`
             : "账号已注销", 5000);
@@ -3412,6 +4029,7 @@
             switchAuthTab(st.needs_setup ? "register" : "login");
             return;
           }
+          resetNotifications();
           currentUser = st.user;
           showApp();
           $("#userBox").textContent = (currentUser.display_name || currentUser.username) +
@@ -3420,25 +4038,27 @@
           $("#inviteBtn").classList.toggle("hidden", currentUser.role !== "admin");
           $("#settingsAdminNavBtn").classList.toggle("hidden", currentUser.role !== "admin");
           $("#settingsAdminRow").classList.toggle("hidden", currentUser.role !== "admin");
+          const initialNotifications = loadNotifications();
           await loadStatus();
-          await loadToday();
+          const saved = readSavedTab();
+          if (saved === "notifications") {
+            switchTab("notifications", false);
+          } else if (status?.has_source === false) {
+            await initialNotifications;
+            if (!currentUser) return;
+            if (notifications.meta?.configured) switchTab("notifications", false);
+            else {
+              switchTab("settings");
+              showSettingsSection("settingsSource");
+            }
+          } else if (saved && saved !== "today") {
+            switchTab(saved);
+          }
+          if (!currentUser) return;
+          safeLoad(loadToday());
           loadWeather();
           pollBrowserLogin();
           if (currentUser.role === "admin") refreshInvites();
-          // 刷新后停留在上一次的页面；首次未配置数据源时引导去设置→课表来源
-          if (status && !status.has_source) {
-            switchTab("settings");
-            showSettingsSection("settingsSource");
-          } else {
-            let saved = readSavedTab();
-            // 旧版本可能把已下线的页签（课表来源/用户管理/空教室）存进 localStorage，
-            // 落到不存在的 tab 会让所有页面都隐藏，这里统一回落到今日页
-            if (!TAB_IDS.includes(saved)) {
-              saved = "today";
-              saveTab("today");
-            }
-            if (saved && saved !== "today") switchTab(saved);
-          }
         } catch (e) {
           toast("加载失败：" + e.message, 5000, "error");
         } finally {
@@ -3472,6 +4092,8 @@
         } catch (err) { authError(err.message); }
       });
       async function doLogout() {
+        currentUser = null;
+        resetNotifications();
         try { await api("/api/auth/logout", { method: "POST" }); } catch (e) {}
         try { localStorage.removeItem(TAB_KEY); } catch (e) {}
         location.reload();

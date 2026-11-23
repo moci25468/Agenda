@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 from datetime import date, datetime, timedelta
@@ -15,8 +16,32 @@ from .providers.zhengfang import ZhengfangProvider, default_term
 TZ = ZoneInfo("Asia/Shanghai")
 BASE = "https://jxgl.qut.edu.cn/jwglxt"
 TTL = 8 * 86400
+ON_DEMAND_WINDOW_DAYS = 7
+ON_DEMAND_TTL = 7 * 86400
 SLOTS = tuple((start, start + 1) for start in range(1, 12, 2))
 log = logging.getLogger(__name__)
+
+
+def on_demand_write_eligible(day: date, now: datetime | None = None) -> bool:
+    today = (now or datetime.now(TZ)).astimezone(TZ).date()
+    return abs((day - today).days) <= ON_DEMAND_WINDOW_DAYS
+
+
+def on_demand_key(provider: ZhengfangProvider, semester_start: str, day: date,
+                  campus: str, building: str, start: int, end: int) -> str | None:
+    if os.getenv("AGENDA_ROOMS_SHARE_ON_DEMAND", "").strip() != "1":
+        return None
+    if provider.base != BASE or not campus:
+        return None
+    try:
+        semester = date.fromisoformat(semester_start)
+    except (TypeError, ValueError):
+        return None
+    if (provider.year, provider.term) != default_term(semester):
+        return None
+    identity = json.dumps([provider.base, provider.year, provider.term, semester.isoformat(),
+                           day.isoformat(), campus, building, start, end])
+    return f"rooms:on-demand:v1:{cache.fingerprint(identity)}"
 
 
 def _semester_start() -> str:
@@ -50,13 +75,32 @@ async def get_meta(provider: ZhengfangProvider, campus: str) -> dict | None:
 
 
 async def get_rooms(provider: ZhengfangProvider, day: date, campus: str,
-                    start: int, end: int) -> dict | None:
+                    start: int, end: int, building: str = "") -> dict | None:
     if (start, end) not in SLOTS or not campus:
         return None
     entry = await cache.get(_key(provider, "free", day.isoformat(), campus, start, end))
     if not isinstance(entry, dict) or not isinstance(entry.get("data"), list):
         return None
-    return entry if isinstance(entry.get("updated_at"), str) else None
+    if not isinstance(entry.get("updated_at"), str):
+        return None
+    if not building:
+        return entry
+    meta = await get_meta(provider, campus)
+    buildings = (meta or {}).get("buildings") or []
+    names = [b.get("name") for b in buildings if str(b.get("id")) == building]
+    if len(names) != 1 or not names[0]:
+        return None
+    name = names[0]
+    # 上游查询按楼号，而快照只有楼名。仅在整批名称可无歧义映射时过滤。
+    counts: dict[str, int] = {}
+    for b in buildings:
+        label = b.get("name") or ""
+        if b.get("id") and label:
+            counts[label] = counts.get(label, 0) + 1
+    rooms = entry["data"]
+    if counts.get(name) != 1 or any(counts.get(r.get("building")) != 1 for r in rooms):
+        return None
+    return {**entry, "data": [r for r in rooms if r.get("building") == name]}
 
 
 def _refresh_window(now: datetime) -> datetime:
@@ -74,8 +118,12 @@ def _refreshed_in_window(entry, cutoff: datetime) -> bool:
         return False
 
 
+def snapshot_time() -> str:
+    return datetime.now(TZ).isoformat(timespec="seconds")
+
+
 async def _store(key: str, data) -> None:
-    await cache.set(key, {"data": data, "updated_at": datetime.now(TZ).isoformat(timespec="seconds")}, TTL)
+    await cache.set(key, {"data": data, "updated_at": snapshot_time()}, TTL)
 
 
 async def refresh(now: datetime | None = None) -> None:
@@ -91,7 +139,7 @@ async def refresh(now: datetime | None = None) -> None:
     provider = ZhengfangProvider({"provider": {"zhengfang": {
         "base": BASE, "year": year, "term": term,
         "cookie": os.getenv("AGENDA_ROOMS_SHARED_COOKIE", ""),
-    }}})
+    }}}, shared_rooms=True)
     monday = today - timedelta(days=today.weekday())
     dates = [monday + timedelta(days=i) for i in range(7)]
     weeks = [(day, current_week(semester_start, day, 40)) for day in dates]

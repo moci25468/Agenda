@@ -1562,14 +1562,16 @@ async def http_tests(port: int):
               and w.get("enabled") is False and w.get("hours") == {}, str(w)[:200])
         await ca.post(f"{base}/api/settings", json={"weather": {"enabled": True}})
         await ca.post(f"{base}/api/settings", json={"rooms": {
-            "default_campus": "05", "default_campus_name": "黄岛校区"}})
+            "default_campus": "05", "default_campus_name": "黄岛校区", "default_building": "B1"}})
         st = (await ca.get(f"{base}/api/settings")).json()
         check("默认校区.设置接口保存并回读",
               (st.get("rooms") or {}).get("default_campus") == "05"
-              and st["rooms"].get("default_campus_name") == "黄岛校区",
+              and st["rooms"].get("default_campus_name") == "黄岛校区"
+              and st["rooms"].get("default_building") == "B1",
               str(st.get("rooms"))[:160])
-        await ca.post(f"{base}/api/settings", json={"rooms": {
+        cleared = await ca.post(f"{base}/api/settings", json={"rooms": {
             "default_campus": "", "default_campus_name": ""}})
+        check("默认教学楼.清空校区同步清空教学楼", cleared.json()["rooms"]["default_building"] == "")
         # 推送：企业微信单通道测试（免启用开关）
         await ca.post(f"{base}/api/settings", json={"push": {
             "bark_enabled": False, "bark_key": "",
@@ -2412,15 +2414,17 @@ async def _verify_shared_rooms():
             return cls.moment.astimezone(tz) if tz else cls.moment.replace(tzinfo=None)
 
     env = {"AGENDA_ROOMS_SHARED_COOKIE": "fixture=shared",
-           "AGENDA_ROOMS_SHARED_SEMESTER_START": "2026-08-31", "REDIS_URL": ""}
+           "AGENDA_ROOMS_SHARED_SEMESTER_START": "2026-08-31", "REDIS_URL": "",
+           "AGENDA_ROOMS_SHARE_ON_DEMAND": "0"}
     campus = [{"id": "A", "name": "A 校区"}]
     source = main.ZhengfangProvider
-    meta = AsyncMock(return_value={"campuses": campus, "campus": "A", "buildings": []})
+    meta = AsyncMock(return_value={"campuses": campus, "campus": "A", "buildings": [
+        {"id": "B1", "name": "一号楼"}, {"id": "B2", "name": "二号楼"}]})
 
     async def free(self, week, weekday, start, end, campus, building="", *, strict=False):
         if strict:
-            assert self.cookie == "fixture=shared"
-            return [] if start == 3 else [{"id": "shared-room"}]
+            assert self.cookie == "fixture=shared" and self._shared_rooms
+            return [] if start == 3 else [{"id": "shared-room", "building": "一号楼"}]
         return [{"id": self.username}]
 
     cfg = {"semester_start": "2026-08-31", "provider": {"zhengfang": {
@@ -2430,7 +2434,8 @@ async def _verify_shared_rooms():
 
     def request_config():
         uid = get_current_user()
-        return {**cfg, "rooms": {"default_campus_name": f"user-{uid}"}}
+        return {**cfg, "rooms": {"default_campus": "A", "default_campus_name": f"user-{uid}",
+                                 "default_building": "B2" if uid == 1 else ""}}
 
     def session(token):
         return {"user_id": int(token)} if token in ("1", "2") else None
@@ -2465,11 +2470,18 @@ async def _verify_shared_rooms():
                 a, b = {"Cookie": "qut_session=1"}, {"Cookie": "qut_session=2"}
                 unauth = await client.get("/api/rooms/free", params=params)
                 check("共享空教室.游客不能读取快照", unauth.status_code == 401)
-                first = await client.get("/api/rooms/free", params=params, headers=a)
-                second = await client.get("/api/rooms/free", params=params, headers=b)
+                all_rooms = {**params, "building": ""}
+                first = await client.get("/api/rooms/free", params=all_rooms, headers=a)
+                second = await client.get("/api/rooms/free", params=all_rooms, headers=b)
                 check("共享空教室.两个账号无个人凭证命中同一快照", first.status_code == 200
                       and first.json() == second.json() and first.json().get("cache_source") == "shared_week"
                       and first.json().get("updated_at") == "2026-11-24T00:30:00+08:00")
+                preferred = await client.get("/api/rooms/free", params=params, headers=a)
+                override = await client.get("/api/rooms/free", params={**params, "building": "B1"}, headers=a)
+                check("共享空教室.默认楼生效且可显式改选", preferred.status_code == 200
+                      and preferred.json().get("rooms") == []
+                      and preferred.json().get("cache_source") == "shared_week"
+                      and override.json().get("rooms") == first.json().get("rooms"))
                 empty = await client.get("/api/rooms/free", params={**params, "start": 3, "end": 4}, headers=b)
                 check("共享空教室.合法空结果命中不回源", empty.status_code == 200
                       and empty.json().get("rooms") == [] and fetch.await_count == 84)
@@ -2494,6 +2506,56 @@ async def _verify_shared_rooms():
                         check(f"共享空教室.未覆盖条件回源且隔离 {extra}",
                               one.json().get("rooms") == [{"id": "person-1"}]
                               and two.json().get("rooms") == [{"id": "person-2"}])
+                with (patch.dict(os.environ, {"AGENDA_ROOMS_SHARE_ON_DEMAND": "1",
+                                              "AGENDA_ROOMS_SHARED_COOKIE": ""}),
+                      patch.object(main, "load_config", configured),
+                      patch.object(source, "fetch_free_rooms", new_callable=AsyncMock,
+                                   side_effect=[[{"id": "room-A"}], [], ValueError("bad upstream"),
+                                                [{"id": "room-past"}]]) as live,
+                      patch.object(_cache, "set", wraps=_cache.set) as store):
+                    day = Clock.moment.date()
+                    query = {"date_s": (day + timedelta(days=7)).isoformat(), "building": "B1"}
+                    first = await personal(1, query)
+                    second = await personal(2, query)
+                    check("按需共享.跨用户命中且只回源一次", first.status_code == 200
+                          and first.json() == second.json() and live.await_count == 1
+                          and live.await_args.kwargs == {"strict": True})
+                    ttl = store.await_args.args[2]
+                    check("按需共享.前后各七天允许写入且有效期固定七天", ttl == 7 * 86400
+                          and rc.on_demand_write_eligible(day)
+                          and rc.on_demand_write_eligible(day - timedelta(days=7))
+                          and not rc.on_demand_write_eligible(day - timedelta(days=8))
+                          and not rc.on_demand_write_eligible(day + timedelta(days=8)))
+                    other_filter = await personal(2, {**query, "building": "B2"})
+                    empty_hit = await personal(1, {**query, "building": "B2"})
+                    check("按需共享.楼号隔离且缓存合法空列表", live.await_count == 2
+                          and other_filter.json() == empty_hit.json() and empty_hit.json().get("rooms") == [])
+                    bad = await personal(1, {**query, "start": 2})
+                    check("按需共享.上游异常不写共享", bad.status_code == 400 and store.await_count == 2)
+                    past_day = day - timedelta(days=7)
+                    past_query = {**query, "date_s": past_day.isoformat()}
+                    past = await personal(1, past_query)
+                    past_hit = await personal(2, past_query)
+                    check("按需共享.过去第七天同样写入七天", past.status_code == 200
+                          and past.json() == past_hit.json() and live.await_count == 4
+                          and store.await_args.args[2] == 7 * 86400)
+                    Clock.moment += timedelta(days=1)
+                    outside_hit = await personal(2, past_query)
+                    check("按需共享.滑出写入窗口仍可命中且不续期", not rc.on_demand_write_eligible(past_day)
+                          and outside_hit.json() == past.json() and live.await_count == 4
+                          and store.await_count == 3)
+                    with patch.object(source, "fetch_free_rooms", new_callable=AsyncMock,
+                                      return_value=[{"id": "personal"}]) as outside_live:
+                        outside_query = {**past_query, "building": "not-cached"}
+                        miss = await personal(1, outside_query)
+                        hit = await personal(1, outside_query)
+                        check("按需共享.窗口外未命中沿用个人短缓存", miss.status_code == 200
+                              and miss.json() == hit.json() and outside_live.await_count == 1
+                              and store.await_args.args[2] == 60
+                              and not store.await_args.args[0].startswith("rooms:on-demand:"))
+                    unauth = await client.get("/api/rooms/free", params={**params, **query})
+                    check("按需共享.游客不能读已有缓存", unauth.status_code == 401)
+                    _cache.clear_local("rooms:on-demand:")
         other = source({"provider": {"zhengfang": {"base": "https://example.invalid", "year": "2026", "term": "3"}}})
         check("共享空教室.非同源或不同开学日不能读取", not rc.eligible(other, cfg["semester_start"])
               and not rc.eligible(provider, "2026-09-01"))

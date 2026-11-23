@@ -24,7 +24,7 @@
     <link rel="stylesheet" href="/static/css/log.css?v=2.0.1" />
     <link rel="stylesheet" href="/static/css/settings.css?v=2.0.1" />
     <link rel="stylesheet" href="/static/css/source.css?v=2.0.1" />
-    <link rel="stylesheet" href="/static/css/admin.css?v=2.0.8" />
+    <link rel="stylesheet" href="/static/css/admin.css?v=2.0.9-push" />
     <link rel="stylesheet" href="/static/css/edit.css?v=2.0.1" />
     <link rel="stylesheet" href="/static/css/skin-paper.css?v=2.0.1" />
     <link rel="stylesheet" href="/static/css/skin-restrained.css?v=2.0.1" />
@@ -35,7 +35,7 @@
     <link rel="stylesheet" href="/static/css/interaction.css?v=2.0.1" />
     <link rel="stylesheet" href="/static/css/motion.css?v=2.0.1" />
     <link rel="stylesheet" href="/static/css/native.css?v=2.0.1" />
-    <link rel="stylesheet" href="/static/css/cards.css?v=2.0.1" />
+    <link rel="stylesheet" href="/static/css/cards.css?v=2.0.3-deadline" />
     <script>
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", () => {
@@ -121,7 +121,7 @@
           <label class="field" id="inviteField"><span>邀请码</span><input id="regInvite"></label>
           <div class="reg-source-hint">
             <b>推荐填写学号与正方密码</b>
-            <span>填了就能在注册成功后直接从正方教务拉取你的真实课表与考试；不填也能用，稍后可在「设置 → 课表来源」里补上。</span>
+            <span>填了就能在注册成功后直接从正方教务拉取你的真实课表与考试；不填也能用，稍后可在「设置 → 账号」里补上。</span>
           </div>
           <label class="field"><span>学号（推荐填写）</span><input id="regStudentId" inputmode="numeric" autocomplete="off" /></label>
           <label class="field"><span>正方教务密码（推荐填写）</span><input id="regZfPassword" type="password" autocomplete="new-password" /></label>
@@ -162,6 +162,7 @@
         <button data-tab="today" class="active" role="tab" aria-selected="true" aria-controls="tab-today"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 9.5h17M8 3v4M16 3v4M8.5 14l2.2 2.2 4.3-4.4"/></svg>今日</button>
         <button data-tab="week" role="tab" aria-selected="false" aria-controls="tab-week"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M10 4v16"/></svg>日程</button>
         <button data-tab="grades" role="tab" aria-selected="false" aria-controls="tab-grades"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20h14M6.5 16.5l4-5 3 3 4.5-6"/><path d="M14 8.5h4v4"/></svg>成绩</button>
+        <button id="notificationsTab" data-tab="notifications" role="tab" aria-selected="false" aria-controls="tab-notifications" tabindex="-1"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 8h18s-3-1-3-8M13.7 21a2 2 0 0 1-3.4 0"/></svg>通知<span id="notificationsBadge" class="notifications-badge hidden" aria-hidden="true"></span></button>
         <button data-tab="settings" role="tab" aria-selected="false" aria-controls="tab-settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17.5 7H20M4 17h2.5M11 17h9"/><circle cx="15.2" cy="7" r="2.2"/><circle cx="8.7" cy="17" r="2.2"/></svg>设置</button>
       </nav>
 
@@ -294,6 +295,35 @@
         </p>
       </section>
 
+      <!-- 学习通通知 -->
+      <section id="tab-notifications" class="hidden" role="tabpanel" aria-labelledby="notificationsTab">
+        <div class="card notifications-card">
+          <div class="notifications-head">
+            <div>
+              <h2>学习通作业与通知</h2>
+              <p id="notificationsSummary" class="hint"></p>
+            </div>
+            <div class="notifications-actions">
+              <button type="button" class="small" id="notificationsReadAll" disabled>全部已读</button>
+              <button type="button" class="small primary" id="notificationsSync" disabled>立即同步</button>
+            </div>
+          </div>
+          <div id="notificationsFilters" class="notifications-filters" role="group" aria-label="筛选通知">
+            <button type="button" class="small active" data-filter="homework" aria-pressed="true">我的作业（未完成）</button>
+            <button type="button" class="small" data-filter="expired" aria-pressed="false">已截止作业</button>
+            <button type="button" class="small" data-filter="all" aria-pressed="false">全部</button>
+            <button type="button" class="small" data-filter="notice" aria-pressed="false">通知</button>
+            <button type="button" class="small" data-filter="unread" aria-pressed="false">未读</button>
+          </div>
+          <div id="notificationsFeedback" class="notifications-feedback hidden">
+            <p id="notificationsMessage" class="hint" role="status"></p>
+            <button type="button" id="notificationsRelogin" class="small hidden" data-go-chaoxing>前往重新登录</button>
+          </div>
+          <div id="notificationsList" class="notifications-list"></div>
+          <p class="hint" id="notificationsLimitHint">「我的作业」显示本学期未提交、未完成的作业。以设置中的开学日期为起点，优先按作业发布或开始时间判断，缺失时按截止时间判断；时间均未知的暂不显示。下学期更新开学日期后自动切换范围，不限制课程名称。按截止时间从近到远排列，最多显示 100 条，是否已读不影响展示。在「已截止作业」中可逐个标记已完成、仍待处理或恢复学习通状态；手动状态仅在知序内生效，不代表向学习通提交作业。</p>
+        </div>
+      </section>
+
       <!-- 编辑用户信息弹窗 -->
       <div id="editUserSheet" class="sheet hidden">
         <div class="sheet-panel" role="dialog" aria-modal="true" aria-label="编辑用户信息">
@@ -328,7 +358,6 @@
           <button type="button" data-target="settingsAccount"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg><span>账号</span></button>
           <button type="button" data-target="settingsSync"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 6.4M20 5v6h-6"/></svg><span>同步</span></button>
           <button type="button" data-target="settingsPush"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 8h18s-3-1-3-8M13.7 21a2 2 0 0 1-3.4 0"/></svg><span>推送</span></button>
-          <button type="button" data-target="settingsSource"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 14.5l5-5M8.5 11.5l-2.2 2.2a3.6 3.6 0 0 0 5.1 5.1l2.1-2.2M15.5 12.5l2.2-2.2a3.6 3.6 0 0 0-5.1-5.1l-2.1 2.2"/></svg><span>课表来源</span></button>
           <button type="button" data-target="settingsAdmin" id="settingsAdminNavBtn" class="hidden"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="3"/><path d="M3.5 19.5c.6-3 2.7-4.5 5.5-4.5s4.9 1.5 5.5 4.5M16 5.7a2.8 2.8 0 0 1 0 5.6M17 15.2c2 .5 3.2 1.9 3.6 4.3"/></svg><span>用户管理</span></button>
           </nav>
         <!-- 手机 iOS 设置首页：大标题 + 分组列表；点行进入详情 -->
@@ -341,7 +370,7 @@
             </button>
             <button type="button" class="ios-row" data-target="settingsAccount">
               <span class="ios-row-ic ic-account"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg></span>
-              <span class="ios-row-label">账号安全</span><span class="ios-row-arrow">›</span>
+              <span class="ios-row-label">账号</span><span class="ios-row-arrow">›</span>
             </button>
           </div>
           <div class="ios-group">
@@ -352,12 +381,6 @@
             <button type="button" class="ios-row" data-target="settingsPush">
               <span class="ios-row-ic ic-push"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 8h18s-3-1-3-8M13.7 21a2 2 0 0 1-3.4 0"/></svg></span>
               <span class="ios-row-label">推送</span><span class="ios-row-arrow">›</span>
-            </button>
-            </div>
-          <div class="ios-group">
-            <button type="button" class="ios-row" data-target="settingsSource">
-              <span class="ios-row-ic ic-sync"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 14.5l5-5M8.5 11.5l-2.2 2.2a3.6 3.6 0 0 0 5.1 5.1l2.1-2.2M15.5 12.5l2.2-2.2a3.6 3.6 0 0 0-5.1-5.1l-2.1 2.2"/></svg></span>
-              <span class="ios-row-label">课表来源</span><span class="ios-row-arrow">›</span>
             </button>
             <button type="button" class="ios-row hidden" data-target="settingsAdmin" id="settingsAdminRow">
               <span class="ios-row-ic ic-account"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="3"/><path d="M3.5 19.5c.6-3 2.7-4.5 5.5-4.5s4.9 1.5 5.5 4.5M16 5.7a2.8 2.8 0 0 1 0 5.6M17 15.2c2 .5 3.2 1.9 3.6 4.3"/></svg></span>
@@ -400,6 +423,44 @@
             注销会永久删除该账号的课表快照、手动调整、考试、推送记录以及数据源
             配置，无法恢复。若是管理员注销，管理员权限会自动交给最早注册的其他账号。
           </p>
+        </div>
+        <div class="card section-hidden" id="settingsChaoxing">
+          <h2>学习通</h2>
+          <p class="hint">展示本学期未完成作业和课程通知；已截止作业可在通知页单独管理，手动标记已完成或仍待处理。已提交、已批改的作业不展示，已截止作业不再推送。提交作业、签到等操作请在学习通完成。</p>
+          <p id="chaoxingSummary" class="hint" role="status"></p>
+          <p id="chaoxingFeedback" class="hint hidden" role="status"></p>
+          <div id="chaoxingOptions" class="hidden">
+            <div class="switch-list">
+              <label class="switch-row">
+                <span class="switch-text"><b>定时同步</b><small id="chaoxingPollHint"></small></span>
+                <input type="checkbox" class="switch-input" id="chaoxingEnabled" role="switch" aria-label="学习通定时同步" />
+                <span class="switch-track" aria-hidden="true"></span>
+              </label>
+              <label class="switch-row">
+                <span class="switch-text"><b>学习通推送</b><small>内容更新与作业截止前 24 小时提醒，使用「设置 → 推送」里已配置的渠道</small></span>
+                <input type="checkbox" class="switch-input" id="chaoxingPushEnabled" role="switch" aria-label="学习通通知推送" />
+                <span class="switch-track" aria-hidden="true"></span>
+              </label>
+            </div>
+            <div class="form-actions">
+              <button type="button" id="chaoxingRelogin">重新登录</button>
+              <button type="button" id="chaoxingDisconnect" class="danger">解除绑定</button>
+            </div>
+          </div>
+          <form method="post" id="chaoxingLoginForm" class="hidden" autocomplete="off">
+            <div class="form-grid">
+              <label class="field"><span>学习通绑定手机号（+86）</span><input id="chaoxingUsername" type="tel" inputmode="tel" autocomplete="tel-national" maxlength="11" pattern="1[0-9]{10}" required /></label>
+              <label class="field"><span>短信验证码</span><input id="chaoxingSmsCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="请输入短信中的 6 位验证码" required /></label>
+            </div>
+            <div class="form-actions"><button type="button" id="chaoxingSendCode" disabled>获取短信验证码</button></div>
+            <div id="chaoxingSmsChallenge"></div>
+            <p class="hint" id="chaoxingLoginHint">无需学习通密码。点击获取短信验证码，完成弹出的官方安全验证后接收短信，再输入验证码登录。</p>
+            <div class="form-actions">
+              <button type="submit" id="chaoxingLogin" class="primary" disabled>登录并绑定</button>
+              <button type="button" id="chaoxingLoginCancel" class="hidden">取消</button>
+            </div>
+          </form>
+          <button type="button" id="chaoxingStatusRetry" class="small hidden">重新加载</button>
         </div>
         <div class="card" id="settingsSync">
           <h2>同步</h2>
@@ -651,6 +712,16 @@
               <span class="hint" id="zfSaveResult"></span>
             </div>
           </div>
+        </div>
+        <div class="card">
+          <h2>空教室查询偏好</h2>
+          <p class="hint">打开空教室查询时优先使用这里保存的校区和教学楼，查询时仍可临时切换。</p>
+          <div class="form-grid">
+            <label class="field"><span>默认校区</span><select id="roomDefaultCampus" disabled></select></label>
+            <label class="field"><span>默认教学楼</span><select id="roomDefaultBuilding" disabled></select></label>
+          </div>
+          <div class="form-actions"><button id="roomDefaultsSave" type="button" disabled>保存查询偏好</button></div>
+          <p id="roomDefaultsStatus" class="hint" role="status"></p>
         </div>
       </section>
 
@@ -989,6 +1060,6 @@
       </div>
     </div>
 
-    <script src="/static/js/app.js?v=2.0.7-rooms1"></script>
+    <script src="/static/js/app.js?v=2.0.11-homework-local-status"></script>
   </body>
 </html>

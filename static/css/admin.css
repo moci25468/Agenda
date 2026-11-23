@@ -191,6 +191,16 @@
   color: var(--warn);
   border-color: transparent;
 }
+.src-tag.on-push {
+  background: var(--success-soft);
+  color: var(--success);
+  border-color: transparent;
+}
+.src-tag.on-push-cfg {
+  background: var(--fill);
+  color: var(--sub);
+  border: 1px solid var(--success);
+}
 .log-row {
   padding: 8px 0;
   border-bottom: 1px solid var(--line);

@@ -28,6 +28,7 @@ MASK_PATHS = [
     ("provider", "portal", "url"),
     ("provider", "portal", "headers"),
     ("provider", "portal", "body"),
+    ("chaoxing", "cookies"),
     ("calendar_subscribe_token",),
 ]
 
@@ -70,6 +71,15 @@ DEFAULT_CONFIG = {
             },
         },
     },
+    "chaoxing": {
+        "enabled": False,
+        "username": "",
+        "cookies": [],
+        "uid": "",
+        "name": "",
+        "poll_minutes": 30,
+        "push_enabled": False,
+    },
     "push": {
         "bark_enabled": False,
         "bark_server": "https://api.day.app",
@@ -95,6 +105,7 @@ DEFAULT_CONFIG = {
     "rooms": {
         "default_campus": "",       # 空教室默认校区（正方 xqh_id），查询时自动带入
         "default_campus_name": "",  # 校区名称，供展示使用
+        "default_building": "",    # 默认校区内的教学楼 ID
     },
     "security": {
         "enabled": False,         # 默认关闭，不影响本地页面与现有用法

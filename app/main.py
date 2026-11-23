@@ -12,16 +12,16 @@ import uuid
 from contextlib import asynccontextmanager, suppress
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import auth, browser_login, cache, db, room_cache
+from . import auth, browser_login, cache, db, notifications, room_cache
 from .config import (
     DEFAULT_CONFIG, MASK, demo_allowed, global_config, load_config, masked_config, save_config,
 )
@@ -526,8 +526,8 @@ def _course_form(data: dict) -> dict:
     }
 
 
-def _save_course_overrides(cfg: dict, overrides: dict) -> dict:
-    save_config(dict(cfg, course_overrides=overrides))
+def _save_course_overrides(overrides: dict) -> dict:
+    save_config({"course_overrides": overrides})
     return {
         "ok": True,
         "hidden_count": len(overrides["hidden"]),
@@ -625,7 +625,7 @@ async def edit_course(req: CourseEditRequest):
                 overrides["edited"][uid] = data
     else:
         raise HTTPException(400, "未知操作")
-    return _save_course_overrides(cfg, overrides)
+    return _save_course_overrides(overrides)
 
 
 @app.get("/api/search")
@@ -832,6 +832,9 @@ async def rooms_meta(campus: str = ""):
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"空教室查询失败: {e}")
     today = date.today()
+    default_building = _room_default_building(rcfg, meta.get("campus"))
+    if not any(str(b.get("id")) == default_building for b in meta.get("buildings") or []):
+        default_building = ""
     # 进程内缓存返回原对象，用户专属字段只写入当前响应。
     return {
         **meta,
@@ -841,12 +844,19 @@ async def rooms_meta(campus: str = ""):
         "today_weekday": today.isoweekday(),
         "default_campus": default_id,
         "default_campus_name": default_name,
+        "default_building": default_building,
     }
+
+
+def _room_default_building(rooms_cfg: dict, campus: str) -> str:
+    if campus and campus == str(rooms_cfg.get("default_campus") or "").strip():
+        return str(rooms_cfg.get("default_building") or "").strip()
+    return ""
 
 
 @app.get("/api/rooms/free")
 async def rooms_free(date_s: str = "", start: int = 1, end: int = 2,
-                     campus: str = "", building: str = ""):
+                     campus: str = "", building: str | None = None):
     """某天某节次范围的空教室。日期 → 教学周/星期按开学日期换算。"""
     from .providers.base import AuthExpiredError
     date_s = (date_s or date.today().isoformat()).strip()
@@ -858,24 +868,32 @@ async def rooms_free(date_s: str = "", start: int = 1, end: int = 2,
         raise HTTPException(400, "节次范围无效")
     cfg = load_config()
     # 未指定校区时用「课表来源」里的默认校区，免得每次查教室都重选
-    campus = campus.strip() or str((cfg.get("rooms") or {}).get("default_campus") or "").strip()
+    rcfg = cfg.get("rooms") or {}
+    campus = campus.strip() or str(rcfg.get("default_campus") or "").strip()
     semester_start = cfg.get("semester_start", "")
     week = current_week(semester_start, d, 40)
     if week < 1:
         raise HTTPException(400, "该日期还没开学，查不了空教室")
     if week > 30:
         raise HTTPException(400, "该日期超出本学期范围")
-    building = building.strip()
+    building = _room_default_building(rcfg, campus) if building is None else building.strip()
     response = {"date": date_s, "week": week, "day": d.isoweekday(),
                 "start": start, "end": end}
-    if not building and campus and (start, end) in room_cache.SLOTS:
-        provider = ZhengfangProvider(cfg)
-        if room_cache.eligible(provider, semester_start):
-            snapshot = await room_cache.get_rooms(provider, d, campus, start, end)
-            if snapshot is not None:
-                rooms = snapshot["data"]
-                return {**response, "rooms": rooms, "count": len(rooms),
-                        "cache_source": "shared_week", "updated_at": snapshot["updated_at"]}
+    provider = ZhengfangProvider(cfg)
+    if campus and (start, end) in room_cache.SLOTS and room_cache.eligible(provider, semester_start):
+        snapshot = await room_cache.get_rooms(provider, d, campus, start, end, building)
+        if snapshot is not None:
+            rooms = snapshot["data"]
+            return {**response, "rooms": rooms, "count": len(rooms),
+                    "cache_source": "shared_week", "updated_at": snapshot["updated_at"]}
+
+    shared_key = room_cache.on_demand_key(provider, semester_start, d, campus, building, start, end)
+    if shared_key:
+        snapshot = await cache.get(shared_key)
+        if isinstance(snapshot, dict) and isinstance(snapshot.get("data"), list):
+            rooms = snapshot["data"]
+            return {**response, "rooms": rooms, "count": len(rooms),
+                    "cache_source": "shared_on_demand", "updated_at": snapshot.get("updated_at")}
 
     provider = _rooms_provider(cfg)
     free_key = (
@@ -883,11 +901,22 @@ async def rooms_free(date_s: str = "", start: int = 1, end: int = 2,
         f"{cache.fingerprint(provider.base)}:{provider.username}:{week}:{d.isoweekday()}:"
         f"{start}:{end}:{campus}:{building}"
     )
-    rooms = await cache.get(free_key)
+    share_write = shared_key is not None and room_cache.on_demand_write_eligible(d)
+    rooms = None if share_write else await cache.get(free_key)
     try:
         if not isinstance(rooms, list):
-            rooms = await provider.fetch_free_rooms(
-                week, d.isoweekday(), start, end, campus, building)
+            if share_write:
+                rooms = await provider.fetch_free_rooms(
+                    week, d.isoweekday(), start, end, campus, building, strict=True)
+                if room_cache.on_demand_write_eligible(d) and isinstance(rooms, list):
+                    updated_at = room_cache.snapshot_time()
+                    await cache.set(shared_key, {"data": rooms, "updated_at": updated_at},
+                                    room_cache.ON_DEMAND_TTL)
+                    return {**response, "rooms": rooms, "count": len(rooms),
+                            "cache_source": "shared_on_demand", "updated_at": updated_at}
+            else:
+                rooms = await provider.fetch_free_rooms(
+                    week, d.isoweekday(), start, end, campus, building)
             if isinstance(rooms, list):
                 await cache.set(free_key, rooms, ROOM_FREE_CACHE_TTL)
     except AuthExpiredError as e:
@@ -1149,8 +1178,8 @@ def _exam_form(data: dict) -> dict:
             "campus": str(data.get("campus") or "").strip(), "note": note}
 
 
-def _save_exam_overrides(cfg: dict, overrides: dict) -> dict:
-    save_config(dict(cfg, exam_overrides=overrides))
+def _save_exam_overrides(overrides: dict) -> dict:
+    save_config({"exam_overrides": overrides})
     return {
         "ok": True,
         "hidden_count": len(overrides["hidden"]),
@@ -1215,7 +1244,7 @@ async def edit_exam(req: ExamEditRequest):
                 overrides["edited"][uid] = data
     else:
         raise HTTPException(400, "未知操作")
-    return _save_exam_overrides(cfg, overrides)
+    return _save_exam_overrides(overrides)
 
 
 @app.post("/api/sync")
@@ -1340,6 +1369,16 @@ def _validate_settings(cfg: dict) -> dict:
         if key in out:
             out[key] = _req_bool(out[key], key)
 
+    if "rooms" in out:
+        rooms_cfg = out["rooms"]
+        if not isinstance(rooms_cfg, dict):
+            raise HTTPException(400, "rooms 必须是 JSON 对象")
+        for key in ("default_campus", "default_campus_name", "default_building"):
+            if key in rooms_cfg:
+                rooms_cfg[key] = _req_str(rooms_cfg[key], f"rooms.{key}", 120).strip()
+        if "default_campus" in rooms_cfg and not rooms_cfg["default_campus"]:
+            rooms_cfg["default_building"] = ""
+
     push = out.get("push")
     if isinstance(push, dict):
         for key in ("bark_enabled", "wecom_enabled", "reminder_enabled",
@@ -1410,6 +1449,8 @@ async def get_settings():
 
 @app.post("/api/settings")
 async def post_settings(cfg: dict):
+    if "chaoxing" in cfg:
+        raise HTTPException(400, "请通过学习通专用接口管理绑定和设置")
     cfg = _validate_settings(cfg)
     hook = str(((cfg or {}).get("push") or {}).get("wecom_webhook") or "")
     if hook and hook != MASK:
@@ -1422,6 +1463,142 @@ async def post_settings(cfg: dict):
         raise HTTPException(400, str(e))
     reschedule(saved)
     return masked_config(saved)
+
+
+async def _chaoxing_operation(operation, *args):
+    try:
+        return await operation(get_current_user(), *args)
+    except notifications.BusyError as exc:
+        raise HTTPException(409, str(exc)) from None
+    except notifications.OperationError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from None
+
+
+@app.get("/api/chaoxing/status")
+def get_chaoxing_status():
+    return notifications.status(get_current_user())
+
+
+@app.post("/api/chaoxing/login")
+async def post_chaoxing_login(request: Request):
+    # 手动校验，避免默认验证错误把账号密码原样放进响应。
+    try:
+        payload = await request.json()
+    except (ValueError, UnicodeError):
+        raise HTTPException(400, "请求必须为 JSON 对象") from None
+    required = {"username", "password"}
+    allowed = required | {"captcha"}
+    if not isinstance(payload, dict) or not (required <= set(payload) <= allowed):
+        raise HTTPException(400, "请提供学习通账号、密码，可选验证码")
+    username = _req_str(payload["username"], "账号", 128).strip()
+    password = _req_str(payload["password"], "密码", 256)
+    captcha = _req_str(payload.get("captcha", ""), "验证码", 32).strip()
+    if not username or not password.strip():
+        raise HTTPException(400, "请填写学习通账号和密码")
+    try:
+        username.encode("utf-8")
+        password.encode("utf-8")
+    except UnicodeError:
+        raise HTTPException(400, "学习通账号或密码包含无效字符") from None
+    return await _chaoxing_operation(notifications.login, username, password, captcha)
+
+
+async def _sms_payload(request: Request, field: str) -> tuple[str, str]:
+    try:
+        payload = await request.json()
+    except (ValueError, UnicodeError):
+        raise HTTPException(400, "请求必须为 JSON 对象") from None
+    if not isinstance(payload, dict) or set(payload) != {"username", field}:
+        raise HTTPException(400, "短信登录参数不完整或包含未知字段")
+    username, value = payload["username"], payload[field]
+    if not isinstance(username, str) or not re.fullmatch(r"1[0-9]{10}", username):
+        raise HTTPException(400, "请输入 11 位手机号")
+    if not isinstance(value, str):
+        raise HTTPException(400, "验证码参数必须是字符串")
+    if field == "code":
+        valid = re.fullmatch(r"[0-9]{6}", value)
+    else:
+        valid = 1 <= len(value) <= 4096 and value.strip() == value and bool(value.strip())
+    if not valid:
+        raise HTTPException(400, "请输入 6 位短信验证码" if field == "code" else "请先完成人工验证")
+    try:
+        value.encode("utf-8")
+    except UnicodeError:
+        raise HTTPException(400, "验证码参数包含无效字符") from None
+    return username, value
+
+
+@app.post("/api/chaoxing/sms/send")
+async def post_chaoxing_sms_send(request: Request):
+    username, validate = await _sms_payload(request, "validate")
+    return await _chaoxing_operation(notifications.send_sms, username, validate)
+
+
+@app.post("/api/chaoxing/sms/login")
+async def post_chaoxing_sms_login(request: Request):
+    username, code = await _sms_payload(request, "code")
+    return await _chaoxing_operation(notifications.login_sms, username, code)
+
+
+@app.post("/api/chaoxing/disconnect")
+async def post_chaoxing_disconnect():
+    return await _chaoxing_operation(notifications.disconnect)
+
+
+@app.post("/api/chaoxing/options")
+async def post_chaoxing_options(options: dict):
+    if options.keys() - {"enabled", "push_enabled"}:
+        raise HTTPException(400, "仅支持 enabled 和 push_enabled")
+    if any(type(v) is not bool for v in options.values()):
+        raise HTTPException(400, "学习通开关必须是布尔值")
+    return await _chaoxing_operation(notifications.set_options, options)
+
+
+@app.get("/api/notifications")
+def get_notifications(kind: Literal["all", "homework", "notice", "expired"] = "all",
+                      unread: Literal["true", "false"] = "false",
+                      limit: str = Query("100", pattern=r"^[1-9][0-9]{0,2}$")):
+    count = int(limit)
+    if count > 500:
+        raise HTTPException(400, "limit 需在 1–500 之间")
+    return notifications.list_items(get_current_user(), kind, unread == "true", count)
+
+
+@app.post("/api/notifications/homework-status")
+def post_homework_status(payload: dict):
+    if payload.keys() != {"id", "status"}:
+        raise HTTPException(400, "仅支持且必须提供 id 和 status")
+    notification_id, status = payload["id"], payload["status"]
+    if type(notification_id) is not int or not 1 <= notification_id <= 2**63 - 1:
+        raise HTTPException(400, "id 必须是有效作业 ID")
+    if not isinstance(status, str) or status not in {"completed", "pending", ""}:
+        raise HTTPException(400, "status 必须是 completed、pending 或空字符串")
+    try:
+        return db.set_homework_status(get_current_user(), notification_id, status)
+    except LookupError:
+        raise HTTPException(404, "作业不存在") from None
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from None
+
+
+@app.post("/api/notifications/read")
+def post_notifications_read(payload: dict):
+    if payload.keys() - {"ids", "all"}:
+        raise HTTPException(400, "仅支持 ids 和 all")
+    all_items = payload.get("all", False)
+    ids = payload.get("ids", [])
+    if type(all_items) is not bool:
+        raise HTTPException(400, "all 必须是布尔值")
+    if (not isinstance(ids, list) or len(ids) > 500
+            or any(type(i) is not int or not 1 <= i <= 2**63 - 1 for i in ids)):
+        raise HTTPException(400, "ids 必须是最多含 500 个有效通知 ID 的数组")
+    updated = db.mark_notifications_read(get_current_user(), ids, all_items)
+    return {"ok": True, "updated": updated}
+
+
+@app.post("/api/notifications/sync")
+async def post_notifications_sync():
+    return await _chaoxing_operation(notifications.sync)
 
 
 class ZfTestRequest(BaseModel):
@@ -1702,6 +1879,7 @@ async def auth_register(req: RegisterRequest, request: Request):
         for key in ("school", "semester_start", "total_weeks", "section_times"):
             clean[key] = template.get(key, clean.get(key))
         clean["security"] = {"enabled": False, "token": "", "allowed_origins": []}
+    clean["chaoxing"] = dict(DEFAULT_CONFIG["chaoxing"])
 
     # 注册选填正方凭据后先使用正方；auto 允许后续接入门户时立即优先门户。
     # 只在两项都填了时才配置，避免「有密码没学号」产生半成品凭证。
@@ -1805,6 +1983,7 @@ def _require_admin() -> dict:
 async def auth_users(q: str = "", sort: str = "id"):
     _require_admin()
     from .config import portal_configured, zhengfang_configured
+    from .push import channel_ready, CHANNELS, CHANNEL_NAMES
     users = db.list_users(q, sort)
     # 附带每个用户「配了哪些数据源」，供管理列表在用户名旁上色显示，
     # 不返回任何凭据内容，只给布尔状态。
@@ -1812,6 +1991,17 @@ async def auth_users(q: str = "", sort: str = "id"):
         cfg = db.get_user_config(u["id"])
         u["portal_configured"] = portal_configured(cfg)
         u["zhengfang_configured"] = zhengfang_configured(cfg)
+        # 推送渠道配置状态：只返回是否已配置、是否启用，不返回具体凭据。
+        push = cfg.get("push") or {}
+        push_status = {}
+        for ch in CHANNELS:
+            ready, _ = channel_ready(cfg, ch)
+            push_status[ch] = {
+                "configured": ready,
+                "enabled": push.get(f"{ch}_enabled") is True,
+                "name": CHANNEL_NAMES.get(ch, ch)
+            }
+        u["push_status"] = push_status
     return {"users": users}
 
 

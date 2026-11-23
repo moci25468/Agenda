@@ -31,6 +31,7 @@ REMINDER_JOB_ID = "class_reminders"
 NEXT_DAY_JOB_ID = "next_day_summary"
 BACKUP_JOB_ID = "daily_backup"
 SYNC_CHECK_JOB_ID = "daily_sync_check"
+NOTIFICATION_JOB_ID = "chaoxing_notifications"
 
 # 自动同步窗口：用户不再自设时间，服务器按注册人数把所有人均匀铺进这个窗口，
 # 一人一个时段，避免同一分钟集中打门户（也避免续期浏览器排队）。
@@ -763,6 +764,29 @@ def _next_day_job_wrapper():
             current_user_id.reset(ctx)
 
 
+def _notification_job_wrapper():
+    """学习通轮询使用独立任务和事件循环，不访问应用的异步 Redis 客户端。"""
+    from . import notifications
+
+    async def poll():
+        semaphore = asyncio.Semaphore(3)
+
+        async def poll_user(user_id: int):
+            async with semaphore:
+                try:
+                    await notifications.sync(user_id, scheduled=True)
+                except notifications.BusyError:
+                    pass
+                except Exception:
+                    # 单个用户失败不影响其他用户，不记录可能包含会话的异常。
+                    pass
+
+        user_ids = await asyncio.to_thread(db.list_user_ids)
+        await asyncio.gather(*(poll_user(user_id) for user_id in user_ids))
+
+    asyncio.run(poll())
+
+
 def _backup_job_wrapper():
     """每日备份整库与全局配置；不分用户，失败只打日志，不影响其他任务。"""
     from .backup import backup_now
@@ -801,6 +825,11 @@ def start_scheduler(cfg: dict):
     _scheduler.add_job(
         _sync_check_wrapper, IntervalTrigger(minutes=1, timezone=TZ),
         id=SYNC_CHECK_JOB_ID, replace_existing=True, max_instances=1,
+        coalesce=True, misfire_grace_time=120,
+    )
+    _scheduler.add_job(
+        _notification_job_wrapper, IntervalTrigger(minutes=1, timezone=TZ),
+        id=NOTIFICATION_JOB_ID, replace_existing=True, max_instances=1,
         coalesce=True, misfire_grace_time=120,
     )
     # 每天凌晨备份一次数据库；进程启动时当天还没备份就补一份
