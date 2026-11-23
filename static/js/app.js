@@ -1158,6 +1158,7 @@
           const data = await api("/api/rooms/free?" + params.toString());
           if (!roomPopIsCurrent(st, seq)) return;
           st.rooms = data.rooms || [];
+          st.updatedAt = data.cache_source === "shared_week" ? data.updated_at : null;
           roomPopRender();
         } catch (e) {
           if (roomPopIsCurrent(st, seq)) roomPopMessage("查询失败", e.message || "请稍后重试");
@@ -1182,9 +1183,17 @@
               (b.seats || 0) - (a.seats || 0) ||
               String(a.name).localeCompare(String(b.name), "zh"),
           );
-        $("#roomPopCount").textContent = minSeats
+        const count = minSeats
           ? `${rooms.length} 间（共 ${total} 间）`
           : `共 ${total} 间空教室`;
+        const updated = st.updatedAt ? new Date(st.updatedAt) : null;
+        const stamp = updated && !Number.isNaN(updated.getTime())
+          ? new Intl.DateTimeFormat("zh-CN", {
+              timeZone: "Asia/Shanghai", month: "numeric", day: "numeric",
+              hour: "2-digit", minute: "2-digit", hour12: false,
+            }).format(updated)
+          : "";
+        $("#roomPopCount").textContent = stamp ? `${count} · 快照更新 ${stamp}` : count;
         if (!rooms.length) {
           // 空态保留计数（如「0 间（共 2 间）」），比纯提示更能说明是筛选所致
           $("#roomPopList").innerHTML =

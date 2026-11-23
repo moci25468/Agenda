@@ -733,7 +733,8 @@ class ZhengfangProvider(TimetableProvider):
         return await self._room_call(_call)
 
     async def fetch_free_rooms(self, week: int, day: int, jc_start: int, jc_end: int,
-                               campus: str = "", building: str = "") -> list[dict]:
+                               campus: str = "", building: str = "", *,
+                               strict: bool = False) -> list[dict]:
         """查第 week 周星期 day（1-7）第 jc_start..jc_end 节没课的教室。"""
         async def _call(client: httpx.AsyncClient) -> list[dict]:
             rooms: list[dict] = []
@@ -753,9 +754,17 @@ class ZhengfangProvider(TimetableProvider):
                     payload = r.json()
                 except ValueError:
                     raise AuthExpiredError(LOGIN_EXPIRED_MSG)
+                if strict and (not isinstance(payload, dict)
+                               or not isinstance(payload.get("items"), list)):
+                    raise ValueError("Invalid room response")
                 items = payload.get("items") or []
-                rooms.extend(parse_room(it) for it in items if isinstance(it, dict))
                 total_page = _to_int(payload.get("totalPage"), 1)
+                if strict and (any(not isinstance(it, dict) or not it.get("cd_id") for it in items)
+                               or (not items and (page > 1 or total_page > 1))):
+                    raise ValueError("Incomplete room response")
+                rooms.extend(parse_room(it) for it in items if isinstance(it, dict))
+                if strict and page < total_page and len(rooms) >= 2000:
+                    raise ValueError("Room results exceed pagination limit")
                 if page >= total_page or not items or len(rooms) >= 2000:
                     break
                 page += 1

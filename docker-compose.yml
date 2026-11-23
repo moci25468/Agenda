@@ -1,7 +1,17 @@
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: qut-campus-assistant-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    expose:
+      - "6379"
+
   campus-assistant:
     build: .
     container_name: qut-campus-assistant
+    depends_on:
+      - redis
     restart: unless-stopped
     ports:
       # 只绑定回环地址：本项目 API 默认无鉴权且配置内含门户 Cookie，
@@ -12,3 +22,8 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - CAMPUS_DATA_DIR=/data
+      - REDIS_URL=redis://redis:6379/0
+      - AGENDA_CACHE_PREFIX=agenda:v1
+      - REDIS_TIMEOUT=0.25
+      - AGENDA_ROOMS_SHARED_SEMESTER_START=${AGENDA_ROOMS_SHARED_SEMESTER_START:-}
+      - AGENDA_ROOMS_SHARED_COOKIE=${AGENDA_ROOMS_SHARED_COOKIE:-}

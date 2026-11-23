@@ -12,6 +12,8 @@ import time
 
 import httpx
 
+from . import cache as shared_cache
+
 API = "https://api.open-meteo.com/v1/forecast"
 # 备用源：部分服务器（尤其境内 VPS）访问 Open-Meteo 会 SSL 握手超时，
 # 用 wttr.in 兜底，它返回逐小时数据且无需 Key。按 地点名 查询。
@@ -168,6 +170,14 @@ async def fetch_hourly(lat: float, lon: float) -> dict:
     now = time.monotonic()
     if hit and now - hit[0] < (CACHE_TTL if hit[1] else FAIL_TTL):
         return hit[1]
+    # Redis shares successful weather data across app restarts/workers. Keep the
+    # existing memory cache as L1 and as the fallback when Redis is unavailable.
+    redis_key = f"weather:v1:{key[0]:.2f}:{key[1]:.2f}"
+    shared = await shared_cache.get(redis_key)
+    if isinstance(shared, dict) and shared:
+        _cache[key] = (now, shared)
+        _last_good[key] = (now, shared)
+        return shared
     params = _params(lat, lon)
     out: dict = {}
     err = ""
@@ -200,6 +210,7 @@ async def fetch_hourly(lat: float, lon: float) -> dict:
     if out:
         _last_good[key] = (now, out)
         _cache[key] = (now, out)
+        await shared_cache.set(redis_key, out, CACHE_TTL)
         return out
     entry = _last_good.get(key)
     stale = entry[1] if entry and now - entry[0] < STALE_MAX else {}
@@ -347,6 +358,7 @@ async def lesson_weather_map(cfg: dict) -> dict:
 def clear_cache():
     """测试或手动刷新用。"""
     global _primary_dead_until
+    shared_cache.clear_local("weather:")
     _cache.clear()
     _last_good.clear()
     _primary_dead_until = 0.0

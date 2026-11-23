@@ -9,7 +9,7 @@ import secrets
 import sqlite3
 import unicodedata
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import auth, browser_login, db
+from . import auth, browser_login, cache, db, room_cache
 from .config import (
     DEFAULT_CONFIG, MASK, demo_allowed, global_config, load_config, masked_config, save_config,
 )
@@ -62,14 +62,23 @@ async def _warm_weather():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_db()
+    await cache.start()
     cfg = load_config()
     start_scheduler(cfg)
     # 首次启动无课表时静默同步一次（不推送），保证打开页面即有数据
     if db.get_snapshot() is None:
         asyncio.create_task(run_sync(push=False))
     asyncio.create_task(_warm_weather())
-    yield
-    shutdown_scheduler()
+    room_task = asyncio.create_task(room_cache.run()) if room_cache.enabled() else None
+    try:
+        yield
+    finally:
+        if room_task is not None:
+            room_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await room_task
+        shutdown_scheduler()
+        await cache.close()
 
 
 app = FastAPI(title="Agenda 知序", version=get_version(), lifespan=lifespan)
@@ -748,10 +757,20 @@ async def edit_event(req: EventEditRequest):
     raise HTTPException(400, "未知操作")
 
 
-# ---------- 空教室查询（正方教务，实时） ----------
+# ---------- 空教室查询（正方教务，短时缓存） ----------
 
-def _rooms_provider() -> ZhengfangProvider:
-    cfg = load_config()
+ROOM_META_CACHE_TTL = 6 * 3600
+ROOM_FREE_CACHE_TTL = 60
+
+
+def _rooms_cache_identity(cfg: dict) -> str:
+    zf = ((cfg.get("provider") or {}).get("zhengfang") or {})
+    identity = "|".join(str(zf.get(k) or "")
+                         for k in ("base", "username", "password", "cookie"))
+    return f"u{get_current_user() or 0}:{cache.fingerprint(identity)}"
+
+
+def _rooms_provider(cfg: dict) -> ZhengfangProvider:
     if not zhengfang_configured(cfg):
         raise HTTPException(400, "空教室查询需要正方教务：请先在「课表来源」填写学号密码")
     return ZhengfangProvider(cfg)
@@ -768,15 +787,44 @@ async def rooms_meta(campus: str = ""):
     rcfg = cfg.get("rooms") or {}
     default_id = str(rcfg.get("default_campus") or "").strip()
     default_name = str(rcfg.get("default_campus_name") or "").strip()
-    provider = _rooms_provider()
+    semester_start = cfg.get("semester_start", "")
+    provider = ZhengfangProvider(cfg)
+    requested_campus = campus.strip() or default_id
+    shared = room_cache.eligible(provider, semester_start)
+
+    async def get_meta(campus_id: str) -> dict:
+        if shared:
+            snapshot = await room_cache.get_meta(provider, campus_id)
+            if snapshot is not None:
+                return snapshot
+            # 用户保存的默认校区已被撤下时，可以从共享校区列表确认并退回第一校区。
+            if not campus.strip() and campus_id == default_id and campus_id:
+                first = await room_cache.get_meta(provider, "")
+                if first is not None and all(str(c.get("id")) != campus_id
+                                             for c in first["campuses"]):
+                    return first
+        personal_provider = _rooms_provider(cfg)
+        meta_key = (
+            f"rooms:meta:v1:{_rooms_cache_identity(cfg)}:{provider.year}:{provider.term}:"
+            f"{cache.fingerprint(provider.base)}:{provider.username}:{campus_id}"
+        )
+        meta = await cache.get(meta_key)
+        if not isinstance(meta, dict):
+            meta = await personal_provider.fetch_room_meta(campus_id)
+            if isinstance(meta, dict) and meta.get("campuses"):
+                await cache.set(meta_key, meta, ROOM_META_CACHE_TTL)
+        return meta
+
     try:
-        meta = await provider.fetch_room_meta(campus.strip() or default_id)
+        meta = await get_meta(requested_campus)
         ids = {str(c.get("id")) for c in meta.get("campuses") or []}
         if default_id and default_id not in ids:
             # 教务里已经没有这个校区（换了学期或校区代码），别让下拉框空着
             default_id, default_name = "", ""
             if not campus.strip():
-                meta = await provider.fetch_room_meta("")
+                meta = await get_meta("")
+    except HTTPException:
+        raise
     except AuthExpiredError as e:
         raise HTTPException(400, str(e))
     except ValueError as e:
@@ -784,16 +832,16 @@ async def rooms_meta(campus: str = ""):
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"空教室查询失败: {e}")
     today = date.today()
-    semester_start = cfg.get("semester_start", "")
-    meta.update({
+    # 进程内缓存返回原对象，用户专属字段只写入当前响应。
+    return {
+        **meta,
         "semester_start": semester_start,
         "current_week": current_week(semester_start, today, 40),
         "today": today.isoformat(),
         "today_weekday": today.isoweekday(),
         "default_campus": default_id,
         "default_campus_name": default_name,
-    })
-    return meta
+    }
 
 
 @app.get("/api/rooms/free")
@@ -811,23 +859,44 @@ async def rooms_free(date_s: str = "", start: int = 1, end: int = 2,
     cfg = load_config()
     # 未指定校区时用「课表来源」里的默认校区，免得每次查教室都重选
     campus = campus.strip() or str((cfg.get("rooms") or {}).get("default_campus") or "").strip()
-    week = current_week(cfg.get("semester_start", ""), d, 40)
+    semester_start = cfg.get("semester_start", "")
+    week = current_week(semester_start, d, 40)
     if week < 1:
         raise HTTPException(400, "该日期还没开学，查不了空教室")
     if week > 30:
         raise HTTPException(400, "该日期超出本学期范围")
-    provider = _rooms_provider()
+    building = building.strip()
+    response = {"date": date_s, "week": week, "day": d.isoweekday(),
+                "start": start, "end": end}
+    if not building and campus and (start, end) in room_cache.SLOTS:
+        provider = ZhengfangProvider(cfg)
+        if room_cache.eligible(provider, semester_start):
+            snapshot = await room_cache.get_rooms(provider, d, campus, start, end)
+            if snapshot is not None:
+                rooms = snapshot["data"]
+                return {**response, "rooms": rooms, "count": len(rooms),
+                        "cache_source": "shared_week", "updated_at": snapshot["updated_at"]}
+
+    provider = _rooms_provider(cfg)
+    free_key = (
+        f"rooms:free:v1:{_rooms_cache_identity(cfg)}:{provider.year}:{provider.term}:"
+        f"{cache.fingerprint(provider.base)}:{provider.username}:{week}:{d.isoweekday()}:"
+        f"{start}:{end}:{campus}:{building}"
+    )
+    rooms = await cache.get(free_key)
     try:
-        rooms = await provider.fetch_free_rooms(
-            week, d.isoweekday(), start, end, campus, building.strip())
+        if not isinstance(rooms, list):
+            rooms = await provider.fetch_free_rooms(
+                week, d.isoweekday(), start, end, campus, building)
+            if isinstance(rooms, list):
+                await cache.set(free_key, rooms, ROOM_FREE_CACHE_TTL)
     except AuthExpiredError as e:
         raise HTTPException(400, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"空教室查询失败: {e}")
-    return {"rooms": rooms, "count": len(rooms), "date": date_s,
-            "week": week, "day": d.isoweekday(), "start": start, "end": end}
+    return {**response, "rooms": rooms, "count": len(rooms)}
 
 
 @app.get("/api/rooms/my-free")
