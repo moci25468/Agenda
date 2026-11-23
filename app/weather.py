@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 
 import httpx
@@ -89,6 +90,14 @@ def _params(lat: float, lon: float) -> dict:
     }
 
 
+def _number(value) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
+
+
 def _parse_hourly(data: dict) -> dict:
     """把 Open-Meteo 返回的列表结构转成 {小时键: {temp, code, pop}}。"""
     hourly = data.get("hourly") or {}
@@ -99,9 +108,9 @@ def _parse_hourly(data: dict) -> dict:
     out: dict[str, dict] = {}
     for i, t in enumerate(times):
         out[str(t)] = {
-            "temp": temps[i] if i < len(temps) else None,
-            "code": codes[i] if i < len(codes) else None,
-            "pop": pops[i] if i < len(pops) else None,
+            "temp": _number(temps[i]) if i < len(temps) else None,
+            "code": _number(codes[i]) if i < len(codes) else None,
+            "pop": _number(pops[i]) if i < len(pops) else None,
         }
     return out
 
@@ -129,9 +138,9 @@ async def _fetch_from_wttr(lat: float, lon: float) -> dict:
                 hour = int(h.get("time", 0) or 0) // 100
                 desc = ((h.get("weatherDesc") or [{}])[0] or {}).get("value", "")
                 slots[hour] = {
-                    "temp": h.get("tempC"),
+                    "temp": _number(h.get("tempC")),
                     "code": _wttr_code(desc),
-                    "pop": h.get("chanceofrain"),
+                    "pop": _number(h.get("chanceofrain")),
                 }
             if not slots:
                 continue
@@ -209,14 +218,12 @@ def _summary(item: dict | None) -> dict | None:
     if not item:
         return None
     out = {"text": describe_code(item.get("code"))}
-    try:
-        out["temp"] = round(float(item["temp"]))
-    except (KeyError, TypeError, ValueError):
-        pass
-    try:
-        out["pop"] = int(float(item["pop"]))
-    except (KeyError, TypeError, ValueError):
-        pass
+    temp = _number(item.get("temp"))
+    pop = _number(item.get("pop"))
+    if temp is not None:
+        out["temp"] = round(temp)
+    if pop is not None:
+        out["pop"] = int(pop)
     return out
 
 
@@ -283,10 +290,8 @@ async def daily_summary(cfg: dict, day_s: str) -> str:
     day_items = [v for k, v in hourly.items() if k.startswith(day_s)]
     if not day_items:
         return ""
-    temps = [round(float(v["temp"])) for v in day_items
-             if isinstance(v.get("temp"), (int, float))]
-    pops = [int(float(v["pop"])) for v in day_items
-            if isinstance(v.get("pop"), (int, float))]
+    temps = [round(n) for v in day_items if (n := _number(v.get("temp"))) is not None]
+    pops = [int(n) for v in day_items if (n := _number(v.get("pop"))) is not None]
     # 取白天时段（8~20 点）代表性天气码，避免凌晨/夜间码干扰
     day_codes = [v["code"] for k, v in hourly.items()
                  if k.startswith(day_s) and 8 <= int(k[11:13]) <= 20 and v.get("code") is not None]

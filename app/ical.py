@@ -7,9 +7,9 @@ iPhone / 安卓 / Outlook / Google 日历均可直接导入。
 from __future__ import annotations
 
 import hashlib
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
-from .models import Course, Exam, current_week, week_dates
+from .models import Course, Exam, course_uid, exam_uid, week_dates
 from .scheduler import section_time
 
 TZID = "Asia/Shanghai"
@@ -40,7 +40,7 @@ def _escape(s: str) -> str:
 
 
 def _uid(c: Course, d: date) -> str:
-    raw = f"{c.name}|{c.day}|{c.start}|{c.end}|{d.isoformat()}|{c.room}"
+    raw = f"{course_uid(c)}|{d.isoformat()}"
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:24]
 
 
@@ -120,19 +120,26 @@ def _exam_events(exams: list[Exam]) -> list[dict]:
     for e in exams:
         if not e.date:
             continue
-        # 缺省时间兜底：没有起止就全天/占 09:00-11:00，避免生成非法事件
-        start_hhmm = e.start or "09:00"
-        end_hhmm = e.end or start_hhmm
         try:
             d = date.fromisoformat(e.date)
-        except ValueError:
+            if e.start:
+                dtstart = _fmt_dt(d, e.start)
+                # 缺少结束时间时留空，由 VEVENT 用显式时长表达。
+                dtend = _fmt_dt(d, e.end) if e.end else None
+                if dtend and dtend <= dtstart:
+                    dtend = None
+            else:
+                dtstart = d.strftime("%Y%m%d")
+                dtend = (d + timedelta(days=1)).strftime("%Y%m%d")
+        except (ValueError, TypeError):
             continue
-        raw = f"exam|{e.name}|{e.date}|{e.start}|{e.end}|{e.room}|{e.seat}"
+        raw = f"exam|{exam_uid(e)}"
         uid = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:24]
         events.append({
             "uid": uid,
-            "dtstart": _fmt_dt(d, start_hhmm),
-            "dtend": _fmt_dt(d, end_hhmm),
+            "dtstart": dtstart,
+            "dtend": dtend,
+            "all_day": not bool(e.start),
             "summary": f"考试：{e.name}",
             "location": e.room,
             "description": _exam_desc(e),
@@ -147,7 +154,7 @@ def build_ical(cfg: dict, courses: list[Course], exams: list[Exam] | None = None
 
     weather_map 为 {day_s: {hhmm: 上课时天气}} 时，逐节附加天气到课程描述。
     """
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     dtstamp = now.strftime("%Y%m%dT%H%M%SZ")
     school = cfg.get("school", "") or "课程表"
     lines = [
@@ -174,10 +181,17 @@ def build_ical(cfg: dict, courses: list[Course], exams: list[Exam] | None = None
             "BEGIN:VEVENT",
             f"UID:{e['uid']}@zhi-xu",
             f"DTSTAMP:{dtstamp}",
-            f"DTSTART;TZID={TZID}:{e['dtstart']}",
-            f"DTEND;TZID={TZID}:{e['dtend']}",
-            f"SUMMARY:{_escape(e['summary'])}",
         ]
+        if e.get("all_day"):
+            lines += [f"DTSTART;VALUE=DATE:{e['dtstart']}",
+                      f"DTEND;VALUE=DATE:{e['dtend']}"]
+        else:
+            lines.append(f"DTSTART;TZID={TZID}:{e['dtstart']}")
+            if e["dtend"]:
+                lines.append(f"DTEND;TZID={TZID}:{e['dtend']}")
+            else:
+                lines.append("DURATION:PT1H")
+        lines.append(f"SUMMARY:{_escape(e['summary'])}")
         if e["location"]:
             lines.append(f"LOCATION:{_escape(e['location'])}")
         if e["description"]:

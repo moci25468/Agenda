@@ -167,6 +167,9 @@ def normalize_provider(p: dict | None) -> dict:
         "year": normalize_year(zf.get("year") or p.get("zf_year") or "") or dy,
         "term": str(zf.get("term") or p.get("zf_term") or "") or dt,
     }
+    for key in ("score_path", "score_gnmk", "score_years"):
+        if key in zf:
+            zhengfang[key] = zf[key]
     portal = {
         "url": portal.get("url") or p.get("http_url") or "",
         "method": (portal.get("method") or p.get("http_method") or "GET").upper(),
@@ -276,7 +279,11 @@ def load_config() -> dict:
     uid = current_user_id.get()
     if uid is not None:
         from . import db
-        cfg = json.loads(json.dumps(_deep_merge(DEFAULT_CONFIG, db.get_user_config(uid))))
+        stored = db.get_user_config(uid)
+        if stored.get("override_uid_version") != 2:
+            db.migrate_override_uids(uid)
+            stored = db.get_user_config(uid)
+        cfg = json.loads(json.dumps(_deep_merge(DEFAULT_CONFIG, stored)))
     else:
         cfg = global_config()
     cfg["provider"] = normalize_provider(cfg.get("provider", {}))
@@ -298,8 +305,24 @@ def save_config(cfg: dict) -> dict:
     uid = current_user_id.get()
     if uid is not None:
         from . import db
-        db.save_user_config(uid, merged)
-        return merged
+        # 只提交调用方修改的字段，事务内合并，避免覆盖并发请求。
+        patch = json.loads(json.dumps(cfg))
+        for path in MASK_PATHS:
+            if _get_path(patch, path) == MASK:
+                parts = path.split(".") if isinstance(path, str) else path
+                parent = patch
+                ancestors = []
+                for part in parts[:-1]:
+                    ancestors.append((parent, part))
+                    parent = parent.get(part, {})
+                parent.pop(parts[-1], None)
+                for container, key in reversed(ancestors):
+                    if container.get(key) == {}:
+                        container.pop(key, None)
+                    else:
+                        break
+        saved = db.patch_user_config(uid, patch)
+        return _deep_merge(DEFAULT_CONFIG, saved)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     tmp = CONFIG_PATH.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")

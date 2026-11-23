@@ -483,6 +483,93 @@ def save_user_config(user_id: int, cfg: dict):
         )
 
 
+def patch_user_config(user_id: int, patch: dict) -> dict:
+    """在写事务内深合并配置，保留其他请求更新的字段。"""
+    def merge(target: dict, changes: dict):
+        for key, value in changes.items():
+            if (key not in ("course_overrides", "exam_overrides") and value
+                    and isinstance(value, dict) and isinstance(target.get(key), dict)):
+                merge(target[key], value)
+            else:
+                target[key] = value
+
+    with get_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT data FROM user_config WHERE user_id = ?", (user_id,)).fetchone()
+        try:
+            cfg = json.loads(row["data"]) if row else {}
+        except json.JSONDecodeError:
+            cfg = {}
+        provider = cfg.get("provider")
+        if isinstance(provider, dict) and any(
+                key.startswith(("http_", "zf_")) for key in provider):
+            from .config import normalize_provider
+            # 先消除旧扁平键，再合入本次补丁，确保新 Cookie 和映射生效。
+            cfg["provider"] = normalize_provider(provider)
+        merge(cfg, patch)
+        conn.execute(
+            """INSERT INTO user_config (user_id, data) VALUES (?, ?)
+               ON CONFLICT(user_id) DO UPDATE SET data=excluded.data""",
+            (user_id, json.dumps(cfg, ensure_ascii=False)),
+        )
+    return cfg
+
+
+def migrate_override_uids(user_id: int) -> None:
+    """基于更新前快照迁移旧手动调整键；必须在下一次同步覆盖快照前完成。"""
+    import hashlib
+    from .models import Course, Exam, course_uid, exam_uid
+
+    with get_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT data FROM user_config WHERE user_id = ?", (user_id,)).fetchone()
+        if not row:
+            return
+        cfg = json.loads(row["data"])
+        if cfg.get("override_uid_version") == 2:
+            return
+        for field, table, cls, uid_fn in (
+            ("course_overrides", "snapshot", Course, course_uid),
+            ("exam_overrides", "exam_snapshot", Exam, exam_uid),
+        ):
+            snap = conn.execute(f"SELECT data FROM {table} WHERE user_id = ?", (user_id,)).fetchone()
+            mapping = {}
+            snapshot_data = json.loads(snap["data"]) if snap else []
+            for data in snapshot_data:
+                item = cls.from_dict(data)
+                if item.source_id.startswith("manual:"):
+                    continue
+                if cls is Course:
+                    parts = [item.source_id, item.name, str(item.day), str(item.start),
+                             str(item.end), ",".join(str(w) for w in sorted(item.weeks))]
+                else:
+                    parts = [item.source_id, item.name, item.date, item.start,
+                             item.end, item.room, item.seat]
+                legacy = hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:16]
+                prior_uid = item.uid
+                item.uid = ""
+                new_uid = uid_fn(item)
+                mapping[legacy] = new_uid
+                if prior_uid:
+                    mapping[prior_uid] = new_uid
+                    data["uid"] = new_uid
+            if snap:
+                conn.execute(f"UPDATE {table} SET data = ? WHERE user_id = ?",
+                             (json.dumps(snapshot_data, ensure_ascii=False), user_id))
+            ov = cfg.get(field)
+            if isinstance(ov, dict):
+                ov["hidden"] = list(dict.fromkeys(mapping.get(k, k) for k in ov.get("hidden", [])))
+                edited = ov.get("edited", {})
+                migrated = {mapping.get(k, k): value for k, value in edited.items()}
+                # 已按新标识保存的调整优先，不能被旧键迁移覆盖。
+                migrated.update({k: value for k, value in edited.items()
+                                 if mapping.get(k, k) == k})
+                ov["edited"] = migrated
+        cfg["override_uid_version"] = 2
+        conn.execute("UPDATE user_config SET data = ? WHERE user_id = ?",
+                     (json.dumps(cfg, ensure_ascii=False), user_id))
+
+
 # ---------- 用户 ----------
 
 def count_users() -> int:
@@ -565,6 +652,49 @@ def create_user(username: str, password_hash: str, display_name: str = "",
         return cur.lastrowid
 
 
+def register_user_atomic(username: str, password_hash: str, display_name: str,
+                         student_id: str, invite_code: str) -> tuple[int, bool]:
+    """原子判断首位管理员、创建账号并核销邀请码。"""
+    with get_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        first = conn.execute("SELECT 1 FROM users LIMIT 1").fetchone() is None
+        ts = now_str()
+        if not first:
+            invite = conn.execute(
+                """SELECT 1 FROM invites
+                   WHERE code = ? AND expires_at > ?
+                     AND COALESCE(used_count, 0) < COALESCE(max_uses, 1)""",
+                (invite_code, ts),
+            ).fetchone()
+            if not invite:
+                raise ValueError("邀请码无效、已用完或已过期")
+        cur = conn.execute(
+            """INSERT INTO users (username, password_hash, display_name, student_id, role, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (username, password_hash, display_name, student_id,
+             "admin" if first else "user", ts),
+        )
+        uid = cur.lastrowid
+        if not first:
+            ts = now_str()
+            changed = conn.execute(
+                """UPDATE invites
+                   SET used_count = COALESCE(used_count, 0) + 1,
+                       used_by = COALESCE(used_by, ?),
+                       used_at = COALESCE(used_at, ?)
+                   WHERE code = ? AND expires_at > ?
+                     AND COALESCE(used_count, 0) < COALESCE(max_uses, 1)""",
+                (uid, ts, invite_code, ts),
+            ).rowcount
+            if not changed:
+                raise ValueError("邀请码无效、已用完或已过期")
+            conn.execute(
+                "INSERT INTO invite_uses (code, user_id, used_at) VALUES (?, ?, ?)",
+                (invite_code, uid, ts),
+            )
+    return uid, first
+
+
 def set_user_active(user_id: int, active: bool):
     with get_conn() as conn:
         conn.execute("UPDATE users SET is_active = ? WHERE id = ?", (1 if active else 0, user_id))
@@ -622,6 +752,24 @@ def create_session(user_id: int, token: str, ttl: int) -> str:
         conn.execute("INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
                      (token, user_id, now_str(), _dt(ttl)))
     return token
+
+
+def checked_create_session(user_id: int, token: str, ttl: int,
+                           expected_password_hash: str) -> bool:
+    """仅在账号仍活跃且密码哈希未变时创建会话，避免改密竞态。"""
+    with get_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT is_active, password_hash FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+        if not row or not row["is_active"] or row["password_hash"] != expected_password_hash:
+            return False
+        conn.execute("DELETE FROM sessions WHERE expires_at < ?", (now_str(),))
+        conn.execute(
+            "INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+            (token, user_id, now_str(), _dt(ttl)),
+        )
+    return True
 
 
 def get_session_user(token: str) -> dict | None:

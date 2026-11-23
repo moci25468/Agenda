@@ -20,11 +20,26 @@ import re
 import time
 from contextlib import asynccontextmanager
 from datetime import date
+from ipaddress import ip_address
+from urllib.parse import urlsplit
 
 import httpx
 
 from ..models import Course, Exam, Score, parse_weeks
+from ..netguard import check_outbound_request, UnsafeURLError
 from .base import AuthExpiredError, TimetableProvider
+
+
+async def _check_zhengfang_request(request) -> None:
+    await check_outbound_request(request)
+    try:
+        ip = ip_address(urlsplit(str(request.url)).hostname or "")
+    except ValueError:
+        return
+    ip = getattr(ip, "ipv4_mapped", None) or ip
+    if ip.is_loopback:
+        raise UnsafeURLError("正方教务地址不允许指向本机/回环地址")
+
 
 UA = ("Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36")
@@ -185,12 +200,13 @@ class ZhengfangProvider(TimetableProvider):
         assert_safe_outbound_url(self.base, allow_http=True)
         # netguard 默认模式放行回环/私网（兼容本地 Ollama/Bark 等合法用法），
         # 但正方教务地址没有任何合法回环用途——这里显式强制封死回环与链路本地
-        host = (self.base.split("://", 1)[1] if "://" in self.base else self.base).split("/", 1)[0].split(":")[0].strip("[]").lower()
+        host = urlsplit(self.base).hostname or ""
         try:
             ip = ip_address(host)
         except ValueError:
             pass  # 域名走 netguard 已完成的校验
         else:
+            ip = getattr(ip, "ipv4_mapped", None) or ip
             if ip.is_loopback or ip.is_link_local:
                 raise _UnsafeURLError("正方教务地址不允许指向本机/回环地址")
 
@@ -201,6 +217,7 @@ class ZhengfangProvider(TimetableProvider):
             headers["Cookie"] = self.cookie
         async with httpx.AsyncClient(
             follow_redirects=True, trust_env=False, headers=headers, timeout=30,
+            event_hooks={"request": [_check_zhengfang_request]},
         ) as client:
             if not self.cookie:
                 await self._login(client)
@@ -471,7 +488,7 @@ class ZhengfangProvider(TimetableProvider):
                 exam_type=self._score_text(item, "ksxz", "ksxzmc", "cxbsmc", "examType"),
                 teacher=self._score_text(item, "xm", "jsxm", "teacher"),
                 note=self._score_text(item, "bz", "remark", "note"),
-                source_id=self._score_text(item, "id", "jxb_id", "kch_id", "cj_id"),
+                source_id=self._score_text(item, "cj_id", "id", "jxb_id", "kch_id"),
             ))
         return scores
 
@@ -629,6 +646,7 @@ class ZhengfangProvider(TimetableProvider):
         if not self.cookie and cached and cached[1] > time.time():
             async with httpx.AsyncClient(
                 follow_redirects=True, trust_env=False, timeout=30,
+                event_hooks={"request": [_check_zhengfang_request]},
                 headers={"User-Agent": UA, "Cookie": cached[0]},
             ) as client:
                 yield client

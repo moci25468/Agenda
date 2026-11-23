@@ -222,7 +222,9 @@
               : "",
             `上次同步：${esc(status.last_sync || "尚未同步")}`,
             `下次同步：${esc(status.next_sync || "-")}（每日 ${esc(status.sync_time)}）`,
-            `推送：${status.push_channels.length ? status.push_channels.join(" / ") : "未启用"}`,
+            `推送：${(status.push_channels || []).length
+              ? status.push_channels.map(pushChannelName).join(" / ")
+              : "未启用"}`,
           ]
             .filter(Boolean)
             .map((s) => `<span>${s}</span>`)
@@ -240,7 +242,7 @@
           c.room ? `<b>教室</b> ${esc(c.room)}` : "",
           c.campus ? `<b>校区</b> ${esc(c.campus)}` : "",
         ].filter(Boolean).join("　·　");
-        return `<div class="course-row course-clickable" data-name="${esc(c.name)}" data-start="${esc(c.start_time || "")}" data-end="${esc(c.end_time || "")}">
+        return `<div class="course-row course-clickable" data-name="${escAttr(c.name)}" data-start="${escAttr(c.start_time)}" data-end="${escAttr(c.end_time)}">
     <div class="course-time"><div class="range">${esc(c.start_time)}–${esc(c.end_time)}</div><div class="sections">第 ${c.start}–${c.end} 节</div></div>
     <div class="course-main">
       <div class="course-name">${esc(c.name)}<span class="row-chevron" aria-hidden="true">›</span></div>
@@ -913,7 +915,6 @@
         const maxEnd = data.courses.reduce((m, c) => Math.max(m, c.end), 10);
         for (let s = 11; s <= maxEnd; s += 2)
           blocks.push({ s, e: Math.min(s + 1, maxEnd) });
-        const blockOf = (section) => Math.floor((section - 1) / 2);
         // 课程色调色板（01 §2.3）：同名课程恒定同色，跨天跨周不跳变
         const toneOf = (name) => {
           let h = 0;
@@ -921,17 +922,16 @@
           return h % 5;
         };
         const cellHtml = (day, bi, isToday, iso) => {
+          const b = blocks[bi];
           const list = data.courses
-            .filter((c) => c.day === day && blockOf(c.start) === bi)
+            .filter((c) => c.day === day && c.start <= b.e && c.end >= b.s)
             .sort(
               (a, b) =>
                 a.start - b.start ||
                 a.end - b.end ||
                 a.name.localeCompare(b.name, "zh"),
             );
-          const b = blocks[bi];
-          // 有课的格子只展示课程；没课的格子并列给「查空教室」和「加日程」，
-          // 都按这个大节的节次/日期，方便直接给这一周的空档安排任务
+          // 跨大节的课程占用所有相交的格子；只有整格无课才显示空闲操作。
           const content = list.length
             ? list
                 .map((c) => {
@@ -1055,16 +1055,23 @@
         return nums.length ? Math.max(...nums) : 12;
       }
 
-      let roomMeta = null;     // /api/rooms/meta 缓存（校区/教学楼/节次表）
-      let roomPopState = null; // 弹层当前查询状态 {date,start,end,campus,building,rooms}
-      let roomPopBusy = false;
-      let roomPopOpen = false;
+      let roomMeta = null; // 默认校区的元数据缓存
+      let roomPopState = null;
+      let roomPopSeq = 0;
+
+      function roomPopIsCurrent(st, seq) {
+        return roomPopState === st && roomPopSeq === seq;
+      }
+      function roomPopSetQueryBusy(busy) {
+        const btn = $("#rpQueryBtn");
+        btn.disabled = busy;
+        btn.textContent = busy ? "查询中…" : "查询";
+      }
 
       function openRoomPop(anchor) {
         const layer = $("#roomPop");
         layer.classList.remove("hidden");
         layer.setAttribute("aria-hidden", "false");
-        roomPopOpen = true;
         const panel = $("#roomPopPanel");
         if (window.matchMedia("(max-width: 720px)").matches) {
           // 移动端底部面板：由 CSS 定位，清掉桌面浮层的内联坐标
@@ -1096,7 +1103,7 @@
         if (layer.classList.contains("hidden")) return;
         layer.classList.add("hidden");
         layer.setAttribute("aria-hidden", "true");
-        roomPopOpen = false;
+        roomPopState = null;
       }
       function roomPopTitle() {
         const st = roomPopState;
@@ -1114,9 +1121,7 @@
           (sub ? `<div class="rp-msg-s">${esc(sub)}</div>` : "") + `</div>`;
       }
       // 弹层筛选控件：用 meta 数据填充校区/教学楼下拉
-      function roomPopFillFilters() {
-        const m = roomMeta;
-        if (!m) return;
+      function roomPopFillFilters(m) {
         const campusSel = $("#rpCampus");
         campusSel.innerHTML = m.campuses
           .map((c) => `<option value="${escAttr(c.id)}">${esc(c.name)}</option>`)
@@ -1136,11 +1141,10 @@
       }
       async function roomPopQuery() {
         const st = roomPopState;
-        if (!st || !roomMeta || roomPopBusy) return;
-        roomPopBusy = true;
-        const btn = $("#rpQueryBtn");
-        btn.disabled = true;
-        btn.textContent = "查询中…";
+        if (!st || !st.ready) return;
+        const seq = ++roomPopSeq;
+        $("#rpBuilding").disabled = true;
+        roomPopSetQueryBusy(true);
         $("#roomPopCount").textContent = "";
         $("#roomPopList").innerHTML = skeletonRows(3);
         try {
@@ -1152,14 +1156,16 @@
             building: st.building || "",
           });
           const data = await api("/api/rooms/free?" + params.toString());
+          if (!roomPopIsCurrent(st, seq)) return;
           st.rooms = data.rooms || [];
           roomPopRender();
         } catch (e) {
-          roomPopMessage("查询失败", e.message || "请稍后重试");
+          if (roomPopIsCurrent(st, seq)) roomPopMessage("查询失败", e.message || "请稍后重试");
         } finally {
-          roomPopBusy = false;
-          btn.disabled = false;
-          btn.textContent = "查询";
+          if (roomPopIsCurrent(st, seq)) {
+            $("#rpBuilding").disabled = false;
+            roomPopSetQueryBusy(false);
+          }
         }
       }
       // 结果按座位数降序（同学找自习室基本按容量挑），最少座位为客户端过滤
@@ -1204,34 +1210,41 @@
       }
 
       // 没课的空格子 → 查空教室：先按原逻辑校验空闲（meta + my-free），
-      // 跨节课程可能让网格看起来没课、实际被占用，所以用 my-free 校验一次，
-      // 真被占用时自动改查当天最接近的空闲时段并 toast 提示；
+      // 若同期课表数据有变化，按最新空闲时段校验，必要时改查并提示。
       // 结果直接在内联弹层里展示，不再跳转独立页（该页已下线）。
       $("#weekGridScroll").addEventListener("click", async (e) => {
         const btn = e.target.closest("button[data-wc-rooms]");
-        if (!btn || btn.disabled) return;
-        btn.disabled = true;
+        if (!btn) return;
+        const wantStart = parseInt(btn.dataset.start, 10) || 1;
+        const wantEnd = parseInt(btn.dataset.end, 10) || wantStart;
+        const st = roomPopState = {
+          date: btn.dataset.date,
+          start: wantStart,
+          end: wantEnd,
+          campus: "",
+          building: "",
+          rooms: null,
+          ready: false,
+        };
+        const seq = ++roomPopSeq;
+        const campusSel = $("#rpCampus");
+        campusSel.disabled = true;
+        $("#rpBuilding").disabled = true;
+        roomPopSetQueryBusy(true);
+        openRoomPop(btn.closest(".week-cell") || btn);
+        roomPopTitle();
+        $("#roomPopCount").textContent = "";
+        $("#roomPopList").innerHTML = skeletonRows(3);
         try {
-          const wantStart = parseInt(btn.dataset.start, 10) || 1;
-          const wantEnd = parseInt(btn.dataset.end, 10) || wantStart;
-          roomPopState = {
-            date: btn.dataset.date,
-            start: wantStart,
-            end: wantEnd,
-            campus: "",
-            building: "",
-            rooms: null,
-          };
-          openRoomPop(btn.closest(".week-cell") || btn);
-          roomPopTitle();
-          $("#roomPopCount").textContent = "";
-          $("#roomPopList").innerHTML = skeletonRows(3);
-          if (!roomMeta) roomMeta = await api("/api/rooms/meta");
-          roomPopFillFilters();
-          roomPopState.campus = $("#rpCampus").value;
+          const meta = roomMeta || await api("/api/rooms/meta");
+          if (!roomPopIsCurrent(st, seq)) return;
+          roomMeta = meta;
+          roomPopFillFilters(meta);
+          st.campus = campusSel.value;
           const free = await api(
-            "/api/rooms/my-free?date_s=" + encodeURIComponent(roomPopState.date),
+            "/api/rooms/my-free?date_s=" + encodeURIComponent(st.date),
           );
+          if (!roomPopIsCurrent(st, seq)) return;
           if (free.spans === null) {
             roomPopMessage("课表还没同步", "先去「设置 → 课表来源」同步课表，再来查空教室。");
             return;
@@ -1258,15 +1271,21 @@
               `第 ${wantStart}–${wantEnd} 节有课，已改查第 ${block.start}–${block.end} 节`,
               3500,
             );
-          roomPopState.start = block.start;
-          roomPopState.end = block.end;
+          st.start = block.start;
+          st.end = block.end;
+          st.ready = true;
+          campusSel.disabled = false;
           roomPopTitle();
           await roomPopQuery();
         } catch (err) {
+          if (!roomPopIsCurrent(st, seq)) return;
           roomPopMessage("查询失败", err.message || "请稍后重试");
           toast(err.message, 4000, "error");
         } finally {
-          btn.disabled = false;
+          if (roomPopIsCurrent(st, seq)) {
+            roomPopSetQueryBusy(false);
+            $("#rpQueryBtn").disabled = !st.ready;
+          }
         }
       });
       // 弹层交互：关闭按钮 / 点遮罩 / Esc；改筛选后点「查询」重新查
@@ -1275,34 +1294,41 @@
         if (e.target === e.currentTarget) closeRoomPop();
       });
       document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape" && roomPopOpen) closeRoomPop();
+        if (e.key === "Escape" && roomPopState) closeRoomPop();
       });
       $("#rpQueryBtn").addEventListener("click", () => {
-        if (!roomPopState || !roomMeta) return;
-        roomPopState.campus = $("#rpCampus").value;
+        if (!roomPopState?.ready || $("#rpQueryBtn").disabled) return;
         roomPopState.building = $("#rpBuilding").value;
         roomPopQuery();
       });
-      // 换校区要重新取 meta（教学楼列表是跟着校区走的）
+      // 切校区时让旧查询失效，等新教学楼列表就绪后再允许查询。
       $("#rpCampus").addEventListener("change", async (e) => {
-        if (!roomPopOpen) return;
-        const campus = e.target.value;
-        if (roomPopState) roomPopState.campus = campus;
+        const st = roomPopState;
+        if (!st?.ready) return;
+        const seq = ++roomPopSeq;
+        const campusSel = e.target;
+        const campus = campusSel.value;
         const bSel = $("#rpBuilding");
         bSel.disabled = true;
+        roomPopSetQueryBusy(true);
+        roomPopMessage("正在加载教学楼…");
         try {
-          roomMeta = await api(
-            "/api/rooms/meta?campus=" + encodeURIComponent(campus),
-          );
-          roomPopFillFilters();
+          const meta = await api("/api/rooms/meta?campus=" + encodeURIComponent(campus));
+          if (!roomPopIsCurrent(st, seq)) return;
+          roomPopFillFilters(meta);
+          st.campus = campusSel.value;
+          st.building = "";
+          roomPopMessage("请选择教学楼或直接点击「查询」");
         } catch (err) {
-          toast(err.message, 4000, "error");
+          if (!roomPopIsCurrent(st, seq)) return;
+          campusSel.value = st.campus;
+          roomPopMessage("加载教学楼失败", err.message || "请稍后重试");
         } finally {
-          bSel.disabled = false;
+          if (roomPopIsCurrent(st, seq)) {
+            bSel.disabled = false;
+            roomPopSetQueryBusy(false);
+          }
         }
-      });
-      $("#rpBuilding").addEventListener("change", (e) => {
-        if (roomPopState) roomPopState.building = e.target.value;
       });
 
       /* ---------- 编辑课表 ---------- */
@@ -1986,8 +2012,15 @@
         return path.split(".").reduce((o, k) => (o == null ? o : o[k]), obj);
       }
 
+      let settingsDirty = false;
+      let settingsEditVersion = 0;
+      let settingsLoadSeq = 0;
       async function loadSettings() {
+        if (settingsDirty) return;
+        const seq = ++settingsLoadSeq;
+        const version = settingsEditVersion;
         const cfg = await api("/api/settings");
+        if (seq !== settingsLoadSeq || version !== settingsEditVersion || settingsDirty) return;
         $$("#tab-settings [name]").forEach((el) => {
           const v = getNested(cfg, el.name);
           if (v !== undefined && v !== null)
@@ -2009,6 +2042,8 @@
       }
       /* ---------- 保存条：仅在有未保存改动时显示（避免滚动时常驻突兀） ---------- */
       function setSettingsDirty(on) {
+        settingsDirty = on;
+        if (on) ++settingsEditVersion;
         const bar = document.querySelector("#tab-settings > .form-actions");
         if (!bar) return;
         bar.classList.toggle("hidden", !on);
@@ -2089,16 +2124,14 @@
         el.addEventListener("input", () => setFieldError(el, fieldError(el)));
         el.addEventListener("blur", () => setFieldError(el, fieldError(el)));
       });
-      // 任意表单控件变动都标记为未保存（事件委托，覆盖文本框/下拉/复选框）
+      // 只跟踪由 /api/settings 保存的字段，排除独立保存的课表来源和管理表单。
       (function bindSettingsDirty() {
         const root = document.getElementById("tab-settings");
         if (!root) return;
         const onChange = (e) => {
           const t = e.target;
-          // 主题开关即时生效、存在本机浏览器，既不算改动也不清掉其他字段的未保存状态
-          if (t.closest && t.closest("#themeSwitches")) return;
-          if (t.closest("button")) return; // 普通按钮点击不算改动
-          setSettingsDirty(true);
+          if (t.closest("#themeSwitches, #tab-source, #tab-admin")) return;
+          if (t.matches("[name], input.switch-input")) setSettingsDirty(true);
         };
         root.addEventListener("input", onChange);
         root.addEventListener("change", onChange);
@@ -2129,13 +2162,15 @@
       }
       async function saveSettings(syncAfter = false) {
         if (!validateSettings()) return;
+        const version = settingsEditVersion;
         try {
           await api("/api/settings", {
             method: "POST",
             body: JSON.stringify(collectSettings()),
           });
+          ++settingsLoadSeq;
           toast("设置已保存");
-          setSettingsDirty(false);
+          if (version === settingsEditVersion) setSettingsDirty(false);
           await loadStatus();
           weatherData = null;   // 位置可能改过，重新取一次天气
           loadWeather({ force: true });
@@ -2292,6 +2327,7 @@
             .join("");
         } catch (e) { toast(e.message, 4000, "error"); }
       }
+      let adminUsersById = new Map();
       async function loadAdminUsers() {
         if (!currentUser || currentUser.role !== "admin") return;
         try {
@@ -2317,6 +2353,7 @@
                 </div>
               </div>`;
           });
+          adminUsersById = new Map(us.users.map((u) => [String(u.id), u]));
           $("#adminUserList").innerHTML = rows.length
             ? rows.join("")
             : '<div class="empty">暂无用户</div>';
@@ -2869,6 +2906,11 @@
           btn.disabled = false;
         }
       });
+      // 推送通道中文名：与后端 app/push.py 的 CHANNEL_NAMES 对齐，未知渠道原样显示
+      function pushChannelName(channel) {
+        const cn = { bark: "Bark", wecom: "企业微信", none: "未启用" };
+        return cn[channel] || channel || "未知通道";
+      }
       async function loadPushLog() {
         showSkeleton($("#pushLogList"), 3);
         try {
@@ -3526,11 +3568,11 @@
 
       /* ---------- 编辑用户信息（弹窗） ---------- */
       let editUserId = null;
-      function openEditUser(id, username, displayName, studentId) {
-        editUserId = id;
-        $("#editUserName").textContent = username;
-        $("#editUserDisplay").value = displayName || "";
-        $("#editUserStudent").value = studentId || "";
+      function openEditUser(user) {
+        editUserId = user.id;
+        $("#editUserName").textContent = user.username;
+        $("#editUserDisplay").value = user.display_name ?? "";
+        $("#editUserStudent").value = user.student_id ?? "";
         $("#editUserError").textContent = "";
         $("#editUserSheet").classList.remove("hidden");
         setTimeout(() => $("#editUserDisplay").focus(), 0);
@@ -3556,12 +3598,14 @@
           });
           toast("用户信息已更新", 2500, "success");
           closeEditUser();
-          await loadAdminUsers();
-          await loadAdminLog();
         } catch (err) {
           $("#editUserError").textContent = err.message;
+          return;
+        } finally {
           $("#editUserSaveBtn").disabled = false;
         }
+        await loadAdminUsers();
+        await loadAdminLog();
       });
 
       /* ---------- 用户管理操作（事件委托） ---------- */
@@ -3572,13 +3616,8 @@
         const act = btn.dataset.act;
         try {
           if (act === "edit") {
-            const row = btn.closest(".admin-user-row");
-            const nameEl = row.querySelector("b");
-            const infoEl = row.querySelector(".muted");
-            const [displayName, studentId] = infoEl
-              ? infoEl.textContent.split("·").map((s) => s.trim())
-              : ["", ""];
-            openEditUser(id, nameEl ? nameEl.textContent : "", displayName, studentId.replace(/^学号\s*/, ""));
+            const user = adminUsersById.get(id);
+            if (user) openEditUser(user);
             return;
           }
           if (act === "toggle-active") {
@@ -3660,6 +3699,7 @@
           $("#changePwdSheet").classList.add("hidden");
         } catch (err) {
           $("#cpError").textContent = err.message;
+        } finally {
           $("#confirmChangePwdBtn").disabled = false;
         }
       });

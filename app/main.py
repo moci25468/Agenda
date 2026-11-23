@@ -49,7 +49,6 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 # 注册串行化：避免「count_users()==0 判定首个管理员」在并发下产生两个 admin，
 # 也避免「先查重再插入」的竞态（单进程足够；多 worker 由 UNIQUE 约束兜底）。
-_REGISTER_LOCK = asyncio.Lock()
 
 
 async def _warm_weather():
@@ -126,7 +125,7 @@ def _subscribe_user_by_token(token: str) -> tuple[int, dict] | None:
     if not token:
         return None
     from . import db as _db
-    for uid in _db.list_user_ids(active_only=False):
+    for uid in _db.list_user_ids(active_only=True):
         cfg = _db.get_user_config(uid)
         if cfg.get("calendar_subscribe_token") == token:
             return uid, cfg
@@ -264,15 +263,12 @@ async def status():
         [Course.from_dict(d) for d in snap["courses"]] if snap else [],
         cfg.get("course_overrides"))
     exam_snap = db.get_exam_snapshot()
-    upcoming_exams = []
-    if exam_snap:
-        all_exams = apply_exam_overrides(
-            [Exam.from_dict(d) for d in exam_snap["exams"]],
-            cfg.get("exam_overrides"))
-        for e in all_exams:
-            if not e.is_finished():
-                upcoming_exams.append(e)
-        upcoming_exams.sort(key=lambda e: (e.date or "9999-12-31", e.start or "23:59"))
+    all_exams = apply_exam_overrides(
+        [Exam.from_dict(d) for d in exam_snap["exams"]] if exam_snap else [],
+        cfg.get("exam_overrides"))
+    upcoming_exams = sorted(
+        (e for e in all_exams if not e.is_finished()),
+        key=lambda e: (e.date or "9999-12-31", e.start or "23:59"))
     from .config import resolve_course_source, portal_configured, zhengfang_configured
     resolved = resolve_course_source(cfg)
     portal_ok = portal_configured(cfg)
@@ -340,8 +336,8 @@ async def timetable(week: int | None = None):
     # 考试也是日程的一部分：今日/明日时间线直接带上，考完前一直显示
     exam_snap = db.get_exam_snapshot()
     exam_items = apply_exam_overrides(
-        [Exam.from_dict(d) for d in exam_snap["exams"]],
-        _exam_overrides(cfg)) if exam_snap else []
+        [Exam.from_dict(d) for d in exam_snap["exams"]] if exam_snap else [],
+        _exam_overrides(cfg))
 
     def exams_on_day(day_s: str) -> list[dict]:
         picked = sorted((e for e in exam_items if e.date == day_s),
@@ -447,8 +443,7 @@ async def get_subscribe_info(request: Request):
     token = (cfg.get("calendar_subscribe_token") or "").strip()
     if not token:
         token = secrets.token_urlsafe(32)
-        cfg["calendar_subscribe_token"] = token
-        save_config(cfg)
+        save_config({"calendar_subscribe_token": token})
 
     # 用请求里的 host 拼绝对地址，兼容本地/线上
     host = request.headers.get("host", "")
@@ -466,9 +461,7 @@ async def get_subscribe_info(request: Request):
 @app.post("/api/export/subscribe/regenerate")
 async def regenerate_subscribe_token():
     """重新生成订阅 token（防止链接泄露后他人继续订阅）。旧 token 立即失效。"""
-    cfg = load_config()
-    cfg["calendar_subscribe_token"] = secrets.token_urlsafe(32)
-    save_config(cfg)
+    save_config({"calendar_subscribe_token": secrets.token_urlsafe(32)})
     return {"ok": True}
 
 
@@ -506,7 +499,10 @@ def _course_form(data: dict) -> dict:
         weeks = [w for w in weeks if w <= 60]
     else:
         text = str(raw_weeks or "").strip()
-        weeks, derived = parse_weeks(text)
+        try:
+            weeks, derived = parse_weeks(text)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
         if text and not weeks:
             raise HTTPException(400, "周次无法识别，请用 1-16、1-15(单)、3,5,7 这类写法")
         if not note:
@@ -864,22 +860,8 @@ async def exams():
     has_source = bool(zhengfang_configured(cfg) or portal_configured(cfg))
     overrides = _exam_overrides(cfg)
     snap = db.get_exam_snapshot()
-    if not snap:
-        return {
-            "exams": [], "upcoming": [], "finished": [],
-            "source": None, "fetched_at": None,
-            "provider": ptype,
-            "is_demo": demo_allowed() and ptype == "mock",
-            "supported": supported,
-            "has_source": has_source,
-            "hidden_count": len(overrides["hidden"]),
-            "edited_count": len(overrides["edited"]),
-            "added_count": len(overrides["added"]),
-            "has_overrides": bool(overrides["hidden"] or overrides["edited"]
-                                  or overrides["added"]),
-        }
     items = apply_exam_overrides(
-        [Exam.from_dict(d) for d in snap["exams"]], overrides)
+        [Exam.from_dict(d) for d in snap["exams"]] if snap else [], overrides)
     items.sort(key=lambda e: (e.is_finished(), e.date or "9999-12-31",
                               e.start or "23:59", e.name))
     manual_ids = {str(x.get("source_id") or x.get("uid") or "")
@@ -900,9 +882,9 @@ async def exams():
         "finished": finished,
         "today": date.today().isoformat(),
         "provider": ptype,
-        "source": snap["source"],
-        "fetched_at": snap["fetched_at"],
-        "is_demo": demo_allowed() and snap["source"] == "mock",
+        "source": (snap or {}).get("source"),
+        "fetched_at": (snap or {}).get("fetched_at"),
+        "is_demo": demo_allowed() and (snap or {}).get("source") == "mock",
         "supported": supported,
         "has_source": has_source,
         "hidden_count": len(overrides["hidden"]),
@@ -1044,9 +1026,9 @@ async def grades():
         "groups": groups,
         "today": date.today().isoformat(),
         "provider": ptype,
-        "source": snap["source"],
-        "fetched_at": snap["fetched_at"],
-        "is_demo": demo_allowed() and snap["source"] == "mock",
+        "source": (snap or {}).get("source"),
+        "fetched_at": (snap or {}).get("fetched_at"),
+        "is_demo": demo_allowed() and (snap or {}).get("source") == "mock",
         "supported": supported,
         "has_source": has_source,
         "current_term": current_term,
@@ -1444,8 +1426,9 @@ async def import_curl(req: CurlImport):
     portal["headers"] = parsed["headers"]
     portal["body"] = parsed["body"]
     p["portal"] = portal
-    p["type"] = "portal" if "qut.edu.cn" in parsed["url"] else "httpjson"
-    p["primary"] = p.get("primary") or "auto"
+    host = (urlsplit(parsed["url"]).hostname or "").lower()
+    p["type"] = "portal" if (host == "qut.edu.cn" or host.endswith(".qut.edu.cn")) else "httpjson"
+    p["primary"] = "auto"
     warnings = diagnose_url(parsed["url"])
     lower_headers = {str(k).lower() for k in parsed["headers"]}
     if not lower_headers & {"cookie", "authorization", "x-token", "x-access-token", "token"}:
@@ -1455,20 +1438,19 @@ async def import_curl(req: CurlImport):
               "list_path": "", "mapping": {}, "course_count": 0, "sample": None,
               "raw_preview": "", "error": None, "analysis": None, "warnings": warnings}
     try:
-        provider = get_provider(cfg)
+        kind = "httpjson" if cfg["provider"].get("type") == "httpjson" else "portal"
+        provider = get_provider(cfg, kind)
         payload = await provider.fetch_raw()
     except AuthExpiredError as e:
-        save_config(cfg)
         result["error"] = str(e)
         return result
     except Exception as e:  # noqa: BLE001
-        save_config(cfg)
         result["error"] = f"试拉取失败：{e}"
         return result
     path, mapping = guess_mapping(payload)
-    p["portal"]["list_path"] = path
-    p["portal"]["mapping"] = mapping
-    save_config(cfg)
+    portal["list_path"] = path
+    portal["mapping"] = mapping
+    save_config({"provider": {"portal": portal, "type": p["type"], "primary": "auto"}})
     result.update({"list_path": path, "mapping": mapping,
                    "raw_preview": _json.dumps(payload, ensure_ascii=False)[:4000],
                    "analysis": analyze_payload(payload)})
@@ -1524,7 +1506,8 @@ async def provider_preview():
 
     cfg = load_config()
     try:
-        provider = get_provider(cfg)
+        kind = "httpjson" if cfg["provider"].get("type") == "httpjson" else "portal"
+        provider = get_provider(cfg, kind)
         payload = await provider.fetch_raw()
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, str(e))
@@ -1632,26 +1615,15 @@ async def auth_register(req: RegisterRequest, request: Request):
     if err:
         raise HTTPException(400, err)
     username = req.username.strip()
-    async with _REGISTER_LOCK:
-        if db.get_user_by_username(username):
-            raise HTTPException(400, "用户名已存在")
-        first = db.count_users() == 0
-        code = _normalize_invite_code(req.invite)
-        if not first and not db.get_valid_invite(code):
-            raise HTTPException(400, "邀请码无效、已用完或已过期")
-        hashed = await run_in_threadpool(auth.hash_password, req.password)
-        try:
-            uid = db.create_user(username, hashed,
-                                 (req.display_name or "").strip()[:40],
-                                 (req.student_id or "").strip()[:32],
-                                 "admin" if first else "user")
-        except sqlite3.IntegrityError:
-            # 并发注册同一用户名：靠 UNIQUE 约束兜底，回 400 而不是 500
-            raise HTTPException(400, "用户名已存在")
-    if not first and not db.consume_invite(code, uid):
-        # 并发抢最后一个名额：回滚刚建好的账号，避免绕过次数限制
-        db.delete_user(uid)
-        raise HTTPException(400, "邀请码刚刚被用完，请换一个")
+    hashed = await run_in_threadpool(auth.hash_password, req.password)
+    try:
+        uid, first = db.register_user_atomic(
+            username, hashed, (req.display_name or "").strip()[:40],
+            (req.student_id or "").strip()[:32], _normalize_invite_code(req.invite))
+    except sqlite3.IntegrityError:
+        raise HTTPException(400, "用户名已存在")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     template = global_config()
     if first:
         # 第一个账号继承现有的单用户配置与课表（快照 user_id=1 已迁移）
@@ -1662,8 +1634,7 @@ async def auth_register(req: RegisterRequest, request: Request):
             clean[key] = template.get(key, clean.get(key))
         clean["security"] = {"enabled": False, "token": "", "allowed_origins": []}
 
-    # 注册时选填了学号 + 正方密码：直接写进该用户的正方 provider，
-    # 并显式设 primary=zhengfang，保证首次同步走正方（即使日后配了门户也不被抢回）。
+    # 注册选填正方凭据后先使用正方；auto 允许后续接入门户时立即优先门户。
     # 只在两项都填了时才配置，避免「有密码没学号」产生半成品凭证。
     sid = (req.student_id or "").strip()
     zf_pwd = (req.zhengfang_password or "").strip()
@@ -1679,7 +1650,7 @@ async def auth_register(req: RegisterRequest, request: Request):
         provider["zhengfang"] = zf
         if provider.get("type") == "mock":
             provider["type"] = "zhengfang"
-        provider["primary"] = "zhengfang"
+        provider["primary"] = "auto"
         clean["provider"] = provider
     db.save_user_config(uid, clean)
 
@@ -1706,10 +1677,12 @@ async def auth_login(req: LoginRequest, request: Request):
         pw_ok = await run_in_threadpool(auth.verify_password, req.password, user["password_hash"])
     if not user or not user["is_active"] or not pw_ok:
         raise HTTPException(400, "用户名或密码错误")
+    token = auth.new_token()
+    if not db.checked_create_session(user["id"], token, auth.SESSION_TTL_SECONDS,
+                                     user["password_hash"]):
+        raise HTTPException(400, "账号状态或密码已变更，请重新登录")
     auth.clear_rate_limit(key)
     db.set_last_login(user["id"])
-    token = auth.new_token()
-    db.create_session(user["id"], token, auth.SESSION_TTL_SECONDS)
     resp = JSONResponse({"ok": True, "user": _public_user(user)})
     _session_cookie(resp, request, token)
     return resp
@@ -2089,8 +2062,7 @@ async def set_provider_primary(req: PrimaryRequest):
         raise HTTPException(400, "还没配置正方教务，请先填学号密码")
     if req.primary == "portal" and not portal_configured(cfg):
         raise HTTPException(400, "还没配置门户，请先扫码登录或导入 cURL")
-    cfg["provider"]["primary"] = req.primary
-    save_config(cfg)
+    save_config({"provider": {"primary": req.primary}})
     result = await run_sync(push=False)
     return {"ok": bool(result.get("ok")), "primary": req.primary,
             "resolved": resolve_course_source(load_config()),
@@ -2160,12 +2132,12 @@ async def save_zhengfang(req: ZhengfangSaveRequest):
     if p.get("type") == "mock":
         p["type"] = "zhengfang"
     p["primary"] = p.get("primary") or "auto"
-    save_config(cfg)  # 先存凭证；学期等测试成功再回写
+    save_config({"provider": {"zhengfang": zf, "type": p["type"], "primary": p["primary"]}})
 
     if not req.test:
         zf["year"] = normalize_year(req.year) or default_term()[0]
         zf["term"] = str(req.term or default_term()[1])
-        save_config(cfg)
+        save_config({"provider": {"zhengfang": zf}})
         return {"ok": True, "message": "已保存正方账号（未测试）",
                 "year": zf["year"], "term": zf["term"]}
 
@@ -2195,9 +2167,16 @@ async def save_zhengfang(req: ZhengfangSaveRequest):
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "message": str(e)}
 
+    # 测试期间账号可能已被另一个请求修改，不能落入旧账号的课表与考试。
+    latest_zf = load_config()["provider"].get("zhengfang", {})
+    if any(latest_zf.get(key) != zf.get(key)
+           for key in ("base", "username", "password", "cookie")):
+        return {"ok": False, "message": "测试期间正方账号配置已变更，请重新测试"}
+    # 只回写测试得到的学期，避免网络等待期间覆盖其他设置或订阅令牌。
     zf["year"], zf["term"] = provider.year, provider.term
-    p["zhengfang"] = zf
-    save_config(cfg)
+    save_config({"provider": {"zhengfang": {"year": provider.year, "term": provider.term}}})
+    cfg = load_config()
+    p = cfg["provider"]
     label = term_label(provider.year, provider.term)
     message = (f"已自动切换到教务当前学期（{label}）：" if switched else f"{label}：")
     message += f"{len(courses)} 门课程"

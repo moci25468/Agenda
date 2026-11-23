@@ -62,10 +62,13 @@ def course_uid(c: Course) -> str:
         return c.uid
     if c.source_id.startswith("manual:"):
         return c.source_id
-    raw = "|".join([
-        c.source_id, c.name, str(c.day), str(c.start), str(c.end),
-        ",".join(str(w) for w in sorted(c.weeks)),
-    ])
+    if c.source_id:
+        # 同一教学班可能有多个时段，保留星期和节次区分。
+        parts = [c.source_id, str(c.day), str(c.start), str(c.end)]
+    else:
+        parts = [c.name, str(c.day), str(c.start), str(c.end),
+                 ",".join(str(w) for w in sorted(c.weeks))]
+    raw = "|".join(parts)
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
 
@@ -170,7 +173,7 @@ def exam_uid(e: Exam) -> str:
         return e.uid
     if e.source_id.startswith("manual:"):
         return e.source_id
-    raw = "|".join([e.source_id, e.name, e.date, e.start, e.end, e.room, e.seat])
+    raw = e.source_id if e.source_id else "|".join([e.name, e.date, e.start, e.end, e.room, e.seat])
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
 
@@ -334,11 +337,17 @@ def parse_weeks(text: str) -> tuple[list[int], str]:
         cleaned = re.sub(r"[第周（）()\s单双]", "", part)
         m = re.match(r"^(\d+)\s*-\s*(\d+)$", cleaned)
         if m:
+            if len(m.group(1)) > 2 or len(m.group(2)) > 2:
+                raise ValueError("周次必须在 1..60 范围内")
             lo, hi = int(m.group(1)), int(m.group(2))
+            if not (1 <= lo <= 60 and 1 <= hi <= 60):
+                raise ValueError("周次必须在 1..60 范围内")
             if lo > hi:
                 lo, hi = hi, lo
             segment = range(lo, hi + 1)
         elif cleaned.isdigit():
+            if len(cleaned) > 2 or not 1 <= int(cleaned) <= 60:
+                raise ValueError("周次必须在 1..60 范围内")
             segment = [int(cleaned)]
         else:
             continue
@@ -371,7 +380,8 @@ def current_week(semester_start: str, today: date | None = None, total_weeks: in
     delta = (today - start).days
     if delta < 0:
         return 0  # 未开学
-    return min(delta // 7 + 1, total_weeks)
+    monday = start - timedelta(days=start.weekday())
+    return min((today - monday).days // 7 + 1, total_weeks)
 
 
 def week_dates(semester_start: str, week: int) -> list[date]:
@@ -463,7 +473,7 @@ class Score:
         """成绩的稳定标识：优先教务给出的 id，否则用 课程名+学年+学期+考试性质。"""
         if self.source_id:
             # 补考/重修可能与正常考试共用教务 id，带上考试性质避免被覆盖成一条
-            return ("id", self.source_id, self.exam_type)
+            return ("id", self.source_id, self.year, self.term, self.exam_type)
         return ("raw", self.name, self.year, self.term, self.exam_type)
 
     def term_label(self) -> str:

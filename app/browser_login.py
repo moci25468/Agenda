@@ -115,9 +115,11 @@ def _mask_url(url: str) -> str:
         return url
 
 
-def _parse_body(raw):
+def _parse_body(raw, content_type: str = ""):
     if not raw:
         return None
+    if content_type and "json" not in content_type.lower():
+        return raw
     try:
         return json.loads(raw)
     except (ValueError, TypeError):
@@ -350,13 +352,15 @@ def apply_candidate(cand: dict, cookie_str: str = "") -> dict:
     portal["url"] = cand["url"]
     portal["method"] = cand["method"]
     portal["headers"] = _headers_for_config(cand, cookie_str)
-    portal["body"] = _parse_body(cand.get("post_data")) or {}
+    content_type = next((str(v) for k, v in portal["headers"].items()
+                         if str(k).lower() == "content-type"), "")
+    portal["body"] = _parse_body(cand.get("post_data"), content_type)
     portal["list_path"] = cand["list_path"]
     portal["mapping"] = cand["mapping"]
     p["portal"] = portal
     p["type"] = "portal"
-    p["primary"] = p.get("primary") or "auto"
-    save_config(cfg)
+    p["primary"] = "auto"
+    save_config({"provider": {"portal": portal, "type": "portal", "primary": "auto"}})
     warnings = diagnose_url(cand["url"])
     try:
         res = asyncio.run(run_sync(push=False))
@@ -668,15 +672,17 @@ def _save_portal_cookie(cookie_str: str) -> bool:
     """把续期得到的 Cookie 写回当前用户的门户配置；返回是否真的发生变化。"""
     cfg = load_config()
     portal = cfg.setdefault("provider", {}).setdefault("portal", {})
-    headers = dict(portal.get("headers") or {})
+    headers = portal.get("headers") or {}
+    if isinstance(headers, str):
+        headers = json.loads(headers)
+    headers = dict(headers)
     key = next((k for k in headers if str(k).lower() == "cookie"), None)
     if key is None:
         return False  # cURL 导入但没带登录态头的配置，不擅自造一个
     if headers.get(key) == cookie_str:
         return False
     headers[key] = cookie_str
-    portal["headers"] = headers
-    save_config(cfg)
+    save_config({"provider": {"portal": {"headers": headers}}})
     return True
 
 

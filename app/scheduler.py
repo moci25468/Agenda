@@ -40,10 +40,20 @@ SYNC_SPACING_MIN = 60        # 相邻用户最小间隔
 SYNC_SPACING_MAX = 300       # 人少时也不拉得太开
 
 # 同步串行化：手动同步与定时同步可能同时触发，若并发执行会各自基于同一份旧快照
-# 算出重复变更并重复推送。用非阻塞锁保证同一时刻只有一个同步流程。
+# 算出重复变更并重复推送。按用户加非阻塞锁，不阻塞其他用户的同步。
 # （apply_snapshot 另有一把短锁，保护 diff→保存→写日志这段无 await 的临界区。）
-_sync_lock = threading.Lock()
+_sync_locks: dict[int | None, threading.Lock] = {}
+_sync_locks_guard = threading.Lock()
 _apply_lock = threading.Lock()
+# 失败按用户退避重试；忙碌不消耗尝试次数，仍可在下一轮补跑。
+_sync_retries: dict[int, tuple[datetime, int]] = {}
+
+
+def _defer_sync_retry(uid: int, now: datetime) -> None:
+    prior = _sync_retries.get(uid)
+    attempts = (prior[1] if prior and prior[0].date() == now.date() else 0) + 1
+    minutes = min(60, 15 * (2 ** min(attempts - 1, 2)))
+    _sync_retries[uid] = (now + timedelta(minutes=minutes, seconds=uid % 60), attempts)
 
 
 def free_spans(occupied: set[int], max_section: int = 12) -> list[tuple[int, int]]:
@@ -65,10 +75,11 @@ def free_spans(occupied: set[int], max_section: int = 12) -> list[tuple[int, int
 def free_sections(cfg: dict, day: date) -> list[tuple[int, int]] | None:
     """算出某天没课的节次区间；课表尚未同步时返回 None（区别于「全天没课」）。"""
     snap = db.get_snapshot()
-    if not snap:
-        return None
     courses = apply_course_overrides(
-        [Course.from_dict(d) for d in snap["courses"]], cfg.get("course_overrides"))
+        [Course.from_dict(d) for d in snap["courses"]] if snap else [],
+        cfg.get("course_overrides"))
+    if not snap and not courses:
+        return None
     occupied: set[int] = set()
     for c in courses_on(cfg, courses, day):
         occupied.update(range(c.start, c.end + 1))
@@ -225,15 +236,16 @@ async def _fallback_bundle(cfg: dict):
     只对 primary=auto 生效：用户显式选了正方/门户时不做替换（失败应暴露给他）。
     返回 (provider, courses, exams) 或 None。
     """
-    from .config import portal_configured, zhengfang_configured
+    from .config import portal_configured
 
     if (cfg.get("provider", {}).get("primary") or "auto") != "auto":
         return None
     used = resolve_course_source(cfg)
     if used == "zhengfang" and portal_configured(cfg):
         cand = get_provider(cfg, "portal")
-    elif used == "portal" and zhengfang_configured(cfg):
-        cand = get_provider(cfg, "zhengfang")
+    elif used == "portal":
+        # 门户是课表权威来源，正方仅用于补充考试 / 成绩。
+        return None
     else:
         return None
     try:
@@ -244,15 +256,19 @@ async def _fallback_bundle(cfg: dict):
 
 
 async def run_sync(push: bool = True) -> dict:
-    """按当前数据源拉取一次课表并应用快照（同一时刻只允许一个同步流程）。
+    """按当前数据源拉取一次课表并应用快照（同一用户同时只允许一个同步流程）。
 
     课表主数据源由 provider.primary 决定（auto = 门户优先，没配门户才用正方）；
     考试始终优先从正方拉取（门户只提供课表），门户存在时也不影响考试同步。
-    auto 模式下主源拉取失败会自动回退到另一套来源，避免单个账号故障导致课表停更。
+    auto 模式下门户失败保留原课表，避免用正方覆盖门户权威快照。
     """
-    if not _sync_lock.acquire(blocking=False):
+    from .user_context import get_current_user
+
+    with _sync_locks_guard:
+        lock = _sync_locks.setdefault(get_current_user(), threading.Lock())
+    if not lock.acquire(blocking=False):
         return {"ok": False, "message": "已有一个同步在进行中，请稍后再试",
-                "changes": {}, "pushed": []}
+                "changes": {}, "pushed": [], "busy": True}
     try:
         # 生产环境未配置任何真实数据源时不跑同步：不写空快照、不刷「0 门课程」日志。
         # 前端会据 has_source=false 显示「暂无数据 + 去设置配置」引导。
@@ -262,7 +278,7 @@ async def run_sync(push: bool = True) -> dict:
                     "changes": {}, "pushed": [], "no_source": True}
         return await _run_sync_inner(push)
     finally:
-        _sync_lock.release()
+        lock.release()
 
 
 async def _fetch_bundle_with_cookie_refresh(cfg: dict):
@@ -302,7 +318,8 @@ async def _run_sync_inner(push: bool = True) -> dict:
             msg = f"课表拉取失败：{e}"
             db.add_sync_log("fail", msg)
             # 凭证过期主动告警（按数据源每天去重），避免静默停更
-            await _alert_auth_expired(cfg, resolve_course_source(cfg), e)
+            await _alert_auth_expired(cfg, resolve_course_source(cfg), e,
+                                      alert_failure=resolve_course_source(cfg) == "portal")
             return {"ok": False, "message": msg, "changes": {}, "pushed": []}
         provider, courses, exams = fallback
         fallback_note = f"（{resolve_course_source(cfg)} 拉取失败，已临时回退到 {provider.name}：{e}）"
@@ -386,24 +403,28 @@ def _push_ready(cfg: dict) -> bool:
                 or (p.get("wecom_enabled") and (p.get("wecom_webhook") or "").strip()))
 
 
-async def _alert_auth_expired(cfg: dict, source: str, err) -> list[dict]:
+async def _alert_auth_expired(cfg: dict, source: str, err,
+                              alert_failure: bool = False) -> list[dict]:
     """登录态过期时主动推一条提醒，按数据源每天去重，修复后不再打扰。
 
     err 可以是异常或错误文本；只有真正的登录失效（AuthExpiredError 或含过期 /
-    Cookie / 登录失败等关键词）才告警，普通网络抖动不打扰用户。
+    Cookie / 登录失败等关键词）才发登录告警；alert_failure 用于门户取数失败告警。
     """
     if not cfg.get("alert_on_fail", True):
         return []
     text = str(err)
     expired = isinstance(err, AuthExpiredError) or any(
         w in text for w in ("过期", "Cookie", "cURL", "登录失败", "未登录", "登录失效"))
-    if not expired or not _push_ready(cfg):
+    if not (expired or alert_failure) or not _push_ready(cfg):
         return []
     day_s = datetime.now(TZ).date().isoformat()
-    key = f"auth_alert:{source}"
+    key = f"auth_alert:{source}" if expired else f"sync_alert:{source}"
     if db.reminder_sent(day_s, key):
         return []
-    if source == "zhengfang":
+    if not expired:
+        title = "门户课表同步失败"
+        body = "融合门户课表暂时无法更新，已保留原有课表。请检查门户数据源配置或稍后重试。"
+    elif source == "zhengfang":
         title = "正方教务登录失效"
         body = ("正方教务登录已失效，考试与空教室暂时无法同步 / 查询。\n"
                 "请到「课表来源 → 正方教务」重新填写学号密码或更新 Cookie。")
@@ -466,9 +487,10 @@ async def push_next_day_summary(now: datetime | None = None) -> list[dict]:
     parts = []
     if show_courses:
         snap = db.get_snapshot()
-        if snap:
-            courses = apply_course_overrides(
-                [Course.from_dict(d) for d in snap["courses"]], cfg.get("course_overrides"))
+        courses = apply_course_overrides(
+            [Course.from_dict(d) for d in snap["courses"]] if snap else [],
+            cfg.get("course_overrides"))
+        if snap or courses:
             next_courses = courses_on(cfg, courses, tomorrow)
             if next_courses:
                 parts.append(f"【明日课表】{head}\n"
@@ -480,13 +502,13 @@ async def push_next_day_summary(now: datetime | None = None) -> list[dict]:
                  (Event.from_dict(d) for d in
                   db.list_events(date_from=tomorrow_s, date_to=tomorrow_s))]
         exam_snap = db.get_exam_snapshot()
-        if exam_snap:
-            exams = apply_exam_overrides(
-                [Exam.from_dict(d) for d in exam_snap["exams"]], cfg.get("exam_overrides"))
-            for e in exams:
-                if e.date == tomorrow_s and not e.is_finished():
-                    room = f" @{e.room}" if e.room else ""
-                    lines.append(f"[考试] {e.display_time()} {e.name}{room}")
+        exams = apply_exam_overrides(
+            [Exam.from_dict(d) for d in exam_snap["exams"]] if exam_snap else [],
+            cfg.get("exam_overrides"))
+        for e in exams:
+            if e.date == tomorrow_s and not e.is_finished():
+                room = f" @{e.room}" if e.room else ""
+                lines.append(f"[考试] {e.display_time()} {e.name}{room}")
         if lines:
             parts.append("【明日日程】\n" + "\n".join(lines))
     if show_weather:
@@ -535,9 +557,10 @@ async def _push_upcoming(cfg: dict, p: dict, now: datetime) -> list[dict]:
     items: list[tuple[str, str, datetime, str]] = []  # (标题, 去重键, 开始时间, 正文)
 
     snap = db.get_snapshot()
-    if snap:
-        courses = apply_course_overrides(
-            [Course.from_dict(d) for d in snap["courses"]], cfg.get("course_overrides"))
+    courses = apply_course_overrides(
+        [Course.from_dict(d) for d in snap["courses"]] if snap else [],
+        cfg.get("course_overrides"))
+    if courses:
         day_courses = courses_on(cfg, courses, now.date())
         for c in day_courses:
             start_at = _parse_hhmm(day_s, section_time(cfg, c.start))
@@ -565,10 +588,10 @@ async def _push_upcoming(cfg: dict, p: dict, now: datetime) -> list[dict]:
             items.append(("日程提醒", f"event:{e.id}", start_at, event_line(e)))
 
     exam_snap = db.get_exam_snapshot()
-    if exam_snap:
-        day_exams = apply_exam_overrides(
-            [Exam.from_dict(d) for d in exam_snap["exams"]],
-            cfg.get("exam_overrides"))
+    day_exams = apply_exam_overrides(
+        [Exam.from_dict(d) for d in exam_snap["exams"]] if exam_snap else [],
+        cfg.get("exam_overrides"))
+    if day_exams:
         for e in day_exams:
             if e.date != day_s or not e.start:
                 continue
@@ -611,10 +634,9 @@ async def push_exam_reviews(cfg: dict, now: datetime | None = None) -> list[dict
         days = 15
     days = max(1, min(days, 60))
     snap = db.get_exam_snapshot()
-    if not snap:
-        return []
     exams = apply_exam_overrides(
-        [Exam.from_dict(d) for d in snap["exams"]], cfg.get("exam_overrides"))
+        [Exam.from_dict(d) for d in snap["exams"]] if snap else [],
+        cfg.get("exam_overrides"))
     pushed: list[dict] = []
     for e in exams:
         if not e.date:
@@ -693,10 +715,19 @@ def _sync_check_wrapper():
         ctx = set_current_user(uid)
         try:
             if db.reminder_sent(today, "daily_sync"):
+                _sync_retries.pop(uid, None)
                 continue
-            db.mark_reminder(today, "daily_sync")  # 先占位，避免同一分钟重复触发
-            asyncio.run(run_sync(push=True))
+            retry = _sync_retries.get(uid)
+            if retry and retry[0].date() == now.date() and now < retry[0]:
+                continue
+            result = asyncio.run(run_sync(push=True))
+            if result.get("ok"):
+                db.mark_reminder(today, "daily_sync")
+                _sync_retries.pop(uid, None)
+            elif not result.get("busy"):
+                _defer_sync_retry(uid, datetime.now(TZ))
         except Exception as e:  # noqa: BLE001
+            _defer_sync_retry(uid, datetime.now(TZ))
             db.add_sync_log("fail", f"定时同步异常：{type(e).__name__}: {e}")
         finally:
             current_user_id.reset(ctx)

@@ -42,6 +42,7 @@ Thumbs.db
 .idea/
 .vscode/
 *.code-workspace
+.liveui.json
 
 # ===== 项目内部工具数据 =====
 .workbuddy/

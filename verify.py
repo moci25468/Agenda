@@ -44,7 +44,8 @@ from app.user_context import current_user_id, set_current_user
 from app.config import load_config, save_config
 from app import db
 from app.models import (
-    Course, Event, Exam, Score, apply_course_overrides, course_uid, diff_courses,
+    Course, Event, Exam, Score, apply_course_overrides, apply_exam_overrides,
+    course_uid, exam_uid, diff_courses,
     diff_scores, score_uid, current_week, parse_exam_time, parse_weeks,
 )
 import asyncio
@@ -60,6 +61,131 @@ def check(name, cond, detail=""):
     passed.append((name, cond))
     print(f"{'PASS' if cond else 'FAIL'}  {name}" +
           (f"  [{detail}]" if detail and not cond else ""))
+
+
+# 配置与定时同步新回归：使用独立用户，避免污染主验证夹具。
+_uid_migration_user = 987
+_uid_migration_ctx = set_current_user(_uid_migration_user)
+try:
+    import hashlib as _hashlib
+    _legacy_course = Course("旧课", day=2, start=3, end=4, weeks=[1, 3],
+                            source_id="legacy-course", uid="old-explicit-uid")
+    _canonical_course = Course("旧课", day=2, start=3, end=4, weeks=[1, 3],
+                               source_id="legacy-course")
+    _new_course_uid = course_uid(_canonical_course)
+    _legacy_course_uid = _hashlib.sha1(
+        "|".join([_legacy_course.source_id, _legacy_course.name, "2", "3", "4", "1,3"])
+        .encode("utf-8")).hexdigest()[:16]
+    _db.save_snapshot([_legacy_course.to_dict()], "migration-test")
+    _db.save_user_config(_uid_migration_user, {
+        "course_overrides": {
+            "hidden": ["old-explicit-uid"],
+            "edited": {
+                "old-explicit-uid": {"room": "旧键覆盖"},
+                _new_course_uid: {"room": "新键覆盖"},
+            },
+        },
+    })
+    _db.migrate_override_uids(_uid_migration_user)
+    _migrated_snapshot = _db.get_snapshot_for(_uid_migration_user)
+    _migrated_cfg = _db.get_user_config(_uid_migration_user)
+    _migrated_overrides = _migrated_cfg["course_overrides"]
+    check("迁移.快照显式 uid 与旧键同事务更新",
+          _migrated_snapshot["courses"][0]["uid"] == _new_course_uid
+          and _migrated_overrides["hidden"] == [_new_course_uid]
+          and _legacy_course_uid not in _migrated_overrides["edited"],
+          str((_migrated_snapshot, _migrated_overrides)))
+    check("迁移.edited 新键优先",
+          _migrated_overrides["edited"].get(_new_course_uid) == {"room": "新键覆盖"},
+          str(_migrated_overrides["edited"]))
+finally:
+    current_user_id.reset(_uid_migration_ctx)
+
+_provider_test_uid = 988
+_db.save_user_config(_provider_test_uid, {"provider": {
+    "http_url": "https://portal.example.invalid/courses",
+    "http_headers": '{"cookie":"legacy-cookie"}',
+    "zf_base": "https://zf.example.invalid",
+    "zf_username": "legacy-user",
+}})
+_provider_patch_cfg = _db.patch_user_config(_provider_test_uid, {
+    "provider": {"portal": {"headers": '{"cookie":"canonical-cookie"}'}}
+})
+check("配置.旧 provider 字段先规范化且新 headers 覆盖旧值",
+      _provider_patch_cfg["provider"]["portal"]["headers"]
+      == '{"cookie":"canonical-cookie"}'
+      and _provider_patch_cfg["provider"]["zhengfang"]["username"] == "legacy-user"
+      and "http_headers" not in _provider_patch_cfg["provider"]
+      and "zf_username" not in _provider_patch_cfg["provider"],
+      str(_provider_patch_cfg["provider"]))
+
+_patch_uid = 986
+_db.save_user_config(_patch_uid, {
+    "calendar_subscribe_token": "preserve-subscribe-token",
+    "course_overrides": {"hidden": ["old-hidden"], "edited": {}, "added": []},
+    "exam_overrides": {"hidden": ["old-exam"], "edited": {}, "added": []},
+})
+_patch_result = _db.patch_user_config(_patch_uid, {"school": "patched-school"})
+_empty_override_result = _db.patch_user_config(_patch_uid, {
+    "course_overrides": {"hidden": [], "edited": {}, "added": []},
+    "exam_overrides": {"hidden": [], "edited": {}, "added": []},
+})
+check("配置.patch保留订阅令牌并支持清空override",
+      _patch_result.get("calendar_subscribe_token") == "preserve-subscribe-token"
+      and _empty_override_result.get("calendar_subscribe_token") == "preserve-subscribe-token"
+      and _empty_override_result.get("course_overrides")
+      == {"hidden": [], "edited": {}, "added": []}
+      and _empty_override_result.get("exam_overrides")
+      == {"hidden": [], "edited": {}, "added": []},
+      str(_empty_override_result))
+_db.save_user_config(_patch_uid, {})
+
+_retry_uid = 989
+_retry_now = datetime(2026, 11, 23, 10, 0, tzinfo=TZ)
+_retry_saved = _sched._sync_retries.copy()
+_sched._sync_retries.pop(_retry_uid, None)
+_retry_expected = [15, 30, 60]
+for _retry_attempt, _retry_minutes in enumerate(_retry_expected, 1):
+    _sched._defer_sync_retry(_retry_uid, _retry_now)
+    _retry_due, _retry_attempts = _sched._sync_retries[_retry_uid]
+    check(f"定时同步.失败退避第{_retry_attempt}次",
+          _retry_attempts == _retry_attempt
+          and _retry_due == _retry_now + timedelta(
+              minutes=_retry_minutes, seconds=_retry_uid % 60),
+          str((_retry_due, _retry_attempts)))
+
+_retry_originals = {
+    "list_user_ids": _db.list_user_ids,
+    "reminder_sent": _db.reminder_sent,
+    "mark_reminder": _db.mark_reminder,
+    "sync_slots": _sched.sync_slots,
+    "run_sync": _sched.run_sync,
+}
+try:
+    _db.list_user_ids = lambda: [_retry_uid]
+    _db.reminder_sent = lambda *_args: False
+    _marked_retries = []
+    _db.mark_reminder = lambda *args: _marked_retries.append(args)
+    _sched.sync_slots = lambda day=None: {
+        _retry_uid: datetime(day.year, day.month, day.day, tzinfo=TZ)}
+    _busy_retry = datetime(2000, 1, 1, tzinfo=TZ)
+    _sched._sync_retries[_retry_uid] = (_busy_retry, 2)
+    _sched.run_sync = lambda **_kwargs: asyncio.sleep(0, result={"ok": False, "busy": True})
+    _sched._sync_check_wrapper()
+    check("定时同步.busy 不退避", _sched._sync_retries.get(_retry_uid) == (_busy_retry, 2))
+    _sched.run_sync = lambda **_kwargs: asyncio.sleep(0, result={"ok": True})
+    _sched._sync_check_wrapper()
+    check("定时同步.成功清理退避状态",
+          _retry_uid not in _sched._sync_retries and len(_marked_retries) == 1,
+          str((_sched._sync_retries.get(_retry_uid), _marked_retries)))
+finally:
+    _db.list_user_ids = _retry_originals["list_user_ids"]
+    _db.reminder_sent = _retry_originals["reminder_sent"]
+    _db.mark_reminder = _retry_originals["mark_reminder"]
+    _sched.sync_slots = _retry_originals["sync_slots"]
+    _sched.run_sync = _retry_originals["run_sync"]
+    _sched._sync_retries.clear()
+    _sched._sync_retries.update(_retry_saved)
 
 
 # 1. diff：新增 / 取消 / 教室调整
@@ -87,6 +213,8 @@ check("diff.周次调整归为 changed", not d2["added"] and not d2["removed"] a
 # 3. 教学周计算（2026-2027-1 学期自 2026-08-31 开始）
 check("周次计算", current_week("2026-08-31", date(2026, 11, 7)) == 10)
 check("开学前为第0周", current_week("2026-08-31", date(2026, 8, 1)) == 0)
+check("周三开学后周一为第2周",
+      current_week("2026-09-02", date(2026, 9, 7)) == 2)
 
 # 3a. 正方周次字符串解析（含单双周、第N周、中文分隔符）
 check("周次.普通范围", parse_weeks("1-16周") == (list(range(1, 17)), ""))
@@ -100,6 +228,48 @@ check("周次.双周段加连续段", parse_weeks("2-4周(双),5-10周")
       == ([2, 4, 5, 6, 7, 8, 9, 10], ""))
 check("周次.正方实测第N周", parse_weeks("第15周") == ([15], ""))
 check("周次.无法解析保留原文", parse_weeks("另行通知") == ([], "另行通知"))
+_t0 = time.perf_counter()
+try:
+    parse_weeks("1-999999999999999999999999999999999999")
+    _huge_weeks_rejected = False
+except ValueError:
+    _huge_weeks_rejected = True
+check("周次.超大范围快速拒绝且不展开",
+      _huge_weeks_rejected and time.perf_counter() - _t0 < 1.0)
+
+# source_id 不变时，课表周次 / 考试考场变化后仍用旧 uid 应用手动覆盖。
+_course_source_old = Course("来源课程", day=2, start=3, end=4,
+                            weeks=[1, 2, 3], source_id="course-source-1")
+_course_source_new = Course("来源课程", day=2, start=3, end=4,
+                            weeks=[4, 5, 6], source_id="course-source-1")
+_course_source_uid = course_uid(_course_source_old)
+_course_hidden = apply_course_overrides(
+    [_course_source_new], {"hidden": [_course_source_uid]})
+_course_edited = apply_course_overrides(
+    [_course_source_new], {"edited": {_course_source_uid: {"room": "新教室"}}})
+check("课表.source_id 周次变化仍应用旧隐藏/修改",
+      not _course_hidden and len(_course_edited) == 1
+      and _course_edited[0].room == "新教室"
+      and course_uid(_course_source_new) == _course_source_uid)
+
+_exam_source_old = Exam.from_dict({"name": "来源考试", "date": "2026-12-01",
+                                   "start": "09:00", "end": "11:00",
+                                   "room": "旧考场", "seat": "1",
+                                   "source_id": "exam-source-1"})
+_exam_source_new = Exam.from_dict({"name": "来源考试", "date": "2026-12-01",
+                                   "start": "09:00", "end": "11:00",
+                                   "room": "新考场", "seat": "9",
+                                   "source_id": "exam-source-1"})
+_exam_source_uid = exam_uid(_exam_source_old)
+_exam_hidden = apply_exam_overrides(
+    [_exam_source_new], {"hidden": [_exam_source_uid]})
+_exam_edited = apply_exam_overrides(
+    [_exam_source_new], {"edited": {_exam_source_uid: {"note": "保留覆盖"}}})
+check("考试.source_id 考场座位变化仍应用旧隐藏/修改",
+      not _exam_hidden and len(_exam_edited) == 1
+      and _exam_edited[0].room == "新考场" and _exam_edited[0].seat == "9"
+      and _exam_edited[0].note == "保留覆盖"
+      and exam_uid(_exam_source_new) == _exam_source_uid)
 
 # 3b. 手动调整叠加：隐藏 / 修改 / 新增，不改动原始快照
 _auto = [Course("高数", day=1, start=1, end=2, room="1-101",
@@ -356,7 +526,7 @@ try:
         return _ZfResp({"items": [{"kcmc": name, "cj": 90, "id": name}]})
     _multi = asyncio.run(_zfp._fetch_all_scores(_ZfClient(
         _score_resp("A"), _score_resp("B"), _score_resp("C"), _score_resp("A"))))
-    check("正方.全学期成绩合并去重", len(_multi) == 3,
+    check("正方.全学期成绩保留跨学期同ID", len(_multi) == 4 and len({s.key() for s in _multi}) == 4,
           str([s.name for s in _multi])[:160])
     _partial = ""
     try:
@@ -381,6 +551,17 @@ _override_cfg["provider"]["zhengfang"].update(
 _zp_override = ZhengfangProvider(_override_cfg)
 check("正方.成绩路径可配置覆盖", _zp_override.score_path == "/cjcx/custom.html"
       and _zp_override.score_gnmk == "N999999")
+from app.config import normalize_provider
+_score_cfg = normalize_provider({"zhengfang": {"score_years": 6,
+                                                "score_path": "/score",
+                                                "score_gnmk": "N123"}})
+_score_provider = ZhengfangProvider({"provider": _score_cfg})
+check("正方.成绩normalize保留配置",
+      _score_cfg["zhengfang"].get("score_years") == 6
+      and _score_provider.score_years == 6
+      and _score_provider.score_path == "/score"
+      and _score_provider.score_gnmk == "N123",
+      str(_score_cfg["zhengfang"]))
 db.save_score_snapshot([_s1.to_dict(), _s2.to_dict()], "test")
 _ssnap = db.get_score_snapshot()
 check("成绩.快照落库", bool(_ssnap) and _ssnap["source"] == "test"
@@ -825,7 +1006,9 @@ check("同步推送.无通道不占去重键",
       not _push_calls and not db.reminder_sent(_tmr_s, "next_day"), str(_push_calls))
 save_config(_sync_cfg)  # 恢复有通道配置
 
-# 4) 每晚定时任务：未推过 → 按默认 22:00 推；已推过（被标记）→ 跳过
+# 4) 隔离前置考试夹具；本组仅验证课程摘要，混合内容另有测试。
+db.save_exam_snapshot([], "test")
+# 每晚定时任务：未推过 → 按默认 22:00 推；已推过（被标记）→ 跳过
 _push_calls.clear()
 asyncio.run(_sched.push_next_day_summary(now=_at(_today.isoformat() + "T22:00:00")))
 check("定时推送.未推则推送明日", len(_push_calls) == 1
@@ -1141,6 +1324,7 @@ asyncio.run(main())
 # 9. cURL 解析（Chrome Copy as cURL 风格）
 curl_text = """curl 'https://portal.qut.edu.cn/portal/api/timetable' \\
   -H 'accept: application/json' \\
+  -H 'content-type: application/json' \\
   -H 'cookie: SESSION=abc123; route=xyz' \\
   --data-raw '{"week":9}' \\
   --compressed"""
@@ -1433,7 +1617,7 @@ async def http_tests(port: int):
         check("注册.凭邀请码成功", rb.status_code == 200, str(rb.text)[:200])
         token_b = rb.cookies.get("qut_session")
 
-        # 注册选填正方凭证：写入该用户 provider 并设 primary=zhengfang；
+        # 注册正方凭据使用 auto，后续门户接入可以自动优先；
         # 验证脚本已置 AGENDA_SKIP_REGISTER_SYNC，不会触发真实网络同步。
         inv_zf = (await ca.post(f"{base}/api/auth/invites")).json().get("code")
         rz = await _hx.AsyncClient(timeout=30, trust_env=False).post(
@@ -1449,8 +1633,8 @@ async def http_tests(port: int):
             zfg = zp.get("zhengfang", zp)
             check("注册.正方学号写入本人配置",
                   zfg.get("username") == "20239999", str(zfg)[:200])
-            check("注册.正方主源已设定",
-                  zp.get("primary") == "zhengfang", str(zp)[:200])
+            check("注册.自动主源允许后续门户优先",
+                  zp.get("primary") == "auto" and _resolve_src(sz) == "zhengfang", str(zp)[:200])
         sb_after = (await ca.get(f"{base}/api/settings")).json()
         check("注册.正方凭证不污染管理员配置",
               "20239999" not in json.dumps(sb_after, ensure_ascii=False))
@@ -2080,6 +2264,128 @@ finally:
                 server_proc.wait(timeout=3)
             except subprocess.TimeoutExpired:
                 pass
+
+
+# 会话原子性：放在 E2E（首个用户=admin 已注册）之后跑，避免抢占演示所挂的 id=1。
+_session_uid = _db.create_user("sessionrace", "current-hash", role="user")
+check("会话.旧密码哈希拒绝创建", not _db.checked_create_session(
+    _session_uid, "stale-session", 60, "old-hash"))
+check("会话.当前密码哈希允许创建", _db.checked_create_session(
+    _session_uid, "fresh-session", 60, "current-hash")
+      and _db.get_session_user("fresh-session")["user_id"] == _session_uid)
+_db.delete_session("fresh-session")
+_db.delete_user(_session_uid)
+
+# ---- UID 迁移、旧来源配置合并与定时同步退避 ----
+from hashlib import sha1
+from unittest.mock import AsyncMock, patch
+
+with tempfile.TemporaryDirectory(prefix="qut_verify_regressions_") as _reg_dir:
+    with patch.object(db, "DB_PATH", Path(_reg_dir) / "campus.db"):
+        db.init_db()
+        _reg_uid = db.create_user("regressions", "unused-test-hash")
+        _reg_ctx = set_current_user(_reg_uid)
+        try:
+            _reg_course = Course("迁移课程", day=2, weeks=[1, 3], source_id="course-42")
+            _reg_exam = Exam("迁移考试", date="2026-12-01", start="09:00", end="11:00",
+                             room="A101", seat="07", source_id="exam-42")
+            _new_course_uid = course_uid(_reg_course)
+            _new_exam_uid = exam_uid(_reg_exam)
+            _old_course_uid = sha1("course-42|迁移课程|2|1|2|1,3".encode()).hexdigest()[:16]
+            _old_exam_uid = sha1(
+                "exam-42|迁移考试|2026-12-01|09:00|11:00|A101|07".encode()).hexdigest()[:16]
+            _reg_course.uid = _old_course_uid
+            _reg_exam.uid = _old_exam_uid
+            db.save_snapshot([_reg_course.to_dict()], "portal")
+            db.save_exam_snapshot([_reg_exam.to_dict()], "zhengfang")
+            db.save_user_config(_reg_uid, {
+                "course_overrides": {"hidden": [_old_course_uid, _new_course_uid],
+                                     "edited": {_new_course_uid: {"room": "新调整"},
+                                                _old_course_uid: {"room": "旧调整"}}},
+                "exam_overrides": {"edited": {_old_exam_uid: {"seat": "08"}}},
+                "provider": {"http_url": "https://example.invalid/courses",
+                             "http_headers": {"Cookie": "session=legacy"},
+                             "http_mapping": {"name": "old_name", "room": "classroom"},
+                             "http_list_path": "result.rows", "zf_username": "legacy-user"},
+            })
+            _reg_cfg = load_config()
+            check("UID迁移.旧快照同步改用新标识",
+                  db.get_snapshot()["courses"][0]["uid"] == _new_course_uid
+                  and db.get_exam_snapshot()["exams"][0]["uid"] == _new_exam_uid)
+            check("UID迁移.去重并保留已有新键调整",
+                  _reg_cfg["course_overrides"]["hidden"] == [_new_course_uid]
+                  and _reg_cfg["course_overrides"]["edited"] == {_new_course_uid: {"room": "新调整"}}
+                  and _reg_cfg["exam_overrides"]["edited"] == {_new_exam_uid: {"seat": "08"}})
+            _reg_stored = db.get_user_config(_reg_uid)
+            load_config()
+            check("UID迁移.版本落库且重复加载幂等",
+                  _reg_stored.get("override_uid_version") == 2
+                  and db.get_user_config(_reg_uid) == _reg_stored)
+
+            save_config({"provider": {"portal": {"headers": {"Cookie": "session=new"},
+                                                "mapping": {"name": "new_name"}}}})
+            _reg_provider = db.get_user_config(_reg_uid)["provider"]
+            _reg_portal = load_config()["provider"]["portal"]
+            check("旧来源配置.新 Cookie 和映射持久生效",
+                  not any(k.startswith(("http_", "zf_")) for k in _reg_provider)
+                  and _reg_portal["headers"] == {"Cookie": "session=new"}
+                  and _reg_portal["mapping"]["name"] == "new_name")
+            check("旧来源配置.保留未修改的门户和正方字段",
+                  _reg_portal["url"] == "https://example.invalid/courses"
+                  and _reg_portal["list_path"] == "result.rows"
+                  and _reg_portal["mapping"]["room"] == "classroom"
+                  and _reg_provider["zhengfang"]["username"] == "legacy-user")
+        finally:
+            current_user_id.reset(_reg_ctx)
+
+        class _SyncClock(datetime):
+            moment = datetime(2026, 11, 23, 7, tzinfo=_sched.TZ)
+
+            @classmethod
+            def now(cls, tz=None):
+                return cls.moment.astimezone(tz) if tz else cls.moment.replace(tzinfo=None)
+
+        async def _long_sync_failure(*, push):
+            _SyncClock.moment += timedelta(minutes=20)
+            return {"ok": False}
+
+        _retry_jitter = timedelta(seconds=_reg_uid % 60)
+        _retry_state = {}
+        _sync_stub = AsyncMock(side_effect=[_long_sync_failure, {"ok": False, "busy": True},
+                                           RuntimeError("模拟请求失败"), {"ok": True}])
+
+        async def _sync_attempt(*, push):
+            result = await _sync_stub(push=push)
+            return await result(push=push) if callable(result) else result
+
+        with (patch.object(_sched, "datetime", _SyncClock),
+              patch.object(_sched, "run_sync", _sync_attempt),
+              patch.object(_sched, "_sync_retries", _retry_state)):
+            _sync_day = _SyncClock.moment.date().isoformat()
+            _sched._sync_check_wrapper()
+            _first_retry = _SyncClock.moment + timedelta(minutes=15) + _retry_jitter
+            check("定时同步.长请求从结束时间算首次退避",
+                  _retry_state.get(_reg_uid) == (_first_retry, 1))
+            _sched._sync_check_wrapper()
+            check("定时同步.退避期内跳过下一轮", _sync_stub.await_count == 1)
+            _SyncClock.moment = _first_retry
+            _sched._sync_check_wrapper()
+            check("定时同步.忙碌可重试且不增加退避次数",
+                  _sync_stub.await_count == 2 and _retry_state.get(_reg_uid) == (_first_retry, 1))
+            _sched._sync_check_wrapper()
+            _second_retry = _SyncClock.moment + timedelta(minutes=30) + _retry_jitter
+            check("定时同步.同步异常进入第二次退避",
+                  _sync_stub.await_count == 3 and _retry_state.get(_reg_uid) == (_second_retry, 2))
+            _SyncClock.moment = _second_retry
+            _sched._sync_check_wrapper()
+            _sched._sync_check_wrapper()
+            _reg_ctx = set_current_user(_reg_uid)
+            try:
+                check("定时同步.成功清除退避并标记当天完成",
+                      _sync_stub.await_count == 4 and _reg_uid not in _retry_state
+                      and db.reminder_sent(_sync_day, "daily_sync"))
+            finally:
+                current_user_id.reset(_reg_ctx)
 
 # ---- 生产模式：未配置数据源时绝不展示演示数据 ----
 # 演示开关只在上面夹具段开启；这里关闭后模拟「库里有遗留 mock 假快照」，

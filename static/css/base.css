@@ -17,6 +17,27 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
+/* 界面文本默认不可选：手机长按/滑动、桌面双击或拖拽都不再整块泛起选中色。
+   只有需要读写的区域（输入框、代码、.selectable）保留选择能力。 */
+html,
+body {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+input,
+textarea,
+select,
+pre,
+code,
+kbd,
+.selectable,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
 .wrap {
   max-width: 960px;
   margin: 0 auto;

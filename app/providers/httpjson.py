@@ -12,7 +12,7 @@ import re
 import httpx
 
 from ..models import Course, parse_weeks
-from ..netguard import assert_safe_outbound_url
+from ..netguard import assert_safe_outbound_url, check_outbound_request
 from .base import AuthExpiredError, TimetableProvider
 
 WEEKDAY_MAP = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "日": 7, "天": 7}
@@ -63,23 +63,25 @@ def _dig(obj, path: str):
 
 
 def _to_day(v) -> int:
-    if isinstance(v, (int, float)):
-        return max(1, min(7, int(v)))
-    s = str(v or "")
-    m = re.search(r"[1-7]", s)
-    if m:
-        return int(m.group())
-    for ch, n in WEEKDAY_MAP.items():
-        if ch in s:
-            return n
-    return 1
+    if v is None:
+        return 1
+    s = str(v).strip()
+    if re.fullmatch(r"(?:周|星期)?[一二三四五六日天]", s):
+        return WEEKDAY_MAP[s[-1]]
+    day = _to_int(v, 0)
+    if not 1 <= day <= 7:
+        raise ValueError("星期必须在 1..7 范围内")
+    return day
 
 
 def _to_int(v, default: int) -> int:
-    if isinstance(v, (int, float)):
-        return int(v)
-    nums = re.findall(r"\d+", str(v or ""))
-    return int(nums[0]) if nums else default
+    if v is None:
+        return default
+    s = str(v).strip()
+    m = re.fullmatch(r"(?:星期|周|第)?([+-]?\d{1,3})(?:\.0+)?(?:节)?", s)
+    if not m:
+        raise ValueError("星期或节次格式不正确")
+    return int(m.group(1))
 
 
 def check_auth_expired(response: httpx.Response):
@@ -115,7 +117,10 @@ def _field_value(item: dict, mapping: dict, field: str, default=None):
 
 def _weeks_value(raw) -> tuple[list[int], str]:
     if isinstance(raw, list):
-        return [int(w) for w in raw], ""
+        weeks = [_to_int(w, 0) for w in raw]
+        if any(not 1 <= w <= 60 for w in weeks):
+            raise ValueError("周次必须在 1..60 范围内")
+        return sorted(set(weeks)), ""
     return parse_weeks(str(raw or ""))
 
 
@@ -147,6 +152,8 @@ def courses_from_payload(payload, list_path: str = "", mapping: dict | None = No
         weeks, note = _weeks_value(_field_value(it, mapping, "weeks", []))
         start = _to_int(raw_start, 1)
         end = _to_int(_field_value(it, mapping, "end", start + 1), start + 1)
+        if not 1 <= start <= end <= 30:
+            raise ValueError("节次必须满足 1 <= 开始节次 <= 结束节次 <= 30")
         courses.append(Course(
             name=str(_field_value(it, mapping, "name", "")),
             day=_to_day(_field_value(it, mapping, "day", 1)),
@@ -173,9 +180,15 @@ class HttpJsonProvider(TimetableProvider):
         self.headers = self._parse_json(
             portal.get("headers") if portal.get("headers") is not None
             else p.get("http_headers"), {})
-        self.body = self._parse_json(
-            portal.get("body") if portal.get("body") is not None
-            else p.get("http_body"), None)
+        body = (portal.get("body") if portal.get("body") is not None
+                else p.get("http_body"))
+        self.content_type = next((str(v).lower().split(";", 1)[0].strip()
+                                  for k, v in self.headers.items()
+                                  if str(k).lower() == "content-type"), "")
+        if isinstance(body, str) and self.content_type and self.content_type != "application/json" and not self.content_type.endswith("+json"):
+            self.body = body
+        else:
+            self.body = self._parse_json(body, None)
         self.list_path = portal.get("list_path") or p.get("http_list_path") or ""
         self.mapping = portal.get("mapping") or p.get("http_mapping") or {}
         if not self.url:
@@ -204,12 +217,13 @@ class HttpJsonProvider(TimetableProvider):
             return
         updates: dict[str, str] = {}
         try:
-            for raw in response.headers.get_list("set-cookie"):
-                name, _, rest = raw.partition("=")
-                name = name.strip()
-                value = rest.split(";", 1)[0].strip()
-                if name and value:
-                    updates[name] = value
+            for hop in [*response.history, response]:
+                for raw in hop.headers.get_list("set-cookie"):
+                    name, sep, rest = raw.partition("=")
+                    name = name.strip()
+                    value = rest.split(";", 1)[0].strip()
+                    if name and sep:
+                        updates[name] = value
         except Exception:  # noqa: BLE001
             return
         if not updates:
@@ -224,20 +238,30 @@ class HttpJsonProvider(TimetableProvider):
             from ..config import load_config, save_config
             cfg = load_config()
             portal = cfg.setdefault("provider", {}).setdefault("portal", {})
-            headers = dict(portal.get("headers") or {})
+            headers = self._parse_json(portal.get("headers"), {})
+            headers = dict(headers)
             pkey = next((k for k in headers if str(k).lower() == "cookie"), "Cookie")
-            headers[pkey] = merged
-            portal["headers"] = headers
-            save_config(cfg)
+            headers[pkey] = merge_cookie_header(headers.get(pkey) or "", updates)
+            save_config({"provider": {"portal": {"headers": headers}}})
             self.headers[key] = merged
         except Exception:  # noqa: BLE001
             pass
 
     async def fetch_raw(self):
         """请求接口并返回原始 JSON（含登录态检查），供导入预览与字段猜测。"""
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True, trust_env=False) as client:
+        async with httpx.AsyncClient(
+            timeout=30, follow_redirects=True, trust_env=False,
+            event_hooks={"request": [check_outbound_request]},
+        ) as client:
             if self.method == "POST":
-                r = await client.post(self.url, headers=self.headers, json=self.body)
+                if self.content_type == "application/x-www-form-urlencoded":
+                    kwargs = ({"data": self.body} if isinstance(self.body, dict)
+                              else {"content": self.body or ""})
+                elif self.content_type and self.content_type != "application/json" and not self.content_type.endswith("+json"):
+                    kwargs = {"content": self.body or ""}
+                else:
+                    kwargs = {"json": self.body}
+                r = await client.post(self.url, headers=self.headers, **kwargs)
             else:
                 r = await client.get(self.url, headers=self.headers)
             self._remember_refreshed_cookies(r)

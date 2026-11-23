@@ -28,6 +28,8 @@ class UnsafeURLError(ValueError):
 
 def _ip_blocked(ip) -> bool:
     # 链路本地（169.254.x.x / fe80::）、保留、组播、未指定：无任何合法用途，恒封
+    if getattr(ip, "ipv4_mapped", None) is not None:
+        return _ip_blocked(ip.ipv4_mapped)
     if ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
         return True
     if _STRICT_PRIVATE and (ip.is_private or ip.is_loopback):
@@ -63,3 +65,8 @@ def assert_safe_outbound_url(url: str, *, allow_http: bool = True) -> str:
     if _ip_blocked(ip):
         raise UnsafeURLError("不允许访问本机/内网地址")
     return url
+
+
+async def check_outbound_request(request) -> None:
+    """在每次实际发送前校验地址，覆盖自动与手动重定向。"""
+    assert_safe_outbound_url(str(request.url))

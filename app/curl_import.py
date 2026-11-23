@@ -8,7 +8,6 @@ from __future__ import annotations
 import json
 import re
 import shlex
-from urllib.parse import parse_qsl
 
 NO_ARG_FLAGS = {
     "--compressed", "-s", "--silent", "-k", "--insecure", "-L", "--location",
@@ -80,13 +79,19 @@ def parse_curl(text: str) -> dict:
         method = "POST" if body is not None else "GET"
     parsed_body = None
     if body is not None:
-        try:
-            parsed_body = json.loads(body)
-        except json.JSONDecodeError:
-            if "=" in body and "{" not in body:
-                parsed_body = dict(parse_qsl(body))
-            else:
-                parsed_body = body
+        ctype = next((v.lower().split(";", 1)[0].strip() for k, v in headers.items()
+                      if k.lower() == "content-type"), "")
+        if not ctype:
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
+            ctype = "application/x-www-form-urlencoded"
+        if ctype == "application/json" or ctype.endswith("+json"):
+            try:
+                parsed_body = json.loads(body)
+            except json.JSONDecodeError:
+                raise ValueError("cURL 的 JSON 请求体格式不正确")
+        else:
+            # 保留表单原文，避免重复键、空值和编码被字典转换丢弃。
+            parsed_body = body
     return {"url": url, "method": method, "headers": headers, "body": parsed_body}
 
 
