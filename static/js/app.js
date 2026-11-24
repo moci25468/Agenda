@@ -232,7 +232,21 @@
             .join("");
       }
 
-      function courseRow(c) {
+      // 以“今天所在教学周”的周一为基准推算课程日期所属周，避免跨周/周日误跳。
+      function teachingWeekForDate(date, today, currentWeek) {
+        const dayMs = 86400000;
+        const parseDay = (iso) => {
+          const [y, m, d] = String(iso || "").split("-").map(Number);
+          return Date.UTC(y, m - 1, d);
+        };
+        const todayDay = parseDay(today);
+        const dateDay = parseDay(date);
+        if (!Number.isFinite(todayDay) || !Number.isFinite(dateDay)) return null;
+        const monday = todayDay - ((new Date(todayDay).getUTCDay() + 6) % 7) * dayMs;
+        return Math.max(1, (Number(currentWeek) || 1) + Math.floor((dateDay - monday) / (7 * dayMs)));
+      }
+
+      function courseRow(c, week = null) {
         const weeks = Array.isArray(c.weeks) && c.weeks.length
           ? (c.weeks.length > 1 ? `第 ${c.weeks[0]}–${c.weeks[c.weeks.length - 1]} 周（共 ${c.weeks.length} 周）` : `第 ${c.weeks[0]} 周`)
           : "整学期";
@@ -243,7 +257,7 @@
           c.room ? `<b>教室</b> ${esc(c.room)}` : "",
           c.campus ? `<b>校区</b> ${esc(c.campus)}` : "",
         ].filter(Boolean).join("　·　");
-        return `<div class="course-row course-clickable" data-name="${escAttr(c.name)}" data-start="${escAttr(c.start_time)}" data-end="${escAttr(c.end_time)}">
+        return `<div class="course-row course-clickable" data-name="${escAttr(c.name)}" data-start="${escAttr(c.start_time)}" data-end="${escAttr(c.end_time)}"${week ? ` data-week="${escAttr(week)}"` : ""}>
     <div class="course-time"><div class="range">${esc(c.start_time)}–${esc(c.end_time)}</div><div class="sections">第 ${c.start}–${c.end} 节</div></div>
     <div class="course-main">
       <div class="course-name">${esc(c.name)}<span class="row-chevron" aria-hidden="true">›</span></div>
@@ -543,7 +557,7 @@
         const items = [
           ...events.map((e) => ({ sort: e.start || "00:00", start: e.start, end: e.end, html: eventRow(e) })),
           ...exams.map((e) => ({ sort: e.start || "00:00", start: e.start, end: e.end, html: agendaExamRow(e) })),
-          ...courses.map((c) => ({ sort: c.start_time || "99:99", start: c.start_time, end: c.end_time, html: courseRow(c) })),
+          ...courses.map((c) => ({ sort: c.start_time || "99:99", start: c.start_time, end: c.end_time, html: courseRow(c, weekData.current_week) })),
         ].sort((a, b) => a.sort.localeCompare(b.sort));
         const countText = [
           courses.length ? `${courses.length} 门课程` : "",
@@ -588,7 +602,7 @@
         const items = [
           ...tmEvents.map((e) => ({ sort: e.start || "00:00", start: e.start, end: e.end, html: eventRow(e) })),
           ...tmExams.map((e) => ({ sort: e.start || "00:00", start: e.start, end: e.end, html: agendaExamRow(e) })),
-          ...tmCourses.map((c) => ({ sort: c.start_time || "99:99", start: c.start_time, end: c.end_time, html: courseRow(c) })),
+          ...tmCourses.map((c) => ({ sort: c.start_time || "99:99", start: c.start_time, end: c.end_time, html: courseRow(c, teachingWeekForDate(weekData.tomorrow, weekData.today, weekData.current_week)) })),
         ].sort((a, b) => a.sort.localeCompare(b.sort));
         $("#tomorrowDate").innerHTML =
           `${d.getMonth() + 1} 月 ${d.getDate()} 日 <span class="dow">${dow}</span>`;
@@ -1010,22 +1024,36 @@
       async function loadWeek(week) {
         // 快速左右连滑时只应用最后一次的结果，避免慢响应覆盖新周次
         const seq = ++weekLoadSeq;
-        if (!$("#weekGrid").children.length)
+        const weekGridEmpty = !$("#weekGrid").children.length;
+        if (weekGridEmpty)
           $("#weekGrid").innerHTML =
             `<div style="grid-column:1/-1"><div class="sk-grid">${
               Array.from({ length: 10 }, () => '<div class="sk"></div>').join("")
             }</div></div>`;
         // 手机上网格是隐藏的，骨架要铺在日视图容器里才看得见
         const daysBox = $("#weekDays");
-        if (daysBox && !daysBox.children.length)
+        const daysEmpty = !!daysBox && !daysBox.children.length;
+        if (daysEmpty)
           daysBox.innerHTML = `<div class="day-skeleton">${skeletonRows(4)}</div>`;
-        const data = await api("/api/timetable?week=" + week);
-        if (seq !== weekLoadSeq) return;
-        viewWeek = data.week;
-        renderWeek(data);
-        if (data.week === data.current_week) loadWeather();
+        try {
+          const data = await api("/api/timetable?week=" + week);
+          if (seq !== weekLoadSeq) return;
+          viewWeek = data.week;
+          renderWeek(data);
+          if (data.week === data.current_week) loadWeather();
+        } catch (e) {
+          if (seq !== weekLoadSeq) return;
+          viewWeek = Math.max(Number(week) || 1, 1); // 失败重试仍停留在用户请求的周次
+          const message = `周课表加载失败：${e.message || "请稍后重试"}`;
+          const errorHtml = `<div class="empty"><div class="empty-title">${esc(message)}</div><button type="button" class="small" data-retry-week>重新加载</button></div>`;
+          // 首次加载失败必须移除两端的骨架；已有成功数据时只更新提示，不丢掉旧课表。
+          if (weekGridEmpty || $("#weekGrid [data-retry-week]"))
+            $("#weekGrid").innerHTML = `<div style="grid-column:1/-1">${errorHtml}</div>`;
+          if (daysBox && (daysEmpty || daysBox.querySelector("[data-retry-week]"))) daysBox.innerHTML = errorHtml;
+          $("#weekHint").textContent = message;
+          toast(message, 4000, "error");
+        }
       }
-
       // 没课的空格子 → 加日程：预填该天日期与这个大节的起止时间
       $("#weekGridScroll").addEventListener("click", (e) => {
         const btn = e.target.closest("button[data-wc-event]");
@@ -1395,11 +1423,16 @@
 
       async function exportCalendar() {
         const btn = $("#exportIcsBtn");
+        if (btn.disabled) return;
         btn.disabled = true;
         const old = btn.textContent;
         btn.textContent = "导出中…";
         try {
-          const resp = await fetch("/api/export/calendar.ics");
+          const resp = await fetch("/api/export/calendar.ics", { credentials: "include" });
+          if (resp.status === 401) {
+            showAuthScreen();
+            throw new Error("登录已失效，请重新登录");
+          }
           if (!resp.ok) {
             let msg = "导出失败";
             try {
@@ -1442,11 +1475,16 @@
 
       async function subscribeCalendar() {
         const btn = $("#subscribeIcsBtn");
+        if (btn.disabled) return;
         btn.disabled = true;
         const old = btn.textContent;
         btn.textContent = "准备中…";
         try {
-          const resp = await fetch("/api/export/subscribe");
+          const resp = await fetch("/api/export/subscribe", { credentials: "include" });
+          if (resp.status === 401) {
+            showAuthScreen();
+            throw new Error("登录已失效，请重新登录");
+          }
           if (!resp.ok) {
             let msg = "获取订阅信息失败";
             try {
@@ -1546,7 +1584,18 @@
         }).join("");
       }
 
+      let courseActionBusy = false;
+      function setCourseActionBusy(busy) {
+        courseActionBusy = busy;
+        $("#saveCourseBtn").disabled = busy;
+        $("#courseEditor [data-edit], #courseEditor [data-del], #restoreHiddenBtn")
+          .forEach((b) => (b.disabled = busy));
+        $("#resetCoursesBtn").disabled = busy || !courseData?.has_overrides;
+      }
       async function applyCourseAction(action, uid, course) {
+        if (courseActionBusy) return false;
+        courseActionBusy = true;
+        setCourseActionBusy(true);
         try {
           await api("/api/courses", {
             method: "POST",
@@ -1572,6 +1621,9 @@
         } catch (e) {
           toast(e.message, 4000, "error");
           return false;
+        } finally {
+          courseActionBusy = false;
+          setCourseActionBusy(false);
         }
       }
 
@@ -1697,7 +1749,18 @@
           .join("");
       }
 
+      let examActionBusy = false;
+      function setExamActionBusy(busy) {
+        examActionBusy = busy;
+        $("#saveExamAdjustBtn").disabled = busy;
+        $("#examEditor [data-edit-exam], #examEditor [data-del-exam], #restoreHiddenExamsBtn")
+          .forEach((b) => (b.disabled = busy));
+        $("#resetExamsBtn").disabled = busy || !examAdjustData?.has_overrides;
+      }
       async function applyExamAction(action, uid, exam) {
+        if (examActionBusy) return false;
+        examActionBusy = true;
+        setExamActionBusy(true);
         try {
           await api("/api/exams", {
             method: "POST",
@@ -1721,6 +1784,9 @@
         } catch (e) {
           toast(e.message, 4000, "error");
           return false;
+        } finally {
+          examActionBusy = false;
+          setExamActionBusy(false);
         }
       }
 
@@ -1816,39 +1882,53 @@
     ${countdown}
   </div>`;
       }
+      let examLoadSeq = 0;
       async function loadExams() {
-        if (!$("#examList").children.length)
+        const seq = ++examLoadSeq;
+        const examListEmpty = !$("#examList").children.length;
+        if (examListEmpty)
           $("#examList").innerHTML = skeletonRows(2);
-        examData = await api("/api/exams");
-        const box = $("#examList");
-        const sub = $("#examSub");
-        if (!examData.exams.length) {
-          sub.textContent = "";
-          box.innerHTML = examData.supported
-            ? `<div class="empty">暂无考试安排，点「立即同步」从教务拉取</div>`
-            : examData.has_source === false
-              // 整页已有「去设置配置」入口，这里只说明状态，不重复放按钮
-              ? `<div class="empty"><div class="empty-title">还没有考试数据</div><div class="empty-sub">接入正方教务后，考试安排会随同步自动带出。</div></div>`
-              : examData.provider === "portal"
-                ? `<div class="empty">门户只提供课表；填写正方账号后，同步会额外拉取考试<br><button class="small" data-go-source>去设置填写正方账号</button></div>`
-                : `<div class="empty">当前数据源不支持考试查询，请在设置 → 账号接入正方教务<br><button class="small" data-go-source>前往账号设置</button></div>`;
-          $("#examHint").textContent = examData.supported
-            ? "考试数据来自正方教务，随每次同步更新；点「编辑考试」可手动添加或调整，临时调考以教务系统为准。"
-            : "";
+        try {
+          const data = await api("/api/exams");
+          if (seq !== examLoadSeq) return;
+          examData = data;
+          const box = $("#examList");
+          const sub = $("#examSub");
+          if (!examData.exams.length) {
+            sub.textContent = "";
+            box.innerHTML = examData.supported
+              ? `<div class="empty">暂无考试安排，点「立即同步」从教务拉取</div>`
+              : examData.has_source === false
+                // 整页已有「去设置配置」入口，这里只说明状态，不重复放按钮
+                ? `<div class="empty"><div class="empty-title">还没有考试数据</div><div class="empty-sub">接入正方教务后，考试安排会随同步自动带出。</div></div>`
+                : examData.provider === "portal"
+                  ? `<div class="empty">门户只提供课表；填写正方账号后，同步会额外拉取考试<br><button class="small" data-go-source>去设置填写正方账号</button></div>`
+                  : `<div class="empty">当前数据源不支持考试查询，请在设置 → 账号接入正方教务<br><button class="small" data-go-source>前往账号设置</button></div>`;
+            $("#examHint").textContent = examData.supported
+              ? "考试数据来自正方教务，随每次同步更新；点「编辑考试」可手动添加或调整，临时调考以教务系统为准。"
+              : "";
+            renderWeekOverview();
+            return;
+          }
+          sub.textContent = examData.fetched_at ? `${examData.fetched_at} 同步` : "";
+          const group = (title, list) =>
+            list.length
+              ? `<div class="exam-group">${title} · ${list.length} 场</div><div class="exam-list">${list.map(examRow).join("")}</div>`
+              : "";
+          box.innerHTML =
+            group("即将进行", examData.upcoming) +
+            group("已结束", examData.finished);
+          $("#examHint").textContent =
+            "考试数据来自正方教务，随每次同步更新；点「编辑考试」可手动添加或调整，临时调考以教务系统为准。";
           renderWeekOverview();
-          return;
+        } catch (e) {
+          if (seq !== examLoadSeq) return;
+          const message = `考试加载失败：${e.message || "请稍后重试"}`;
+          if (examListEmpty || $("#examList [data-retry-exams]"))
+            $("#examList").innerHTML = `<div class="empty"><div class="empty-title">${esc(message)}</div><button type="button" class="small" data-retry-exams>重新加载</button></div>`;
+          $("#examHint").textContent = message;
+          toast(message, 4000, "error");
         }
-        sub.textContent = examData.fetched_at ? `${examData.fetched_at} 同步` : "";
-        const group = (title, list) =>
-          list.length
-            ? `<div class="exam-group">${title} · ${list.length} 场</div><div class="exam-list">${list.map(examRow).join("")}</div>`
-            : "";
-        box.innerHTML =
-          group("即将进行", examData.upcoming) +
-          group("已结束", examData.finished);
-        $("#examHint").textContent =
-          "考试数据来自正方教务，随每次同步更新；点「编辑考试」可手动添加或调整，临时调考以教务系统为准。";
-        renderWeekOverview();
       }
 
       /* ---------- 成绩（只读） ---------- */
@@ -1992,12 +2072,28 @@
           ? `成绩同步失败：${err}；当前显示上次成功同步的数据。`
           : `成绩从正方教务自动同步，发现新成绩或分数更新会推送提醒；统计为${gradesTermKey === GRADES_ALL_TERM ? "全部学期" : "当前所选学期"}数值成绩的简单平均，以教务系统公布为准。`;
       }
+      let gradesLoadSeq = 0;
       async function loadGrades() {
+        const seq = ++gradesLoadSeq;
         const box = $("#gradesList");
-        if (!box.children.length) box.innerHTML = skeletonRows(3);
-        gradesData = await api("/api/grades");
-        renderGradesTermOptions();
-        renderGrades();
+        const gradesListEmpty = !box.children.length;
+        if (gradesListEmpty) box.innerHTML = skeletonRows(3);
+        try {
+          const data = await api("/api/grades");
+          if (seq !== gradesLoadSeq) return;
+          gradesData = data;
+          renderGradesTermOptions();
+          renderGrades();
+        } catch (e) {
+          if (seq !== gradesLoadSeq) return;
+          const message = `成绩加载失败：${e.message || "请稍后重试"}`;
+          if (gradesListEmpty || box.querySelector("[data-retry-grades]"))
+            box.innerHTML = `<div class="empty"><div class="empty-title">${esc(message)}</div><button type="button" class="small" data-retry-grades>重新加载</button></div>`;
+          $("#gradesSub").textContent = "";
+          $("#gradesStats").innerHTML = "";
+          $("#gradesHint").textContent = message;
+          toast(message, 4000, "error");
+        }
       }
       const gradesTermSelect = $("#gradesTerm");
       if (gradesTermSelect) {
@@ -2283,20 +2379,41 @@
         }
       });
 
+      let sourcesLoadSeq = 0;
+      const zfFields = ["#zfBase", "#zfUsername", "#zfPassword", "#zfYear", "#zfTerm"];
+      const zfInputs = new Map(zfFields.map((selector) => [selector, $(selector)]));
+      zfInputs.forEach((el) => {
+        el.addEventListener("input", () => {
+          ++sourcesLoadSeq; // 输入期间开始的旧响应不得再回填表单
+        });
+        el.addEventListener("change", () => {
+          ++sourcesLoadSeq;
+        });
+      });
       async function loadSources() {
+        const seq = ++sourcesLoadSeq;
+        const initial = new Map([...zfInputs].map(([selector, el]) => [selector, el.value]));
         try {
           const s = await api("/api/provider/sources");
+          if (seq !== sourcesLoadSeq) return;
           const badge = (el, ok, onText, offText) => {
             el.textContent = ok ? onText : offText;
             el.classList.toggle("real", !!ok);
           };
           badge($("#portalBadge"), s.portal.configured, "已配置", "未配置");
           badge($("#zfBadge"), s.zhengfang.configured, "已配置", "未配置");
-          // 回填正方表单（密码不回显，留空表示未改）
-          $("#zfBase").value = s.zhengfang.base || "https://jxgl.qut.edu.cn/jwglxt";
-          $("#zfUsername").value = s.zhengfang.username || "";
-          fillZfYears(s.zhengfang.year || "");
-          $("#zfTerm").value = (s.zhengfang.term || "3");
+          // 请求后又被用户改过的正方字段不回填（密码同样不会在请求期间被旧响应清空）。
+          zfInputs.forEach((el, selector) => {
+            if (el.value === initial.get(selector)) {
+              if (selector === "#zfBase") el.value = s.zhengfang.base || "https://jxgl.qut.edu.cn/jwglxt";
+              else if (selector === "#zfUsername") el.value = s.zhengfang.username || "";
+              else if (selector === "#zfYear") {
+                const oldValue = el.value;
+                fillZfYears(s.zhengfang.year || "");
+                el.value = s.zhengfang.year || oldValue;
+              } else if (selector === "#zfTerm") el.value = s.zhengfang.term || "3";
+            }
+          });
           // 门户表单回填 cURL 占位信息
           if (s.portal.url) {
             $("#curlInput").placeholder = (s.portal.url === "********")
@@ -2305,7 +2422,7 @@
           }
           renderPrimaryState(s);
         } catch (e) {
-          toast(e.message, 4000, "error");
+          if (seq === sourcesLoadSeq) toast(e.message, 4000, "error");
         }
       }
 
@@ -2400,12 +2517,21 @@
         } catch (e) { toast(e.message, 4000, "error"); }
       }
       let adminUsersById = new Map();
+      let adminUsersQuery = { q: "", sort: "id" };
+      let adminUsersLoadSeq = 0;
       async function loadAdminUsers() {
         if (!currentUser || currentUser.role !== "admin") return;
+        const seq = ++adminUsersLoadSeq;
+        const q = ($("#adminSearch") || {}).value || "";
+        const sort = ($("#adminSort") || {}).value || "id";
         try {
-          const q = ($("#adminSearch") || {}).value || "";
-          const sort = ($("#adminSort") || {}).value || "id";
-          const us = await api(`/api/auth/users?q=${encodeURIComponent(q)}&sort=${sort}`);
+          const us = await api(`/api/auth/users?q=${encodeURIComponent(q)}&sort=${encodeURIComponent(sort)}`);
+          if (seq !== adminUsersLoadSeq) return;
+          const liveQ = ($("#adminSearch") || {}).value || "";
+          const liveSort = ($("#adminSort") || {}).value || "id";
+          if (q !== liveQ || sort !== liveSort) return;
+          adminUsersQuery = { q, sort };
+          adminUsersById = new Map(us.users.map((u) => [String(u.id), u]));
           const rows = us.users.map((u) => {
             const me = u.id === currentUser.id;
             const inactive = u.is_active === 0 || u.is_active === false;
@@ -2425,11 +2551,16 @@
                 </div>
               </div>`;
           });
-          adminUsersById = new Map(us.users.map((u) => [String(u.id), u]));
           $("#adminUserList").innerHTML = rows.length
             ? rows.join("")
             : '<div class="empty">暂无用户</div>';
         } catch (e) {
+          const liveQ = ($("#adminSearch") || {}).value || "";
+          const liveSort = ($("#adminSort") || {}).value || "id";
+          if (seq !== adminUsersLoadSeq || q !== liveQ || sort !== liveSort) return;
+          // 列表与 ID 映射一起失效，避免勾选/编辑继续指向上一查询的集合。
+          adminUsersById = new Map();
+          $("#adminUserList").innerHTML = `<div class="empty">用户加载失败：${esc(e.message)}</div>`;
           toast(e.message, 4000, "error");
         }
       }
@@ -3378,6 +3509,9 @@
           return;
         }
         if (e.target.closest("[data-sync-now]")) doSync();
+        else if (e.target.closest("[data-retry-week]")) loadWeek(viewWeek ?? Math.max(weekData?.current_week || 1, 1));
+        else if (e.target.closest("[data-retry-exams]")) loadExams();
+        else if (e.target.closest("[data-retry-grades]")) loadGrades();
       });
       $("#prevWeek").addEventListener("click", () =>
         loadWeek(Math.max(1, viewWeek - 1)),
@@ -3389,22 +3523,36 @@
         if (!$("#weekLabel").classList.contains("clickable")) return;
         loadWeek(Math.max(weekRender?.current_week || status?.week || 1, 1));
       });
+      function openWeekView(week) {
+        const current = weekRender?.current_week ?? weekData?.current_week ?? status?.week ?? 1;
+        const target = Math.min(Math.max(Number(week) || current, 1), status?.total_weeks || 30);
+        viewWeek = target;
+        switchTab("week"); // switchTab 会按刚设置的 viewWeek 发起加载
+      }
       $("#nextClassBar").addEventListener("click", () => {
         if (weekData && weekData.has_source === false) goSourceSettings();
-        else switchTab("week");
+        else openWeekView(weekData?.current_week ?? status?.week ?? viewWeek);
       });
       $("#tbTomorrow").addEventListener("click", () => {
         const block = $("#tomorrowBlock");
         if (!block || block.classList.contains("hidden")) return;
         block.scrollIntoView({ behavior: "smooth", block: "center" });
       });
-      // 时间轴课程行：点击展开/收起详情；点「在周课表中查看」直达周视图
+      // 时间轴课程行：点击展开/收起详情；点「在周课表中查看」直达对应教学周
       function bindTimelineClicks(listSel) {
         $(listSel).addEventListener("click", (e) => {
           const goWeek = e.target.closest('button[data-act="go-week"]');
           if (goWeek) {
             e.stopPropagation();
-            switchTab("week");
+            const row = goWeek.closest(".course-row");
+            const week = Number(row?.dataset.week);
+            if (Number.isFinite(week) && week > 0) {
+              openWeekView(week);
+            } else if (weekData?.has_source === false) {
+              goSourceSettings();
+            } else {
+              switchTab("week");
+            }
             return;
           }
           const row = e.target.closest(".course-row.course-clickable");
@@ -3825,8 +3973,16 @@
       async function runScheduleSearch(q) {
         const box = $("#searchResults");
         const query = q.trim();
-        if (!query) { box.classList.add("hidden"); box.innerHTML = ""; return; }
+        if (!query) {
+          ++searchSeq; // 使清空前已发出的请求失效，防止旧结果重新弹出
+          box.classList.add("hidden");
+          box.innerHTML = "";
+          delete box.dataset.items;
+          delete box.dataset.query;
+          return;
+        }
         const seq = ++searchSeq;
+        box.dataset.query = query;
         box.classList.remove("hidden");
         box.innerHTML = `<div class="sk-inline">${skeletonRows(2)}</div>`;
         try {
@@ -3851,11 +4007,17 @@
       }
       $("#scheduleSearch").addEventListener("input", (e) => {
         clearTimeout(searchTimer);
-        searchTimer = setTimeout(() => runScheduleSearch(e.target.value), 320);
+        ++searchSeq; // 输入框一变，上一轮搜索立即失效，包括延迟窗口和清空场景
+        const query = e.target.value;
+        $("#searchResults").classList.add("hidden");
+        delete $("#searchResults").dataset.items;
+        searchTimer = setTimeout(() => runScheduleSearch(query), 320);
       });
       $("#searchResults").addEventListener("click", async (e) => {
         const btn = e.target.closest("button[data-sr]");
         if (!btn) return;
+        const query = $("#scheduleSearch").value.trim();
+        if (!query || $("#searchResults").dataset.query !== query) return;
         const items = JSON.parse($("#searchResults").dataset.items || "[]");
         const item = items[Number(btn.dataset.sr)];
         if (!item) return;
@@ -4091,10 +4253,24 @@
           location.reload();
         } catch (err) { authError(err.message); }
       });
+      let logoutBusy = false;
       async function doLogout() {
+        if (logoutBusy) return;
+        logoutBusy = true;
+        const buttons = [$("#logoutBtn"), $("#securityLogoutBtn")];
+        buttons.forEach((b) => (b.disabled = true));
+        try {
+          await api("/api/auth/logout", { method: "POST" });
+        } catch (e) {
+          // 服务端未确认退出时不能 reload：Cookie 仍有效，会把登录态恢复出来。
+          toast(e.message || "退出失败，请检查网络后重试", 5000, "error");
+          return;
+        } finally {
+          logoutBusy = false;
+          buttons.forEach((b) => (b.disabled = false));
+        }
         currentUser = null;
         resetNotifications();
-        try { await api("/api/auth/logout", { method: "POST" }); } catch (e) {}
         try { localStorage.removeItem(TAB_KEY); } catch (e) {}
         location.reload();
       }
@@ -4165,25 +4341,57 @@
       });
       // 搜索 / 排序
       let adminSearchTimer = null;
-      $("#adminSearch").addEventListener("input", () => {
+      function invalidateAdminUsers() {
         clearTimeout(adminSearchTimer);
+        ++adminUsersLoadSeq;
+        adminUsersById = new Map();
+        $("#adminUserList").innerHTML = '<div class="empty">正在加载用户…</div>';
+      }
+      $("#adminSearch").addEventListener("input", () => {
+        invalidateAdminUsers();
         adminSearchTimer = setTimeout(loadAdminUsers, 300);
       });
-      $("#adminSort").addEventListener("change", loadAdminUsers);
+      $("#adminSort").addEventListener("change", () => {
+        invalidateAdminUsers();
+        loadAdminUsers();
+      });
       $("#adminSelectAll").addEventListener("click", () => {
+        const q = ($("#adminSearch") || {}).value || "";
+        const sort = ($("#adminSort") || {}).value || "id";
+        if (adminBatchBusy || q !== adminUsersQuery.q || sort !== adminUsersQuery.sort) {
+          toast("搜索条件已变化，请等待最新列表加载完成", 3000, "warn");
+          return;
+        }
         const boxes = $$("#adminUserList .admin-user-check:not(:disabled)");
         const allChecked = boxes.length && [...boxes].every((b) => b.checked);
         boxes.forEach((b) => (b.checked = !allChecked));
       });
+      let adminBatchBusy = false;
+      function setAdminBatchBusy(busy) {
+        adminBatchBusy = busy;
+        $("#adminSelectAll").disabled = busy;
+        $("#adminBatchDisable").disabled = busy;
+        $("#adminBatchEnable").disabled = busy;
+      }
       async function batchActive(active) {
+        if (adminBatchBusy) return;
+        const q = ($("#adminSearch") || {}).value || "";
+        const sort = ($("#adminSort") || {}).value || "id";
+        if (q !== adminUsersQuery.q || sort !== adminUsersQuery.sort) {
+          toast("搜索条件已变化，请等待最新列表加载完成", 3000, "warn");
+          return;
+        }
         const ids = [...$$("#adminUserList .admin-user-check:checked")]
-          .map((b) => parseInt(b.dataset.uid, 10));
+          .map((b) => parseInt(b.dataset.uid, 10))
+          .filter(Number.isFinite);
         if (!ids.length) { toast("请先勾选用户", 3000); return; }
-        if (!(await confirmDialog(`确定${active ? "启用" : "停用"}选中的 ${ids.length} 个用户？`, {
-          ok: active ? "启用" : "停用",
-          danger: !active,
-        }))) return;
+        adminBatchBusy = true;
+        setAdminBatchBusy(true);
         try {
+          if (!(await confirmDialog(`确定${active ? "启用" : "停用"}选中的 ${ids.length} 个用户？`, {
+            ok: active ? "启用" : "停用",
+            danger: !active,
+          }))) return;
           const r = await api("/api/auth/users/batch-active", {
             method: "POST",
             body: JSON.stringify({ ids, active }),
@@ -4193,6 +4401,7 @@
           await loadAdminStats();
           await loadAdminLog();
         } catch (e) { toast(e.message, 4000, "error"); }
+        finally { adminBatchBusy = false; setAdminBatchBusy(false); }
       }
       $("#adminBatchDisable").addEventListener("click", () => batchActive(false));
       $("#adminBatchEnable").addEventListener("click", () => batchActive(true));

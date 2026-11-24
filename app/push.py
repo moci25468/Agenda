@@ -1,13 +1,17 @@
 """推送通道：Bark（iOS）与企业微信 / 钉钉群机器人。所有发送结果写入 push_log。"""
 from __future__ import annotations
 
+import logging
 import re
+from collections.abc import Callable
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
 
 from . import db
-from .netguard import UnsafeURLError, assert_safe_outbound_url
+from .netguard import SafeAsyncHTTPTransport, UnsafeURLError, assert_safe_outbound_url
+
+log = logging.getLogger(__name__)
 
 WECOM_API = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key="
 WECOM_HOST = "qyapi.weixin.qq.com"
@@ -69,14 +73,15 @@ async def send_bark(cfg: dict, title: str, body: str, url: str = "") -> tuple[bo
     except UnsafeURLError as e:
         return False, f"Bark 服务器地址不安全：{e}"
     try:
-        async with httpx.AsyncClient(timeout=15, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=15, trust_env=False,
+                                     transport=SafeAsyncHTTPTransport()) as client:
             r = await client.post(f"{server}/{key}", json=payload)
             data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
             if r.status_code == 200 and data.get("code") == 200:
                 return True, ""
             return False, f"Bark 返回 {r.status_code}: {r.text[:120]}"
-    except Exception as e:  # noqa: BLE001
-        return False, f"Bark 请求失败: {e}"
+    except Exception as exc:  # noqa: BLE001
+        return False, f"Bark 请求失败: {type(exc).__name__}"
 
 
 async def send_wecom(cfg: dict, title: str, body: str) -> tuple[bool, str]:
@@ -95,7 +100,8 @@ async def send_wecom(cfg: dict, title: str, body: str) -> tuple[bool, str]:
     except UnsafeURLError as e:
         return False, f"机器人地址不安全：{e}"
     try:
-        async with httpx.AsyncClient(timeout=15, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=15, trust_env=False,
+                                     transport=SafeAsyncHTTPTransport()) as client:
             r = await client.post(hook, json=payload)
             data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
             if r.status_code == 200 and data.get("errcode") == 0:
@@ -105,8 +111,8 @@ async def send_wecom(cfg: dict, title: str, body: str) -> tuple[bool, str]:
                 msg = WECOM_ERRORS.get(code) or data.get("errmsg") or "群机器人返回错误"
                 return False, f"{msg}（errcode {code}）"
             return False, f"群机器人返回 {r.status_code}: {r.text[:120]}"
-    except Exception as e:  # noqa: BLE001
-        return False, f"群机器人请求失败: {e}"
+    except Exception as exc:  # noqa: BLE001
+        return False, f"群机器人请求失败: {type(exc).__name__}"
 
 
 CHANNELS = ("bark", "wecom")
@@ -149,19 +155,44 @@ async def send_selected(cfg: dict, title: str, body: str, channels: list[str]) -
     return results
 
 
-async def push_all(cfg: dict, title: str, body: str) -> list[dict]:
-    """向所有已启用通道推送，逐条记录日志，返回结果列表。"""
+async def push_all(cfg: dict, title: str, body: str,
+                   on_result: Callable[[dict], None] | None = None) -> list[dict]:
+    """向所有已启用通道推送，逐条记录日志，返回结果列表。
+
+    on_result 在每个通道完成后立即同步调用，供 outbox 先持久化成功结果；
+    这样后续通道超时或异常时，不会丢掉前面已经送达的通道。
+    """
     p = cfg.get("push", {})
     results = []
+
+    async def deliver(channel: str) -> None:
+        try:
+            if channel == "bark":
+                ok, err = await send_bark(cfg, title, body)
+            else:
+                ok, err = await send_wecom(cfg, title, body)
+        except Exception as exc:  # noqa: BLE001
+            # 单通道异常不阻断后续通道；原始异常可能含 webhook，不写入日志。
+            ok, err = False, f"{CHANNEL_NAMES.get(channel, channel)}推送异常：{type(exc).__name__}"
+        result = {"channel": channel, "ok": ok, "error": err}
+        results.append(result)
+        try:
+            db.add_push_log(channel, title, body, "ok" if ok else "fail", err)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Push log persistence failed (%s)", type(exc).__name__)
+        finally:
+            if on_result is not None:
+                on_result(result)
+
     if p.get("bark_enabled"):
-        ok, err = await send_bark(cfg, title, body)
-        db.add_push_log("bark", title, body, "ok" if ok else "fail", err)
-        results.append({"channel": "bark", "ok": ok, "error": err})
+        await deliver("bark")
     if p.get("wecom_enabled") and _wecom_url(p.get("wecom_webhook") or ""):
-        ok, err = await send_wecom(cfg, title, body)
-        db.add_push_log("wecom", title, body, "ok" if ok else "fail", err)
-        results.append({"channel": "wecom", "ok": ok, "error": err})
+        await deliver("wecom")
     if not results:
         db.add_push_log("none", title, body, "skip", "未启用任何推送通道")
-        results.append({"channel": "none", "ok": False, "error": "未启用任何推送通道（设置中开启 Bark 或企业微信群机器人）"})
+        result = {"channel": "none", "ok": False,
+                  "error": "未启用任何推送通道（设置中开启 Bark 或企业微信群机器人）"}
+        results.append(result)
+        if on_result is not None:
+            on_result(result)
     return results

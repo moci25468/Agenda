@@ -1,13 +1,14 @@
 /* Agenda 知序 Service Worker：提供安装能力，并在离线时回落到已缓存的页面外壳。
    策略：导航请求网络优先、失败回落缓存的 "/" 外壳；静态资源网络优先、离线回落缓存；
    接口（/api/）一律不进缓存。 */
-const CACHE = "agenda-static-v4";
+const CACHE = "agenda-static-v5";
 const SHELL = ["/", "/static/icons/icon-192.png", "/static/icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(
     caches.open(CACHE)
-      .then((c) => c.addAll(SHELL).catch(() => {}))
+      // 任一核心资源失败都不激活半成品，也不能跳过等待替换旧版本。
+      .then((c) => c.addAll(SHELL))
       .then(() => self.skipWaiting())
   );
 });
@@ -15,7 +16,8 @@ self.addEventListener("install", (e) => {
 self.addEventListener("activate", (e) => {
   e.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      // 仅清理本应用自己的旧缓存，避免误删同源其他应用/站点的缓存。
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith("agenda-static-") && k !== CACHE).map((k) => caches.delete(k))))
   );
 });
 

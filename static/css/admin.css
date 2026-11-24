@@ -214,6 +214,7 @@
 
 #toast {
   position: fixed;
+  z-index: 121;
   left: 50%;
   bottom: 32px;
   transform: translateX(-50%);

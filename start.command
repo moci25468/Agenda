@@ -19,4 +19,4 @@ fi
 # 等服务起来后自动打开浏览器
 ( sleep 2 && open "http://127.0.0.1:${PORT}" ) >/dev/null 2>&1 &
 
-exec .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port "$PORT"
+exec .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port "$PORT"

@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import threading
+from collections.abc import Callable
 from time import monotonic
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -324,10 +325,20 @@ async def _retry_outbox(user_id: int):
     if not succeeded:
         for channel in delivered:
             push[f"{channel}_enabled"] = False
+
+        def persist_result(result: dict):
+            # 每完成一个通道就落库；后续通道超时也不能抹掉已送达结果。
+            nonlocal succeeded
+            if result.get("ok") is True and result.get("channel") in enabled:
+                delivered.add(result["channel"])
+            succeeded = bool(enabled) and enabled <= delivered
+            db.finish_notification_outbox(user_id, cx, rows, sorted(delivered), succeeded)
+
         try:
             # 每轮最多一批、一次 push_all；不在请求内循环排空积压。
             results = await asyncio.wait_for(
-                _push_changes(dict(cfg, push=push), [json.loads(row["payload"]) for row in rows]),
+                _push_changes(dict(cfg, push=push), [json.loads(row["payload"]) for row in rows],
+                              on_result=persist_result),
                 timeout=35,
             )
             delivered.update(result["channel"] for result in results
@@ -335,12 +346,13 @@ async def _retry_outbox(user_id: int):
             succeeded = bool(enabled) and enabled <= delivered
         except Exception:
             # 不保存通道原始错误，异常可能包含 webhook 或 Cookie。
-            succeeded = False
+            succeeded = bool(enabled) and enabled <= delivered
     await asyncio.to_thread(db.finish_notification_outbox, user_id, cx, rows,
                             sorted(delivered), succeeded)
 
 
-async def _push_changes(cfg: dict, changed: list[dict]):
+async def _push_changes(cfg: dict, changed: list[dict],
+                        on_result: Callable[[dict], None] | None = None):
     if not changed:
         return []
     # 分批分类：截止提醒和内容更新使用不同格式。
@@ -370,4 +382,6 @@ async def _push_changes(cfg: dict, changed: list[dict]):
         if len(changed) > 5:
             lines.append(f"另有 {len(changed) - 5} 条更新，请在站内查看")
         title = "学习通通知更新"
-    return await push_all(cfg, title, "\n".join(lines))
+    if on_result is None:
+        return await push_all(cfg, title, "\n".join(lines))
+    return await push_all(cfg, title, "\n".join(lines), on_result=on_result)

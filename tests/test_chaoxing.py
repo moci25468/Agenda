@@ -13,6 +13,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 from urllib.parse import parse_qs, quote
 import uuid
+from datetime import datetime, timedelta
 
 # 必须先隔离再导入 app；若已导入到其他目录则立即失败，不能碰真实凭据。
 _DATA = tempfile.TemporaryDirectory(prefix="agenda-chaoxing-tests-")
@@ -1261,56 +1262,64 @@ class DomainTests(_DatabaseMixin, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(notifications.status(self.user)["state"], "ready")
 
     async def test_homework_due_reminders_enqueue_once_per_deadline_and_cancel_on_status_change(self):
+        now = datetime.now(notifications.TZ)
+        due_at = (now + timedelta(hours=26)).isoformat(timespec="seconds")
+        new_due_at = (now + timedelta(hours=30)).isoformat(timespec="seconds")
+        reminder_at = (now + timedelta(hours=3)).isoformat(timespec="seconds")
+        new_reminder_at = (now + timedelta(hours=7)).isoformat(timespec="seconds")
         # 完成首次基线，不生成历史提醒
-        await self.sync_items(self.user, [_item(due_at="2026-11-25T10:00:00+08:00")])
+        await self.sync_items(self.user, [_item(due_at=due_at)])
         self.assertEqual(len([r for r in self.outbox() if r["kind"] == "homework_due"]), 0)
         # 距截止 23 小时，自动刷新生成提醒
         fake, _, _ = self.fake_client()
         with patch.object(chaoxing, "ChaoxingClient", fake):
             await notifications.sync(self.user, scheduled=True)
         with db.get_conn() as conn:
-            db._refresh_homework_reminders(conn, self.user, "2026-11-24T11:30:00+08:00")
+            db._refresh_homework_reminders(conn, self.user, reminder_at)
         reminders = [row for row in self.outbox() if row["kind"] == "homework_due"]
         self.assertEqual(len(reminders), 1)
         payload = json.loads(reminders[0]["payload"])
         self.assertEqual(payload["title"], "第一章练习")
         self.assertEqual(payload["event"], "homework_due")
-        self.assertIn("2026-11-25T10:00:00", payload["due_at"])
+        self.assertEqual(payload["due_at"], due_at)
         source_id = reminders[0]["source_id"]
         # 同一截止时间重新刷新不会重复生成
         with db.get_conn() as conn:
-            db._refresh_homework_reminders(conn, self.user, "2026-11-24T12:00:00+08:00")
+            db._refresh_homework_reminders(conn, self.user, (now + timedelta(hours=4)).isoformat())
         self.assertEqual(len([r for r in self.outbox() if r["kind"] == "homework_due"]), 1)
         # 作业已提交，取消待发提醒
-        await self.sync_items(self.user, [_item(status="submitted", due_at="2026-11-25T10:00:00+08:00")])
+        await self.sync_items(self.user, [_item(status="submitted", due_at=due_at)])
         with db.get_conn() as conn:
-            db._refresh_homework_reminders(conn, self.user, "2026-11-24T13:00:00+08:00")
+            db._refresh_homework_reminders(conn, self.user, reminder_at)
         self.assertEqual(len([r for r in self.outbox() if r["kind"] == "homework_due" and r["status"] == "pending"]), 0)
         # 截止时间变更后按新时间重新生成
-        await self.sync_items(self.user, [_item(status="pending", due_at="2026-11-25T18:00:00+08:00")])
+        await self.sync_items(self.user, [_item(status="pending", due_at=new_due_at)])
         with db.get_conn() as conn:
-            db._refresh_homework_reminders(conn, self.user, "2026-11-24T19:00:00+08:00")
+            db._refresh_homework_reminders(conn, self.user, new_reminder_at)
         new_reminders = [r for r in self.outbox() if r["kind"] == "homework_due" and r["status"] == "pending"]
         self.assertEqual(len(new_reminders), 1)
         self.assertNotEqual(new_reminders[0]["source_id"], source_id)
-        self.assertIn("2026-11-25T18:00:00", json.loads(new_reminders[0]["payload"])["due_at"])
+        self.assertEqual(json.loads(new_reminders[0]["payload"])["due_at"], new_due_at)
 
     async def test_due_reminders_separate_batch_from_content_updates(self):
-        await self.sync_items(self.user, [_item(due_at="2026-11-25T14:00:00+08:00")])
+        now = datetime.now(notifications.TZ)
+        due_at = (now + timedelta(hours=26)).isoformat()
+        reminder_at = (now + timedelta(hours=3)).isoformat()
+        await self.sync_items(self.user, [_item(due_at=due_at)])
         # 内容更新生成一条 outbox
-        result = await self.sync_items(self.user, [_item(title="更新后的作业", due_at="2026-11-25T14:00:00+08:00")])
+        result = await self.sync_items(self.user, [_item(title="更新后的作业", due_at=due_at)])
         self.assertTrue(result["ok"])
         content_updates = [r for r in self.outbox() if r["kind"] == "homework"]
         self.assertEqual(len(content_updates), 1)
         self.assertEqual(content_updates[0]["status"], "sent")
         # 截止提醒单独排队，待交作业且距24小时内才生成
         with db.get_conn() as conn:
-            db._refresh_homework_reminders(conn, self.user, "2026-11-24T15:00:00+08:00")
+            db._refresh_homework_reminders(conn, self.user, reminder_at)
         reminders = [r for r in self.outbox() if r["kind"] == "homework_due"]
         self.assertEqual(len(reminders), 1)
         self.assertEqual(reminders[0]["status"], "pending")
         # 分批发送时优先提醒
-        rows = db.get_due_notification_outbox(self.user, {"uid": "701", "cookies": _cookies()}, "2026-11-24T15:00:00+08:00")
+        rows = db.get_due_notification_outbox(self.user, {"uid": "701", "cookies": _cookies()}, reminder_at)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["kind"], "homework_due")
 

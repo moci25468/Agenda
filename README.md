@@ -39,14 +39,14 @@ Compose 会启动仅供内部网络访问的 Redis 缓存容器，不发布 Redi
 
 数据持久化在 `./data`；进程每天 03:20 自动把数据库与全局配置快照到 `data/backups/`（保留 7 天，权限 600）。
 
-本机另存一份：`scripts/backup-to-desktop.sh` 通过 SSH 把服务器上最新的备份拉到 `~/Desktop/QUT备份/`（保留 30 天），配合 `launchd` 每天 12:30 执行；备份含 Cookie 与密码哈希，目录权限已收紧，不要外传。
-
 nginx 反代示例：
 
 ```nginx
 location / {
     proxy_pass http://127.0.0.1:8300;
     proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_read_timeout 120s;   # 一键登录与导入可能较慢
 }
 ```
@@ -62,7 +62,9 @@ location / {
 
 > cURL 含登录 Cookie，只粘到本地设置页，不要发到聊天或群聊。换学期请重新登录一次。
 
-## diff、考试、空教室协议、天气、推送去重、多用户隔离、邀请码、注销等核心链路。
+## 核心链路验证
+
+`python3 verify.py` 覆盖课表与成绩、考试、空教室、天气、推送去重、多用户隔离、邀请码、注销等核心链路。脚本使用临时数据目录并禁用 Redis，不读取生产 `data/`；写入与临时服务用例只在显式运行脚本时执行。
 
 ## 目录结构
 
@@ -74,5 +76,5 @@ static/            单文件前端
 data/              运行时生成（已 gitignore）
 verify.py          核心链路验证脚本
 release.sh         发布脚本
-scripts/           本机备份到桌面的脚本
+docs/功能介绍.md   功能说明
 ```

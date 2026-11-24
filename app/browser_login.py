@@ -24,12 +24,25 @@ from .curl_import import collect_arrays, diagnose_url, guess_mapping
 from .scheduler import run_sync
 from .user_context import get_current_user, set_current_user
 
-PORTAL_ENTRY = "http://portal.qut.edu.cn/portal/event"
+PORTAL_ENTRY = "https://portal.qut.edu.cn/portal/event"
 PROFILE_DIR = DATA_DIR / "browser_profile"   # 1 号用户沿用历史目录（升级免重登）
 PROFILE_ROOT = DATA_DIR / "browser_profiles"  # 其他用户按 uid 隔离
 TIMEOUT_SECONDS = 300
 COLLECT_MAX_SECONDS = 25   # 登录后最多等这么久收集接口
 SETTLE_SECONDS = 3         # 发现第一个候选后再等这么久收尾
+
+
+def _is_qut_host(host: str) -> bool:
+    host = (host or "").lower().rstrip(".")
+    return host == "qut.edu.cn" or host.endswith(".qut.edu.cn")
+
+
+def _candidate_url_allowed(url: str) -> bool:
+    try:
+        parts = urlsplit(url)
+        return parts.scheme == "https" and _is_qut_host(parts.hostname or "")
+    except ValueError:
+        return False
 
 
 def _profile_dir(uid: int):
@@ -167,7 +180,7 @@ def pick_best(candidates: list[dict]) -> dict | None:
     门户的「应用 / 资源」列表同样是大数组，不能只按条数多少挑。
     """
     usable = [c for c in candidates if c.get("kind") == "courses"
-              and c.get("status") == 200 and c.get("url", "").startswith(("http://", "https://"))]
+              and c.get("status") == 200 and _candidate_url_allowed(c.get("url", ""))]
     if not usable:
         return None
     qualified = []
@@ -203,7 +216,7 @@ def _looks_logged_in(url: str) -> bool:
     except Exception:  # noqa: BLE001
         return False
     host = (parts.hostname or "").lower()
-    if not host.endswith("qut.edu.cn"):
+    if not _is_qut_host(host):
         return False
     if not host.startswith("portal") and host.split(".")[0] in _AUTH_HOSTS:
         return False
@@ -320,14 +333,22 @@ def _grab_qr(page, timeout: float = 6.0) -> str | None:
     return None
 
 
-def _cookie_from_context(cookies) -> str:
-    return "; ".join(
-        f"{c['name']}={c['value']}" for c in cookies
-        if "qut.edu.cn" in str(c.get("domain", "")) and c.get("name") and c.get("value")
-    )
+def _cookie_from_context(cookies, host: str = "") -> str:
+    host = (host or "").lower().rstrip(".")
+    selected = []
+    for c in cookies:
+        domain = str(c.get("domain") or "").lower().lstrip(".").rstrip(".")
+        if not (_is_qut_host(domain) and c.get("name") and c.get("value")):
+            continue
+        if host and not (host == domain or host.endswith("." + domain)):
+            continue
+        selected.append(f"{c['name']}={c['value']}")
+    return "; ".join(selected)
 
 
-def _headers_for_config(cand: dict, cookie_str: str) -> dict:
+def _headers_for_config(cand: dict, cookie_str: str = "") -> dict:
+    if not _candidate_url_allowed(cand.get("url", "")):
+        raise ValueError("一键登录只接受学校官方 HTTPS 接口")
     out = {}
     for k, v in (cand.get("headers") or {}).items():
         lk = str(k).lower()
@@ -345,8 +366,11 @@ def apply_candidate(cand: dict, cookie_str: str = "") -> dict:
     portal 与 zhengfang 并存：只写 provider.portal 子配置，并置 primary=auto
     （门户优先），不清除已填的正方凭证。
     """
+    if not _candidate_url_allowed(cand.get("url", "")):
+        raise ValueError("一键登录只接受学校官方 HTTPS 接口")
     cfg = load_config()
     p = cfg["provider"]
+    old_provider = json.loads(json.dumps(p))
     # 保留已存在的子配置，只覆盖门户部分
     portal = dict(p.get("portal") or {})
     portal["url"] = cand["url"]
@@ -360,6 +384,7 @@ def apply_candidate(cand: dict, cookie_str: str = "") -> dict:
     p["portal"] = portal
     p["type"] = "portal"
     p["primary"] = "auto"
+    attempted_provider = json.loads(json.dumps(p))
     save_config({"provider": {"portal": portal, "type": "portal", "primary": "auto"}})
     warnings = diagnose_url(cand["url"])
     try:
@@ -367,6 +392,9 @@ def apply_candidate(cand: dict, cookie_str: str = "") -> dict:
         synced, message = bool(res["ok"]), res["message"]
     except Exception as e:  # noqa: BLE001
         synced, message = False, f"试同步失败：{e}"
+    if not synced:
+        from . import db
+        db.restore_provider_config(get_current_user(), attempted_provider, old_provider)
     return {
         "ok": synced,
         "url": _mask_url(cand["url"]),
@@ -452,9 +480,7 @@ def _run(uid: int):
 
             def on_response(resp):
                 try:
-                    if "json" not in resp.headers.get("content-type", ""):
-                        return
-                    if "qut.edu.cn" not in resp.url:
+                    if not _candidate_url_allowed(resp.url):
                         return
                     payload = json.loads(resp.text())
                 except Exception:  # noqa: BLE001
@@ -570,8 +596,10 @@ def _run(uid: int):
                         break
                     time.sleep(0.5)
                 _log(f"收集完成，共捕获 {len(candidates)} 个候选接口")
+            best = pick_best(candidates)
             try:
-                cookie_str = _cookie_from_context(ctx.cookies())
+                host = (urlsplit(best["url"]).hostname or "") if best else ""
+                cookie_str = _cookie_from_context(ctx.cookies(), host)
             except Exception:  # noqa: BLE001
                 pass
             _log("正在关闭登录窗口…")
@@ -668,6 +696,16 @@ def _available_mb() -> int | None:
     return None
 
 
+def _configured_portal_host() -> str:
+    cfg = load_config()
+    url = cfg.get("provider", {}).get("portal", {}).get("url") or PORTAL_ENTRY
+    try:
+        host = (urlsplit(url).hostname or "").lower()
+    except ValueError:
+        return ""
+    return host if _is_qut_host(host) else ""
+
+
 def _save_portal_cookie(cookie_str: str) -> bool:
     """把续期得到的 Cookie 写回当前用户的门户配置；返回是否真的发生变化。"""
     cfg = load_config()
@@ -745,7 +783,7 @@ def _silent_refresh_inner(profile_dir, save: bool) -> dict:
                 return {"ok": True, "refreshed": False, "expired": True,
                         "reason": "redirected-to-login"}
             cookies = ctx.cookies()
-            cookie_str = _cookie_from_context(cookies)
+            cookie_str = _cookie_from_context(cookies, _configured_portal_host())
             if not cookie_str:
                 return {"ok": True, "refreshed": False, "expired": True,
                         "reason": "no-cookie"}

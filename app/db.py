@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -42,6 +43,24 @@ def get_conn():
 def _uid() -> int:
     """没有用户上下文时（启动、离线脚本）回落到 1，兼容单用户数据。"""
     return current_user_id.get() or 1
+
+
+_user_locks: dict[int | None, threading.Lock] = {}
+_user_locks_guard = threading.Lock()
+
+
+def user_lock(user_id: int | None) -> threading.Lock:
+    with _user_locks_guard:
+        return _user_locks.setdefault(user_id, threading.Lock())
+
+
+def _user_write_allowed(conn: sqlite3.Connection, user_id: int | None = None) -> bool:
+    uid = _uid() if user_id is None else user_id
+    if user_id is not None or current_user_id.get() is not None:
+        return conn.execute("SELECT 1 FROM users WHERE id = ?", (uid,)).fetchone() is not None
+    if conn.execute("SELECT 1 FROM users WHERE id = ?", (uid,)).fetchone():
+        return True
+    return conn.execute("SELECT 1 FROM users LIMIT 1").fetchone() is None
 
 
 def init_db():
@@ -285,11 +304,15 @@ def get_snapshot_for(user_id: int) -> dict | None:
 
 def save_snapshot(courses: list[dict], source: str):
     with get_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        uid = _uid()
+        if not _user_write_allowed(conn):
+            return
         conn.execute(
             """INSERT INTO snapshot (user_id, data, source, fetched_at) VALUES (?, ?, ?, ?)
                ON CONFLICT(user_id) DO UPDATE SET
                  data=excluded.data, source=excluded.source, fetched_at=excluded.fetched_at""",
-            (_uid(), json.dumps(courses, ensure_ascii=False), source, now_str()),
+            (uid, json.dumps(courses, ensure_ascii=False), source, now_str()),
         )
 
 
@@ -316,12 +339,16 @@ def get_exam_snapshot_for(user_id: int) -> dict | None:
 
 def save_exam_snapshot(exams: list[dict], source: str):
     with get_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        uid = _uid()
+        if not _user_write_allowed(conn):
+            return
         conn.execute(
             """INSERT INTO exam_snapshot (user_id, data, source, fetched_at)
                VALUES (?, ?, ?, ?)
                ON CONFLICT(user_id) DO UPDATE SET
                  data=excluded.data, source=excluded.source, fetched_at=excluded.fetched_at""",
-            (_uid(), json.dumps(exams, ensure_ascii=False), source, now_str()),
+            (uid, json.dumps(exams, ensure_ascii=False), source, now_str()),
         )
 
 
@@ -348,17 +375,24 @@ def get_score_snapshot_for(user_id: int) -> dict | None:
 
 def save_score_snapshot(scores: list[dict], source: str):
     with get_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        uid = _uid()
+        if not _user_write_allowed(conn):
+            return
         conn.execute(
             """INSERT INTO score_snapshot (user_id, data, source, fetched_at)
                VALUES (?, ?, ?, ?)
                ON CONFLICT(user_id) DO UPDATE SET
                  data=excluded.data, source=excluded.source, fetched_at=excluded.fetched_at""",
-            (_uid(), json.dumps(scores, ensure_ascii=False), source, now_str()),
+            (uid, json.dumps(scores, ensure_ascii=False), source, now_str()),
         )
 
 
 def add_sync_log(status: str, message: str, changes: dict | None = None):
     with get_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if not _user_write_allowed(conn):
+            return
         conn.execute(
             "INSERT INTO sync_log (user_id, ts, status, message, changes) VALUES (?, ?, ?, ?, ?)",
             (_uid(), now_str(), status, message, json.dumps(changes or {}, ensure_ascii=False)),
@@ -367,6 +401,9 @@ def add_sync_log(status: str, message: str, changes: dict | None = None):
 
 def add_push_log(channel: str, title: str, body: str, status: str, error: str = ""):
     with get_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if not _user_write_allowed(conn):
+            return
         conn.execute(
             """INSERT INTO push_log (user_id, ts, channel, title, body, status, error)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
@@ -523,8 +560,31 @@ def get_user_config(user_id: int) -> dict:
         return {}
 
 
+def restore_provider_config(user_id: int, expected_provider: dict, old_provider: dict) -> bool:
+    if user_id is None:
+        return False
+    with get_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT data FROM user_config WHERE user_id=?", (user_id,)).fetchone()
+        if not row:
+            return False
+        try:
+            cfg = json.loads(row["data"])
+        except json.JSONDecodeError:
+            return False
+        if cfg.get("provider") != expected_provider:
+            return False
+        cfg["provider"] = old_provider
+        conn.execute("UPDATE user_config SET data=? WHERE user_id=?",
+                     (json.dumps(cfg, ensure_ascii=False), user_id))
+    return True
+
+
 def save_user_config(user_id: int, cfg: dict):
     with get_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if not _user_write_allowed(conn, user_id):
+            return
         conn.execute(
             """INSERT INTO user_config (user_id, data) VALUES (?, ?)
                ON CONFLICT(user_id) DO UPDATE SET data=excluded.data""",
@@ -544,6 +604,8 @@ def patch_user_config(user_id: int, patch: dict) -> dict:
 
     with get_conn() as conn:
         conn.execute("BEGIN IMMEDIATE")
+        if not _user_write_allowed(conn, user_id):
+            return {}
         row = conn.execute("SELECT data FROM user_config WHERE user_id = ?", (user_id,)).fetchone()
         try:
             cfg = json.loads(row["data"]) if row else {}
@@ -1178,6 +1240,23 @@ def create_user(username: str, password_hash: str, display_name: str = "",
         return cur.lastrowid
 
 
+def registration_error(username: str, invite_code: str) -> str | None:
+    """哈希前预检，减少无效注册触发的高成本密码派生；最终仍以原子注册为准。"""
+    with get_conn() as conn:
+        if conn.execute("SELECT 1 FROM users WHERE username = ?", (username,)).fetchone():
+            return "用户名已存在"
+        if conn.execute("SELECT 1 FROM users LIMIT 1").fetchone():
+            invite = conn.execute(
+                """SELECT 1 FROM invites
+                   WHERE code = ? AND expires_at > ?
+                     AND COALESCE(used_count, 0) < COALESCE(max_uses, 1)""",
+                (invite_code, now_str()),
+            ).fetchone()
+            if not invite:
+                return "邀请码无效、已用完或已过期"
+    return None
+
+
 def register_user_atomic(username: str, password_hash: str, display_name: str,
                          student_id: str, invite_code: str) -> tuple[int, bool]:
     """原子判断首位管理员、创建账号并核销邀请码。"""
@@ -1254,20 +1333,31 @@ def delete_user_sessions(user_id: int, except_token: str = ""):
 
 def delete_user(user_id: int):
     """注销账号：用户行和各表里属于他的数据一起删除，避免留孤儿数据。"""
-    with get_conn() as conn:
-        for table in ("sessions", "snapshot", "exam_snapshot", "score_snapshot",
-                      "sync_log", "push_log", "user_config", "events",
-                      "reminders", "notifications", "chaoxing_sync", "notification_outbox"):
-            conn.execute(f"DELETE FROM {table} WHERE user_id = ?", (user_id,))
-        # 邀请码是可复用的，注销账号只收回他这一次的占用，不能把整个码删掉
-        conn.execute(
-            """UPDATE invites SET used_count = MAX(COALESCE(used_count, 0) - 1, 0)
-               WHERE code IN (SELECT code FROM invite_uses WHERE user_id = ?)""",
-            (user_id,))
-        conn.execute("DELETE FROM invite_uses WHERE user_id = ?", (user_id,))
-        conn.execute("UPDATE invites SET used_by = NULL, used_at = NULL WHERE used_by = ?",
-                     (user_id,))
-        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    with user_lock(user_id):
+        with get_conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            for table in ("sessions", "snapshot", "exam_snapshot", "score_snapshot",
+                          "sync_log", "push_log", "user_config", "events",
+                          "reminders", "notifications", "chaoxing_sync", "notification_outbox"):
+                conn.execute(f"DELETE FROM {table} WHERE user_id = ?", (user_id,))
+            # 邀请码是可复用的，注销账号只收回他这一次的占用，不能把整个码删掉
+            conn.execute(
+                """UPDATE invites SET used_count = MAX(COALESCE(used_count, 0) - 1, 0)
+                   WHERE code IN (SELECT code FROM invite_uses WHERE user_id = ?)""",
+                (user_id,))
+            conn.execute("DELETE FROM invite_uses WHERE user_id = ?", (user_id,))
+            conn.execute("UPDATE invites SET used_by = NULL, used_at = NULL WHERE used_by = ?",
+                         (user_id,))
+            conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        import logging
+        import shutil
+        from .browser_login import _profile_dir
+        try:
+            shutil.rmtree(_profile_dir(user_id))
+        except FileNotFoundError:
+            pass
+        except OSError:
+            logging.getLogger(__name__).warning("注销后清理浏览器 profile 失败 uid=%s", user_id)
 
 
 # ---------- 会话 ----------

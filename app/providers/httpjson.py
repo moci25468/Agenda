@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import json
 import re
+from http.cookies import SimpleCookie
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 
 from ..models import Course, parse_weeks
-from ..netguard import assert_safe_outbound_url, check_outbound_request
+from ..netguard import SafeAsyncHTTPTransport, assert_safe_outbound_url
 from .base import AuthExpiredError, TimetableProvider
 
 WEEKDAY_MAP = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "日": 7, "天": 7}
@@ -41,6 +43,48 @@ def merge_cookie_header(existing: str, updates: dict) -> str:
     if not changed:
         return existing
     return "; ".join(f"{k}={pairs[k]}" for k in order)
+
+
+def _origin(url: str) -> tuple[str, str, int]:
+    parts = urlsplit(url)
+    return parts.scheme.lower(), (parts.hostname or "").lower(), parts.port or (443 if parts.scheme == "https" else 80)
+
+
+_SENSITIVE_HEADERS = {
+    "authorization", "proxy-authorization", "cookie", "token", "x-token",
+    "x-access-token", "x-auth-token", "x-api-key", "api-key",
+}
+
+
+def _redirect_headers(headers: dict, old_url: str, new_url: str, method: str) -> dict:
+    out = dict(headers)
+    if _origin(old_url) != _origin(new_url):
+        out = {k: v for k, v in out.items() if str(k).lower() not in _SENSITIVE_HEADERS}
+    if method == "GET":
+        out = {k: v for k, v in out.items() if str(k).lower() not in {
+            "content-length", "transfer-encoding", "content-type"}}
+    return out
+
+
+def _domain_matches(host: str, domain: str) -> bool:
+    domain = domain.lower().lstrip(".").rstrip(".")
+    return host == domain or host.endswith("." + domain)
+
+
+def _cookie_updates(response, expected_host: str) -> dict[str, str]:
+    updates: dict[str, str] = {}
+    for raw in response.headers.get_list("set-cookie"):
+        parsed = SimpleCookie()
+        try:
+            parsed.load(raw)
+        except Exception:
+            continue
+        for name, morsel in parsed.items():
+            domain = morsel["domain"]
+            if domain and not _domain_matches(expected_host, domain):
+                continue
+            updates[name] = morsel.value
+    return updates
 
 
 def _dig(obj, path: str):
@@ -207,25 +251,16 @@ class HttpJsonProvider(TimetableProvider):
         except json.JSONDecodeError:
             raise ValueError(f"headers/body 配置不是合法 JSON: {str(text)[:60]}")
 
-    def _remember_refreshed_cookies(self, response) -> None:
-        """门户网关会在响应里滚动下发新 Cookie（滑动续期）。
-
-        把这部分写回配置，静态快照就能跟着网关一起续命；失败一律静默，
-        绝不能因为写配置出错而影响取数。
-        """
+    def _remember_refreshed_cookies(self, responses) -> None:
+        """只接收当前门户源同源响应下发的 Cookie。"""
         if self.name != "portal":
             return
+        expected_host = (urlsplit(self.url).hostname or "").lower()
         updates: dict[str, str] = {}
-        try:
-            for hop in [*response.history, response]:
-                for raw in hop.headers.get_list("set-cookie"):
-                    name, sep, rest = raw.partition("=")
-                    name = name.strip()
-                    value = rest.split(";", 1)[0].strip()
-                    if name and sep:
-                        updates[name] = value
-        except Exception:  # noqa: BLE001
-            return
+        for response in responses:
+            if (urlsplit(str(response.url)).hostname or "").lower() != expected_host:
+                continue
+            updates.update(_cookie_updates(response, expected_host))
         if not updates:
             return
         key = next((k for k in self.headers if str(k).lower() == "cookie"), None)
@@ -248,23 +283,39 @@ class HttpJsonProvider(TimetableProvider):
             pass
 
     async def fetch_raw(self):
-        """请求接口并返回原始 JSON（含登录态检查），供导入预览与字段猜测。"""
+        """请求接口并返回原始 JSON，重定向时不把凭据带到其他源。"""
+        url = self.url
+        method = self.method
+        headers = dict(self.headers)
+        body = self.body
+        responses = []
         async with httpx.AsyncClient(
-            timeout=30, follow_redirects=True, trust_env=False,
-            event_hooks={"request": [check_outbound_request]},
+            timeout=30, follow_redirects=False, trust_env=False,
+            transport=SafeAsyncHTTPTransport(),
         ) as client:
-            if self.method == "POST":
-                if self.content_type == "application/x-www-form-urlencoded":
-                    kwargs = ({"data": self.body} if isinstance(self.body, dict)
-                              else {"content": self.body or ""})
-                elif self.content_type and self.content_type != "application/json" and not self.content_type.endswith("+json"):
-                    kwargs = {"content": self.body or ""}
-                else:
-                    kwargs = {"json": self.body}
-                r = await client.post(self.url, headers=self.headers, **kwargs)
+            for _ in range(6):
+                kwargs = {}
+                if method == "POST":
+                    if self.content_type == "application/x-www-form-urlencoded":
+                        kwargs = ({"data": body} if isinstance(body, dict)
+                                  else {"content": body or ""})
+                    elif self.content_type and self.content_type != "application/json" and not self.content_type.endswith("+json"):
+                        kwargs = {"content": body or ""}
+                    else:
+                        kwargs = {"json": body}
+                r = await client.request(url, method=method, headers=headers, **kwargs)
+                responses.append(r)
+                location = r.headers.get("location") if r.is_redirect else ""
+                if not location:
+                    break
+                if r.status_code == 303 or (r.status_code in (301, 302) and method == "POST"):
+                    method, body = "GET", None
+                url = urljoin(str(r.url), location)
+                assert_safe_outbound_url(url)
+                headers = _redirect_headers(headers, str(r.url), url, method)
             else:
-                r = await client.get(self.url, headers=self.headers)
-            self._remember_refreshed_cookies(r)
+                raise ValueError("接口重定向次数过多")
+            self._remember_refreshed_cookies(responses)
             check_auth_expired(r)
             r.raise_for_status()
             try:

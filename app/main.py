@@ -13,13 +13,13 @@ from contextlib import asynccontextmanager, suppress
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import auth, browser_login, cache, db, notifications, room_cache
 from .config import (
@@ -94,6 +94,7 @@ PUBLIC_API_PATHS = {
     # 日历订阅端点：webcal:// 拉取时日历 App 不携带 Cookie，靠 URL 里的私有 token 鉴权
     "/api/export/calendar.ics",
 }
+MAX_API_BODY_BYTES = 2 * 1024 * 1024
 _CORS_HEADER_NAMES = {
     b"access-control-allow-origin", b"access-control-allow-credentials",
     b"access-control-allow-headers", b"access-control-allow-methods", b"vary",
@@ -159,6 +160,37 @@ class AccessGuard:
                    for k, v in scope.get("headers", [])}
         path = scope.get("path", "")
         origin = headers.get("origin", "")
+        if path.startswith("/api/") and scope.get("method") not in ("GET", "HEAD", "OPTIONS"):
+            try:
+                declared_size = int(headers.get("content-length", "0"))
+            except ValueError:
+                declared_size = 0
+            if declared_size > MAX_API_BODY_BYTES:
+                resp = JSONResponse({"detail": "请求内容过大"}, status_code=413)
+                await resp(scope, receive, send)
+                return
+            body = bytearray()
+            while True:
+                message = await receive()
+                if message["type"] == "http.disconnect":
+                    break
+                body.extend(message.get("body", b""))
+                if len(body) > MAX_API_BODY_BYTES:
+                    resp = JSONResponse({"detail": "请求内容过大"}, status_code=413)
+                    await resp(scope, receive, send)
+                    return
+                if not message.get("more_body", False):
+                    break
+            replayed = False
+
+            async def buffered_receive():
+                nonlocal replayed
+                if not replayed:
+                    replayed = True
+                    return {"type": "http.request", "body": bytes(body), "more_body": False}
+                return {"type": "http.disconnect"}
+
+            receive = buffered_receive
         user = db.get_session_user(_cookie_token(headers.get("cookie", "")))
         ctx = set_current_user(user["user_id"] if user else None)
         try:
@@ -171,6 +203,12 @@ class AccessGuard:
                 await resp(scope, receive, send)
                 return
             is_public = (not path.startswith("/api/")) or path in PUBLIC_API_PATHS
+            if (scope.get("method") not in ("GET", "HEAD", "OPTIONS") and origin
+                    and not _same_origin(origin, headers.get("host", "")) and not allowed):
+                resp = JSONResponse({"detail": "请求来源不受信任"}, status_code=403)
+                _apply_cors(resp, origin, False)
+                await resp(scope, receive, send)
+                return
             if not is_public and user is None:
                 resp = JSONResponse({"detail": "请先登录"}, status_code=401)
                 _apply_cors(resp, origin, allowed)
@@ -488,6 +526,8 @@ def _course_form(data: dict) -> dict:
     name = str(data.get("name") or "").strip()
     if not name:
         raise HTTPException(400, "课程名称不能为空")
+    if len(name) > 100:
+        raise HTTPException(400, "课程名称太长（最多 100 字）")
     try:
         day = int(data.get("day") or 1)
         start = int(data.get("start") or 1)
@@ -501,6 +541,8 @@ def _course_form(data: dict) -> dict:
     note = str(data.get("note") or "").strip()
     raw_weeks = data.get("weeks", "")
     if isinstance(raw_weeks, (list, tuple)):
+        if len(raw_weeks) > 60:
+            raise HTTPException(400, "周次列表过长")
         try:
             weeks = sorted({int(w) for w in raw_weeks if int(w) > 0})
         except (TypeError, ValueError):
@@ -508,6 +550,8 @@ def _course_form(data: dict) -> dict:
         weeks = [w for w in weeks if w <= 60]
     else:
         text = str(raw_weeks or "").strip()
+        if len(text) > 500:
+            raise HTTPException(400, "周次格式过长")
         try:
             weeks, derived = parse_weeks(text)
         except ValueError as e:
@@ -516,17 +560,26 @@ def _course_form(data: dict) -> dict:
             raise HTTPException(400, "周次无法识别，请用 1-16、1-15(单)、3,5,7 这类写法")
         if not note:
             note = derived
+    teacher = str(data.get("teacher") or "").strip()
+    room = str(data.get("room") or "").strip()
+    campus = str(data.get("campus") or "").strip()
+    note = str(data.get("note") or "").strip()
+    if (len(teacher) > 80 or len(room) > 100 or len(campus) > 100
+            or len(note) > 500):
+        raise HTTPException(400, "教师、地点或备注过长")
     return {
         "name": name, "day": day, "start": start, "end": end,
-        "teacher": str(data.get("teacher") or "").strip(),
-        "room": str(data.get("room") or "").strip(),
+        "teacher": teacher, "room": room,
         "weeks": weeks,
-        "campus": str(data.get("campus") or "").strip(),
+        "campus": campus,
         "note": note,
     }
 
 
 def _save_course_overrides(overrides: dict) -> dict:
+    if (len(overrides["added"]) > 500 or len(overrides["edited"]) > 2000
+            or len(overrides["hidden"]) > 2000):
+        raise HTTPException(400, "手动课表调整数量超过上限")
     save_config({"course_overrides": overrides})
     return {
         "ok": True,
@@ -596,6 +649,8 @@ async def edit_course(req: CourseEditRequest):
         uid = (req.uid or "").strip()
         if not uid:
             raise HTTPException(400, "缺少课程标识")
+        if len(uid) > 100:
+            raise HTTPException(400, "课程标识过长")
         target = next((item for item in overrides["added"]
                        if uid in (item.get("uid"), item.get("source_id"))), None)
         if action == "delete":
@@ -746,6 +801,8 @@ async def edit_event(req: EventEditRequest):
         event_id = (req.id or "").strip()
         if not event_id:
             raise HTTPException(400, "缺少日程标识")
+        if len(event_id) > 100:
+            raise HTTPException(400, "日程标识过长")
         current = db.get_event(event_id)
         if current is None:
             raise HTTPException(404, "日程不存在")
@@ -906,14 +963,17 @@ async def rooms_free(date_s: str = "", start: int = 1, end: int = 2,
     try:
         if not isinstance(rooms, list):
             if share_write:
-                rooms = await provider.fetch_free_rooms(
-                    week, d.isoweekday(), start, end, campus, building, strict=True)
-                if room_cache.on_demand_write_eligible(d) and isinstance(rooms, list):
-                    updated_at = room_cache.snapshot_time()
-                    await cache.set(shared_key, {"data": rooms, "updated_at": updated_at},
-                                    room_cache.ON_DEMAND_TTL)
-                    return {**response, "rooms": rooms, "count": len(rooms),
-                            "cache_source": "shared_on_demand", "updated_at": updated_at}
+                try:
+                    snapshot = await room_cache.fetch_on_demand(
+                        shared_key, get_current_user(),
+                        lambda: provider.fetch_free_rooms(
+                            week, d.isoweekday(), start, end, campus, building, strict=True))
+                except room_cache.RoomQueryBusy as e:
+                    raise HTTPException(429, str(e))
+                rooms = snapshot["data"]
+                return {**response, "rooms": rooms, "count": len(rooms),
+                        "cache_source": "shared_on_demand",
+                        "updated_at": snapshot["updated_at"]}
             else:
                 rooms = await provider.fetch_free_rooms(
                     week, d.isoweekday(), start, end, campus, building)
@@ -1171,14 +1231,20 @@ def _exam_form(data: dict) -> dict:
     if len(room) > 100 or len(seat) > 50:
         raise HTTPException(400, "考场或座位信息太长")
     note = str(data.get("note") or "").strip()
+    campus = str(data.get("campus") or "").strip()
     if len(note) > 500:
         raise HTTPException(400, "备注太长")
+    if len(campus) > 100:
+        raise HTTPException(400, "校区信息太长")
     return {"name": name, "date": date_s, "start": start, "end": end,
             "room": room, "seat": seat,
-            "campus": str(data.get("campus") or "").strip(), "note": note}
+            "campus": campus, "note": note}
 
 
 def _save_exam_overrides(overrides: dict) -> dict:
+    if (len(overrides["added"]) > 500 or len(overrides["edited"]) > 2000
+            or len(overrides["hidden"]) > 2000):
+        raise HTTPException(400, "手动考试调整数量超过上限")
     save_config({"exam_overrides": overrides})
     return {
         "ok": True,
@@ -1215,6 +1281,8 @@ async def edit_exam(req: ExamEditRequest):
         uid = (req.uid or "").strip()
         if not uid:
             raise HTTPException(400, "缺少考试标识")
+        if len(uid) > 100:
+            raise HTTPException(400, "考试标识过长")
         target = next((item for item in overrides["added"]
                        if uid in (item.get("uid"), item.get("source_id"))), None)
         if action == "delete":
@@ -1271,19 +1339,29 @@ async def ingest(req: IngestRequest):
     from .curl_import import analyze_payload
     from .providers.httpjson import courses_from_payload
 
+    if req.mapping is not None:
+        if not isinstance(req.mapping, dict) or len(req.mapping) > 20:
+            raise HTTPException(400, "mapping 必须是字段数不超过 20 的对象")
+        for key, value in req.mapping.items():
+            if not isinstance(key, str) or not isinstance(value, str) or len(value) > 200:
+                raise HTTPException(400, "mapping 的字段名和路径必须是短字符串")
+    source = _req_str(req.source or "ingest", "source", 40)
     analysis = analyze_payload(req.payload)
     if analysis["kind"] == "events":
         return {"ok": False,
                 "message": "收到的是「按日期的日程事件流」，现有课表模型只表达周期性课程，需要事件适配器；请把这份结构发给助手。",
                 "analysis": analysis}
     list_path = req.list_path if req.list_path is not None else analysis["suggested_path"]
+    list_path = _req_str(list_path or "", "list_path", 200)
     mapping = req.mapping if req.mapping is not None else analysis["mapping"]
     try:
         courses = courses_from_payload(req.payload, list_path, mapping)
     except ValueError as e:
         return {"ok": False, "message": str(e), "analysis": analysis,
                 "list_path": list_path, "mapping": mapping}
-    result = await apply_snapshot(load_config(), courses, req.source or "ingest", req.push)
+    if len(courses) > 2000:
+        return {"ok": False, "message": "单次最多导入 2000 门课程", "analysis": analysis}
+    result = await apply_snapshot(load_config(), courses, source, req.push)
     result.update(
         {"analysis": analysis, "list_path": list_path, "mapping": mapping})
     return result
@@ -1833,17 +1911,17 @@ async def _sync_after_register(uid: int) -> None:
 
 
 class RegisterRequest(BaseModel):
-    username: str
-    password: str
-    display_name: str = ""
-    student_id: str = ""
-    zhengfang_password: str = ""
-    invite: str = ""
+    username: str = Field(max_length=32)
+    password: str = Field(max_length=auth.MAX_PASSWORD_LENGTH)
+    display_name: str = Field(default="", max_length=40)
+    student_id: str = Field(default="", max_length=32)
+    zhengfang_password: str = Field(default="", max_length=256)
+    invite: str = Field(default="", max_length=128)
 
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    username: str = Field(max_length=32)
+    password: str = Field(max_length=auth.MAX_PASSWORD_LENGTH)
 
 
 @app.get("/api/auth/status")
@@ -1857,28 +1935,32 @@ async def auth_status():
 
 @app.post("/api/auth/register")
 async def auth_register(req: RegisterRequest, request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    if not auth.consume_rate_limit(f"register:{client_ip}"):
+        raise HTTPException(429, "注册尝试过于频繁，请一分钟后再试")
     err = auth.validate_credentials(req.username, req.password)
     if err:
         raise HTTPException(400, err)
     username = req.username.strip()
+    invite_code = _normalize_invite_code(req.invite)
+    err = db.registration_error(username, invite_code)
+    if err:
+        raise HTTPException(400, err)
     hashed = await run_in_threadpool(auth.hash_password, req.password)
     try:
-        uid, first = db.register_user_atomic(
+        uid, _ = db.register_user_atomic(
             username, hashed, (req.display_name or "").strip()[:40],
-            (req.student_id or "").strip()[:32], _normalize_invite_code(req.invite))
+            (req.student_id or "").strip()[:32], invite_code)
     except sqlite3.IntegrityError:
         raise HTTPException(400, "用户名已存在")
     except ValueError as e:
         raise HTTPException(400, str(e))
     template = global_config()
-    if first:
-        # 第一个账号继承现有的单用户配置与课表（快照 user_id=1 已迁移）
-        clean = template
-    else:
-        clean = json.loads(json.dumps(DEFAULT_CONFIG))
-        for key in ("school", "semester_start", "total_weeks", "section_times"):
-            clean[key] = template.get(key, clean.get(key))
-        clean["security"] = {"enabled": False, "token": "", "allowed_origins": []}
+    clean = json.loads(json.dumps(DEFAULT_CONFIG))
+    for key in ("school", "semester_start", "total_weeks", "section_times",
+                "section_ends", "weather", "rooms"):
+        clean[key] = template.get(key, clean.get(key))
+    clean["security"] = {"enabled": False, "token": "", "allowed_origins": []}
     clean["chaoxing"] = dict(DEFAULT_CONFIG["chaoxing"])
 
     # 注册选填正方凭据后先使用正方；auto 允许后续接入门户时立即优先门户。
@@ -1902,7 +1984,8 @@ async def auth_register(req: RegisterRequest, request: Request):
     db.save_user_config(uid, clean)
 
     token = auth.new_token()
-    db.create_session(uid, token, auth.SESSION_TTL_SECONDS)
+    if not db.checked_create_session(uid, token, auth.SESSION_TTL_SECONDS, hashed):
+        raise HTTPException(401, "账号状态已变更，请重新注册")
     if has_zf and not os.environ.get("AGENDA_SKIP_REGISTER_SYNC"):
         # 只在注册成功后才拉数据：用新用户上下文后台同步一次，不阻塞注册响应。
         # 失败由 run_sync 自己记录日志，不影响账号已创建这一结果。
@@ -1915,20 +1998,28 @@ async def auth_register(req: RegisterRequest, request: Request):
 
 @app.post("/api/auth/login")
 async def auth_login(req: LoginRequest, request: Request):
-    key = request.client.host if request.client else "unknown"
-    if not auth.check_rate_limit(key):
+    client_ip = request.client.host if request.client else "unknown"
+    username = (req.username or "").strip()
+    account_key = f"login:{client_ip}:{username.lower()}"
+    ip_key = f"login-ip:{client_ip}"
+    if (not auth.rate_limit_allowed(account_key)
+            or not auth.rate_limit_allowed(ip_key, auth.MAX_IP_ATTEMPTS_PER_MINUTE)):
         raise HTTPException(429, "尝试过于频繁，请一分钟后再试")
-    user = db.get_user_by_username((req.username or "").strip())
-    pw_ok = False
-    if user:
-        pw_ok = await run_in_threadpool(auth.verify_password, req.password, user["password_hash"])
+    user = db.get_user_by_username(username)
+    stored_hash = user["password_hash"] if user else ""
+    pw_ok = await run_in_threadpool(auth.verify_password, req.password, stored_hash)
     if not user or not user["is_active"] or not pw_ok:
+        auth.record_auth_failure(account_key)
+        auth.record_auth_failure(ip_key, auth.MAX_IP_ATTEMPTS_PER_MINUTE)
         raise HTTPException(400, "用户名或密码错误")
     token = auth.new_token()
     if not db.checked_create_session(user["id"], token, auth.SESSION_TTL_SECONDS,
                                      user["password_hash"]):
+        auth.record_auth_failure(account_key)
+        auth.record_auth_failure(ip_key, auth.MAX_IP_ATTEMPTS_PER_MINUTE)
         raise HTTPException(400, "账号状态或密码已变更，请重新登录")
-    auth.clear_rate_limit(key)
+    auth.clear_rate_limit(account_key)
+    auth.clear_rate_limit(ip_key)
     db.set_last_login(user["id"])
     resp = JSONResponse({"ok": True, "user": _public_user(user)})
     _session_cookie(resp, request, token)
@@ -1966,7 +2057,7 @@ async def auth_delete_account(req: DeleteAccountRequest, request: Request):
         if others:
             db.set_user_role(others[0]["id"], "admin")
             promoted = others[0]["username"]
-    db.delete_user(uid)
+    await run_in_threadpool(db.delete_user, uid)
     resp = JSONResponse({"ok": True, "promoted": promoted})
     resp.delete_cookie(auth.SESSION_COOKIE, path="/")
     return resp
@@ -2334,12 +2425,18 @@ async def provider_sources():
     from .config import portal_configured, zhengfang_configured, resolve_course_source
     cfg = load_config()
     snap = db.get_snapshot()
+    portal_url = cfg["provider"].get("portal", {}).get("url") or ""
+    try:
+        parts = urlsplit(portal_url)
+        portal_origin = urlunsplit((parts.scheme, parts.netloc.rsplit("@", 1)[-1], "", "", ""))
+    except ValueError:
+        portal_origin = ""
     return {
         "primary": cfg["provider"].get("primary", "auto"),
         "resolved": resolve_course_source(cfg),
         "portal": {
             "configured": portal_configured(cfg),
-            "url": (cfg["provider"].get("portal", {}).get("url") or "")[:80],
+            "url": portal_origin[:80],
             "has_login": bool(cfg["provider"].get("portal", {}).get("headers")),
         },
         "zhengfang": {

@@ -20,25 +20,25 @@ import re
 import time
 from contextlib import asynccontextmanager
 from datetime import date
-from ipaddress import ip_address
 from urllib.parse import urlsplit
 
 import httpx
 
 from ..models import Course, Exam, Score, parse_weeks
-from ..netguard import check_outbound_request, UnsafeURLError
+from ..netguard import SafeAsyncHTTPTransport, check_outbound_request
 from .base import AuthExpiredError, TimetableProvider
 
 
-async def _check_zhengfang_request(request) -> None:
+def _origin(url: str) -> tuple[str, str, int]:
+    parts = urlsplit(url)
+    return (parts.scheme.lower(), (parts.hostname or "").lower(),
+            parts.port or (443 if parts.scheme == "https" else 80))
+
+
+async def _check_zhengfang_request(request, expected_origin: tuple[str, str, int]) -> None:
     await check_outbound_request(request)
-    try:
-        ip = ip_address(urlsplit(str(request.url)).hostname or "")
-    except ValueError:
-        return
-    ip = getattr(ip, "ipv4_mapped", None) or ip
-    if ip.is_loopback:
-        raise UnsafeURLError("正方教务地址不允许指向本机/回环地址")
+    if _origin(str(request.url)) != expected_origin:
+        request.headers.pop("cookie", None)
 
 
 UA = ("Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 "
@@ -140,6 +140,32 @@ def _page_message(html: str) -> str:
     return ""
 
 
+def _response_items(payload, keys: tuple[str, ...], label: str) -> list:
+    if not isinstance(payload, dict):
+        raise ValueError(f"{label}接口响应格式异常")
+    for key in keys:
+        if key in payload:
+            items = payload[key]
+            if items is None:
+                return []
+            if not isinstance(items, list):
+                raise ValueError(f"{label}接口 {key} 字段不是数组")
+            return items
+    raise ValueError(f"{label}接口缺少 {'/'.join(keys)} 字段")
+
+
+def _response_total(payload: dict) -> int | None:
+    for key in ("total", "totalCount", "totalSize"):
+        value = payload.get(key)
+        if value is None:
+            continue
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 def _to_int(value, default: int = 1) -> int:
     if isinstance(value, (int, float)):
         return int(value)
@@ -216,9 +242,12 @@ class ZhengfangProvider(TimetableProvider):
         headers = {"User-Agent": UA}
         if self.cookie:
             headers["Cookie"] = self.cookie
+        expected_origin = _origin(self.base)
         async with httpx.AsyncClient(
             follow_redirects=not self._shared_rooms, trust_env=False, headers=headers, timeout=30,
-            event_hooks={"request": [_check_zhengfang_request]},
+            transport=SafeAsyncHTTPTransport(),
+            event_hooks={"request": [
+                lambda request: _check_zhengfang_request(request, expected_origin)]},
         ) as client:
             if not self.cookie:
                 await self._login(client)
@@ -324,10 +353,8 @@ class ZhengfangProvider(TimetableProvider):
         except ValueError:
             raise AuthExpiredError(LOGIN_EXPIRED_MSG)
         if not isinstance(payload, dict):
-            raise TermEmptyError(
-                f"教务没有返回 {term_label(self.year, self.term)} 的课表，学年/学期可能填错了",
-                self.year, self.term)
-        kb_list = payload.get("kbList") or []
+            raise ValueError("课表接口响应格式异常")
+        kb_list = _response_items(payload, ("kbList",), "课表")
         if not kb_list:
             keys = ", ".join(list(payload.keys())[:8])
             raise TermEmptyError(
@@ -354,52 +381,77 @@ class ZhengfangProvider(TimetableProvider):
                 campus=item.get("cdxqmc") or item.get("xqmc") or "",
                 source_id=str(item.get("jxb_id") or item.get("kch_id") or ""),
             ))
+        if kb_list and not courses:
+            raise ValueError("课表接口返回了无法识别的数据")
         return courses
 
     async def _fetch_exams(self, client: httpx.AsyncClient) -> list[Exam]:
-        r = await client.post(
-            f"{self.base}/kwgl/kscx_cxXsksxxIndex.html",
-            params={"doType": "query", "gnmkdm": "N358105"},
-            headers={
-                "X-Requested-With": "XMLHttpRequest",
-                "Referer": f"{self.base}/kwgl/kscx_cxXsksxxIndex.html"
-                           "?gnmkdm=N358105&layout=default",
-            },
-            data={
-                "xnm": self.year,
-                "xqm": self.term,
-                "_search": "false",
-                "nd": int(time.time() * 1000),
-                "queryModel.showCount": "50",
-                "queryModel.currentPage": "1",
-                "queryModel.sortName": "",
-                "queryModel.sortOrder": "asc",
-            },
-            timeout=30,
-        )
-        r.raise_for_status()
-        try:
-            payload = r.json()
-        except ValueError:
-            raise AuthExpiredError(LOGIN_EXPIRED_MSG)
-        items = payload.get("items") or payload.get("rows") or []
-        exams = []
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            name = str(item.get("kcmc") or "").strip()
-            raw_time = str(item.get("kssj") or "").strip()
-            if not name and not raw_time:
-                continue
-            exams.append(Exam.from_dict({
-                "name": name or "未命名考试",
-                "time": raw_time,
-                "room": item.get("cdmc") or "",
-                "seat": item.get("zwh") or "",
-                "campus": item.get("cdxqmc") or item.get("xqmc") or "",
-                "note": item.get("ksxz") or "",
-                "source_id": str(item.get("id") or f"{name}_{raw_time}"),
-            }))
+        exams: list[Exam] = []
+        seen: set[str] = set()
+        page_size = 50
+        for page in range(1, 21):
+            r = await client.post(
+                f"{self.base}/kwgl/kscx_cxXsksxxIndex.html",
+                params={"doType": "query", "gnmkdm": "N358105"},
+                headers={
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Referer": f"{self.base}/kwgl/kscx_cxXsksxxIndex.html"
+                               "?gnmkdm=N358105&layout=default",
+                },
+                data={
+                    "xnm": self.year,
+                    "xqm": self.term,
+                    "_search": "false",
+                    "nd": int(time.time() * 1000),
+                    "queryModel.showCount": str(page_size),
+                    "queryModel.currentPage": str(page),
+                    "queryModel.sortName": "",
+                    "queryModel.sortOrder": "asc",
+                },
+                timeout=30,
+            )
+            r.raise_for_status()
+            try:
+                payload = r.json()
+            except ValueError:
+                raise AuthExpiredError(LOGIN_EXPIRED_MSG)
+            items = _response_items(payload, ("items", "rows"), "考试")
+            total = _response_total(payload)
+            added = 0
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("kcmc") or "").strip()
+                raw_time = str(item.get("kssj") or "").strip()
+                if not name and not raw_time:
+                    continue
+                source_id = str(item.get("id") or f"{name}_{raw_time}")
+                if source_id in seen:
+                    continue
+                seen.add(source_id)
+                added += 1
+                exams.append(Exam.from_dict({
+                    "name": name or "未命名考试",
+                    "time": raw_time,
+                    "room": item.get("cdmc") or "",
+                    "seat": item.get("zwh") or "",
+                    "campus": item.get("cdxqmc") or item.get("xqmc") or "",
+                    "note": item.get("ksxz") or "",
+                    "source_id": source_id,
+                }))
+            if items and not added and page > 1 and (total is None or len(seen) < total):
+                raise ValueError("考试接口分页数据异常，已保留上次快照")
+            if total is not None:
+                if len(seen) >= total:
+                    break
+                if not items:
+                    raise ValueError("考试接口返回数量不完整，已保留上次快照")
+            elif len(items) < page_size:
+                break
+        else:
+            raise ValueError("考试接口数据超过分页上限，已保留上次快照")
+        if not exams and items:
+            raise ValueError("考试接口返回了无法识别的数据")
         return exams
 
     # ---------- 考试成绩（cjcx/cjcx_cxDgXscj，正方标准学生成绩查询） ----------
@@ -459,9 +511,7 @@ class ZhengfangProvider(TimetableProvider):
             raise AuthExpiredError(LOGIN_EXPIRED_MSG)
         if not isinstance(payload, dict):
             raise ValueError("成绩接口未返回有效数据（登录态失效、菜单号或路径不对）")
-        if "items" not in payload and "rows" not in payload:
-            raise ValueError("成绩接口响应缺少 items/rows 字段，可能接口已变更")
-        items = payload.get("items") or payload.get("rows") or []
+        items = _response_items(payload, ("items", "rows"), "成绩")
         scores = []
         for item in items:
             if not isinstance(item, dict):
@@ -491,6 +541,8 @@ class ZhengfangProvider(TimetableProvider):
                 note=self._score_text(item, "bz", "remark", "note"),
                 source_id=self._score_text(item, "cj_id", "id", "jxb_id", "kch_id"),
             ))
+        if items and not scores:
+            raise ValueError("成绩接口返回了无法识别的数据，已保留上次快照")
         return scores
 
     async def fetch(self) -> list[Course]:
@@ -644,10 +696,13 @@ class ZhengfangProvider(TimetableProvider):
     async def _room_session(self):
         key = (self.base, self.username)
         cached = self._room_cookies.get(key)
+        expected_origin = _origin(self.base)
         if not self.cookie and cached and cached[1] > time.time():
             async with httpx.AsyncClient(
                 follow_redirects=True, trust_env=False, timeout=30,
-                event_hooks={"request": [_check_zhengfang_request]},
+                transport=SafeAsyncHTTPTransport(),
+                event_hooks={"request": [
+                    lambda request: _check_zhengfang_request(request, expected_origin)]},
                 headers={"User-Agent": UA, "Cookie": cached[0]},
             ) as client:
                 yield client

@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -20,6 +21,52 @@ ON_DEMAND_WINDOW_DAYS = 7
 ON_DEMAND_TTL = 7 * 86400
 SLOTS = tuple((start, start + 1) for start in range(1, 12, 2))
 log = logging.getLogger(__name__)
+
+ON_DEMAND_MAX_INFLIGHT = 4
+ON_DEMAND_USER_INTERVAL = 1.0
+ON_DEMAND_RETRY_INTERVAL = 3.0
+_on_demand_tasks: dict[str, asyncio.Task] = {}
+_on_demand_user_last: dict[int | None, float] = {}
+_on_demand_key_last: dict[str, float] = {}
+
+
+class RoomQueryBusy(RuntimeError):
+    pass
+
+
+async def fetch_on_demand(key: str, user_id: int | None, fetcher):
+    now = time.monotonic()
+    task = _on_demand_tasks.get(key)
+    if task is None:
+        if (len(_on_demand_tasks) >= ON_DEMAND_MAX_INFLIGHT
+                or now - _on_demand_user_last.get(user_id, 0) < ON_DEMAND_USER_INTERVAL
+                or now - _on_demand_key_last.get(key, 0) < ON_DEMAND_RETRY_INTERVAL):
+            raise RoomQueryBusy("空教室查询过于频繁，请稍后再试")
+        _on_demand_user_last[user_id] = now
+        task = asyncio.create_task(_fetch_and_store(key, fetcher))
+        _on_demand_tasks[key] = task
+    try:
+        return await asyncio.shield(task)
+    finally:
+        _on_demand_key_last[key] = time.monotonic()
+        if task.done() and _on_demand_tasks.get(key) is task:
+            _on_demand_tasks.pop(key, None)
+        if len(_on_demand_key_last) > 4096:
+            _on_demand_key_last.clear()
+        if len(_on_demand_user_last) > 4096:
+            _on_demand_user_last.clear()
+
+
+async def _fetch_and_store(key: str, fetcher) -> dict:
+    snapshot = await cache.get(key)
+    if isinstance(snapshot, dict) and isinstance(snapshot.get("data"), list):
+        return snapshot
+    rooms = await fetcher()
+    if not isinstance(rooms, list):
+        raise ValueError("空教室接口未返回有效数据")
+    snapshot = {"data": rooms, "updated_at": snapshot_time()}
+    await cache.set(key, snapshot, ON_DEMAND_TTL)
+    return snapshot
 
 
 def on_demand_write_eligible(day: date, now: datetime | None = None) -> bool:

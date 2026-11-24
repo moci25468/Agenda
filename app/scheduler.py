@@ -20,6 +20,7 @@ from .providers import get_provider
 from .providers.base import AuthExpiredError
 from .push import push_all
 from .study import review_message
+from .user_context import get_current_user
 from .weather import weather_line, daily_summary
 
 TZ = ZoneInfo("Asia/Shanghai")
@@ -43,11 +44,16 @@ SYNC_SPACING_MAX = 300       # 人少时也不拉得太开
 # 同步串行化：手动同步与定时同步可能同时触发，若并发执行会各自基于同一份旧快照
 # 算出重复变更并重复推送。按用户加非阻塞锁，不阻塞其他用户的同步。
 # （apply_snapshot 另有一把短锁，保护 diff→保存→写日志这段无 await 的临界区。）
-_sync_locks: dict[int | None, threading.Lock] = {}
-_sync_locks_guard = threading.Lock()
 _apply_lock = threading.Lock()
 # 失败按用户退避重试；忙碌不消耗尝试次数，仍可在下一轮补跑。
 _sync_retries: dict[int, tuple[datetime, int]] = {}
+
+# 普通提醒推送失败时使用 reminders 表的独立元数据键做有限退避，不占用成功去重键。
+# 不新增数据库字段，进程重启后仍可借 reminders.sent_at 恢复退避。
+REMINDER_RETRY_PREFIX = "__reminder_retry__:"
+REMINDER_RETRY_DELAYS = (2, 4, 8, 16, 30, 60)
+_reminder_guard = threading.Lock()
+_reminder_inflight: set[tuple[int, str, str]] = set()
 
 
 def _defer_sync_retry(uid: int, now: datetime) -> None:
@@ -103,7 +109,19 @@ def course_line(cfg: dict, c: Course) -> str:
 
 
 def courses_on(cfg: dict, courses: list[Course], day: date) -> list[Course]:
-    week = current_week(cfg.get("semester_start", ""), day, cfg.get("total_weeks", 25))
+    start_s = cfg.get("semester_start", "")
+    total_weeks = cfg.get("total_weeks", 25)
+    try:
+        start = date.fromisoformat(start_s)
+        total_weeks = int(total_weeks)
+    except (ValueError, TypeError):
+        # 配置缺失时沿用 current_week 的兼容行为，不把未知学期误判为已结束。
+        week = current_week(start_s, day, cfg.get("total_weeks", 25))
+    else:
+        monday = start - timedelta(days=start.weekday())
+        if day < start or total_weeks < 1 or day >= monday + timedelta(weeks=total_weeks):
+            return []
+        week = current_week(start_s, day, total_weeks)
     dow = day.isoweekday()
     return sorted(
         [c for c in courses if c.day == dow and c.in_week(week)],
@@ -226,7 +244,7 @@ async def apply_snapshot(cfg: dict, courses: list[Course], source: str,
                 parts.append(
                     f"【今日剩余课程】{WEEKDAY_CN[today.isoweekday() - 1]}\n"
                     + "\n".join(course_line(cfg, c) for c in remaining))
-        if parts:
+        if parts and _push_ready(cfg):
             pushed = await push_all(cfg, title, "\n\n".join(parts))
     return {"ok": True, "message": summary, "changes": changes, "pushed": pushed}
 
@@ -265,12 +283,17 @@ async def run_sync(push: bool = True) -> dict:
     """
     from .user_context import get_current_user
 
-    with _sync_locks_guard:
-        lock = _sync_locks.setdefault(get_current_user(), threading.Lock())
+    uid = get_current_user()
+    lock = db.user_lock(uid)
     if not lock.acquire(blocking=False):
         return {"ok": False, "message": "已有一个同步在进行中，请稍后再试",
                 "changes": {}, "pushed": [], "busy": True}
     try:
+        if uid is not None:
+            user = db.get_user_by_id(uid)
+            if not user or not user["is_active"]:
+                return {"ok": False, "message": "账号不存在或已停用",
+                        "changes": {}, "pushed": []}
         # 生产环境未配置任何真实数据源时不跑同步：不写空快照、不刷「0 门课程」日志。
         # 前端会据 has_source=false 显示「暂无数据 + 去设置配置」引导。
         cfg = load_config()
@@ -404,6 +427,99 @@ def _push_ready(cfg: dict) -> bool:
                 or (p.get("wecom_enabled") and (p.get("wecom_webhook") or "").strip()))
 
 
+def _reminder_retry_state(user_id: int, day: str, key: str) -> tuple[int, datetime | None]:
+    prefix = f"{REMINDER_RETRY_PREFIX}{key}:"
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            "SELECT item_key, sent_at FROM reminders WHERE user_id=? AND day=? "
+            "AND substr(item_key, 1, ?)=?",
+            (user_id, day, len(prefix), prefix),
+        ).fetchall()
+    attempts, latest = 0, None
+    for row in rows:
+        try:
+            attempts = max(attempts, int(row["item_key"][len(prefix):]))
+            sent_at = datetime.fromisoformat(row["sent_at"])
+        except (ValueError, TypeError):
+            continue
+        if sent_at.tzinfo is None:
+            sent_at = sent_at.replace(tzinfo=TZ)
+        if latest is None or sent_at > latest:
+            latest = sent_at
+    return attempts, latest
+
+
+def _claim_reminder(day: str, key: str, now: datetime) -> tuple[int, str, str] | None:
+    user_id = get_current_user() or 1
+    token = (user_id, day, key)
+    with _reminder_guard:
+        if token in _reminder_inflight or db.reminder_sent(day, key):
+            return None
+        attempts, latest = _reminder_retry_state(user_id, day, key)
+        if attempts:
+            if attempts >= len(REMINDER_RETRY_DELAYS) or latest is None:
+                return None
+            delay = REMINDER_RETRY_DELAYS[attempts - 1]
+            if now < latest + timedelta(minutes=delay):
+                return None
+        _reminder_inflight.add(token)
+    return token
+
+
+def _finish_reminder(token: tuple[int, str, str], key: str, ok: bool, now: datetime):
+    user_id, day, _ = token
+    prefix = f"{REMINDER_RETRY_PREFIX}{key}:"
+    with _reminder_guard:
+        try:
+            if ok:
+                db.mark_reminder(day, key)
+                with db.get_conn() as conn:
+                    conn.execute(
+                        "DELETE FROM reminders WHERE user_id=? AND day=? "
+                        "AND substr(item_key, 1, ?)=?",
+                        (user_id, day, len(prefix), prefix),
+                    )
+                return
+            attempts, _ = _reminder_retry_state(user_id, day, key)
+            attempt = min(attempts + 1, len(REMINDER_RETRY_DELAYS))
+            retry_key = f"{prefix}{attempt}"
+            with db.get_conn() as conn:
+                conn.execute(
+                    "INSERT OR IGNORE INTO reminders (user_id, day, item_key, sent_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (user_id, day, retry_key, now.isoformat(timespec="seconds")),
+                )
+                cutoff = (now.astimezone(TZ) - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+                conn.execute("DELETE FROM reminders WHERE user_id=? AND sent_at<?",
+                             (user_id, cutoff))
+        finally:
+            _reminder_inflight.discard(token)
+
+
+def _release_reminder(token: tuple[int, str, str]):
+    with _reminder_guard:
+        _reminder_inflight.discard(token)
+
+
+async def _push_reminder(cfg: dict, day: str, key: str, title: str,
+                         body: str, now: datetime) -> dict | None:
+    """推送普通提醒：任一通道成功才标记，全失败时按既有 reminders 表退避重试。"""
+    token = _claim_reminder(day, key, now)
+    if token is None:
+        return None
+    try:
+        try:
+            results = await push_all(cfg, title, body)
+        except Exception:  # noqa: BLE001
+            # 单次异常不阻断其他提醒；原始异常可能含 webhook，不对外返回。
+            results = []
+        ok = any(result.get("ok") is True for result in results)
+        _finish_reminder(token, key, ok, now)
+        return {"title": title, "key": key, "results": results}
+    finally:
+        _release_reminder(token)
+
+
 async def _alert_auth_expired(cfg: dict, source: str, err,
                               alert_failure: bool = False) -> list[dict]:
     """登录态过期时主动推一条提醒，按数据源每天去重，修复后不再打扰。
@@ -418,10 +534,9 @@ async def _alert_auth_expired(cfg: dict, source: str, err,
         w in text for w in ("过期", "Cookie", "cURL", "登录失败", "未登录", "登录失效"))
     if not (expired or alert_failure) or not _push_ready(cfg):
         return []
-    day_s = datetime.now(TZ).date().isoformat()
+    now = datetime.now(TZ)
+    day_s = now.date().isoformat()
     key = f"auth_alert:{source}" if expired else f"sync_alert:{source}"
-    if db.reminder_sent(day_s, key):
-        return []
     if not expired:
         title = "门户课表同步失败"
         body = "融合门户课表暂时无法更新，已保留原有课表。请检查门户数据源配置或稍后重试。"
@@ -433,9 +548,8 @@ async def _alert_auth_expired(cfg: dict, source: str, err,
         title = "门户登录已过期"
         body = ("融合门户登录已过期，课表暂停自动更新。\n"
                 "请到「课表来源」重新扫码登录，或导入新的 cURL / 更新 Cookie。")
-    db.mark_reminder(day_s, key)  # 先标记再推，推送失败也不重复打扰
-    results = await push_all(cfg, title, body)
-    return [{"title": title, "key": key, "results": results}]
+    pushed = await _push_reminder(cfg, day_s, key, title, body, now)
+    return [pushed] if pushed else []
 
 
 def _courses_after(cfg: dict, courses: list[Course], moment: datetime) -> list[Course]:
@@ -464,7 +578,7 @@ async def push_next_day_summary(now: datetime | None = None) -> list[dict]:
     """每天按用户配置的时间推送「明日安排」，时间与内容均可在设置里调，按天去重。
 
     与同步推送解耦：同步时若今天还有课只推「今日剩余」，明天的安排交给本任务统一推。
-    每分钟轮询一次，只在 now 命中配置时间（默认 22:00）的那一分钟触发。
+    每分钟轮询一次，配置时间（默认 22:00）至当日结束之间均可补触发，按天去重。
     """
     cfg = load_config()
     if not cfg.get("push_next_day", True):
@@ -474,7 +588,8 @@ async def push_next_day_summary(now: datetime | None = None) -> list[dict]:
     now = now or datetime.now(TZ)
     now = now.replace(tzinfo=TZ) if now.tzinfo is None else now.astimezone(TZ)
     p = cfg.get("push", {})
-    if now.strftime("%H:%M") != _hhmm(p.get("daily_time"), "22:00"):
+    daily_at = _parse_hhmm(now.date().isoformat(), _hhmm(p.get("daily_time"), "22:00"))
+    if daily_at is None or now < daily_at:
         return []
     tomorrow = (now + timedelta(days=1)).date()
     tomorrow_s = tomorrow.isoformat()
@@ -520,10 +635,8 @@ async def push_next_day_summary(now: datetime | None = None) -> list[dict]:
     if not parts:
         return []  # 内容全关或暂无数据时不打扰，也不占用去重标记
     title = "明日课表提醒" if (show_courses and len(parts) == 1) else "明日安排提醒"
-    # 先标记再推，推送失败也不重复打扰
-    db.mark_reminder(tomorrow_s, dedup_key)
-    results = await push_all(cfg, title, "\n\n".join(parts))
-    return [{"title": title, "key": dedup_key, "results": results}]
+    pushed = await _push_reminder(cfg, tomorrow_s, dedup_key, title, "\n\n".join(parts), now)
+    return [pushed] if pushed else []
 
 
 async def run_reminders(now: datetime | None = None) -> list[dict]:
@@ -607,12 +720,10 @@ async def _push_upcoming(cfg: dict, p: dict, now: datetime) -> list[dict]:
     for title, key, start_at, body in items:
         if not (start_at - window <= now < start_at):
             continue  # 没进提醒窗口，或已经开始了
-        if db.reminder_sent(day_s, key):
-            continue
-        db.mark_reminder(day_s, key)  # 先标记再推，推送失败也不重复打扰
         remaining = max(1, int((start_at - now).total_seconds() // 60))
-        results = await push_all(cfg, title, f"还有 {remaining} 分钟\n{body}")
-        pushed.append({"title": title, "key": key, "results": results})
+        result = await _push_reminder(cfg, day_s, key, title, f"还有 {remaining} 分钟\n{body}", now)
+        if result:
+            pushed.append(result)
     return pushed
 
 
@@ -649,11 +760,10 @@ async def push_exam_reviews(cfg: dict, now: datetime | None = None) -> list[dict
         if not (1 <= left <= days):
             continue
         key = f"review:{e.name}:{e.start}"
-        if db.reminder_sent(e.date, key):
-            continue
-        db.mark_reminder(e.date, key)
-        results = await push_all(cfg, "考试复习提醒", review_message(e, left))
-        pushed.append({"title": "考试复习提醒", "key": key, "results": results})
+        result = await _push_reminder(cfg, e.date, key, "考试复习提醒",
+                                      review_message(e, left), now)
+        if result:
+            pushed.append(result)
     return pushed
 
 

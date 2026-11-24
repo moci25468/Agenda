@@ -7,6 +7,9 @@ import tempfile
 
 _TEST_DATA_DIR = tempfile.mkdtemp(prefix="qut_verify_")
 os.environ["CAMPUS_DATA_DIR"] = _TEST_DATA_DIR
+# 必须在导入任何 app 模块之前覆盖生产环境，验证只使用进程内缓存和独立命名空间。
+os.environ["REDIS_URL"] = ""
+os.environ["AGENDA_CACHE_PREFIX"] = f"agenda:verify:{os.getpid()}"
 # 验证脚本用演示源做测试夹具：生产默认关闭演示数据，这里显式开启以保留原有测试场景。
 os.environ["AGENDA_ALLOW_DEMO"] = "1"
 sys.path.insert(0, ".")
@@ -15,6 +18,7 @@ from pathlib import Path
 import time
 import subprocess
 import socket
+import threading
 from app.providers.httpjson import courses_from_payload
 from app.browser_login import (
     build_candidate, pick_best, _headers_for_config, _parse_body, _public_candidates,
@@ -56,6 +60,7 @@ _db.init_db()   # 隔离目录是空的，先建表（含旧库迁移检测）
 asyncio.run(run_sync(push=False))   # 生成一份演示快照，供后续筛选用例使用
 
 passed = []
+_db.create_user("verify-primary", "unused-test-hash")
 
 
 def check(name, cond, detail=""):
@@ -73,7 +78,7 @@ check("Redis缓存.凭证身份摘要不可逆", len(_cache.fingerprint("cookie-
 
 
 # 配置与定时同步新回归：使用独立用户，避免污染主验证夹具。
-_uid_migration_user = 987
+_uid_migration_user = _db.create_user("verify-migration", "unused-test-hash")
 _uid_migration_ctx = set_current_user(_uid_migration_user)
 try:
     import hashlib as _hashlib
@@ -110,7 +115,7 @@ try:
 finally:
     current_user_id.reset(_uid_migration_ctx)
 
-_provider_test_uid = 988
+_provider_test_uid = _db.create_user("verify-provider", "unused-test-hash")
 _db.save_user_config(_provider_test_uid, {"provider": {
     "http_url": "https://portal.example.invalid/courses",
     "http_headers": '{"cookie":"legacy-cookie"}',
@@ -128,7 +133,7 @@ check("配置.旧 provider 字段先规范化且新 headers 覆盖旧值",
       and "zf_username" not in _provider_patch_cfg["provider"],
       str(_provider_patch_cfg["provider"]))
 
-_patch_uid = 986
+_patch_uid = _db.create_user("verify-patch", "unused-test-hash")
 _db.save_user_config(_patch_uid, {
     "calendar_subscribe_token": "preserve-subscribe-token",
     "course_overrides": {"hidden": ["old-hidden"], "edited": {}, "added": []},
@@ -461,9 +466,9 @@ check("正方.空学期报错带学期标签",
 try:
     asyncio.run(_zfp._fetch_courses(_ZfClient(_ZfResp(None))))
     _zf_null = ""
-except TermEmptyError as e:
+except ValueError as e:
     _zf_null = str(e)
-check("正方.学年参数不被接受时报学期", "2026-2027" in _zf_null, _zf_null)
+check("正方.空响应不伪装成空学期", "格式异常" in _zf_null, _zf_null)
 
 check("正方.识别教务当前学期",
       asyncio.run(_zfp.detect_current_term(
@@ -795,7 +800,8 @@ _orig_cfg = load_config()
 _push_calls.clear()
 _scfg = load_config()
 _scfg["push_next_day"] = False
-_scfg["push"] = dict(_scfg.get("push") or {}, new_score_enabled=True)
+_scfg["push"] = dict(_scfg.get("push") or {}, new_score_enabled=True,
+                     bark_enabled=True, bark_key="test")
 _cur_courses = [Course.from_dict(d) for d in _orig_snap["courses"]]
 db.save_score_snapshot([_s1.to_dict()], "test")  # 基线：只有数据结构
 _res = asyncio.run(_sched.apply_snapshot(
@@ -939,14 +945,15 @@ check("复习.数学建议命中", "公式" in advice_for("高等数学"))
 check("复习.代码建议命中", "代码" in advice_for("数据结构"))
 check("复习.陌生科目有通用建议", advice_for("神秘学导论").strip() != "")
 
-# 用户隔离：999 的配置 / 快照 / 去重记录独立于默认用户
-_ctx999 = set_current_user(999)
+# 用户隔离：独立真实用户的配置 / 快照 / 去重记录独立于默认用户
+_uid_isolated = _db.create_user("verify-reminder-isolation", "unused-test-hash")
+_ctx_isolated = set_current_user(_uid_isolated)
 try:
-    _cfg999 = load_config()
-    _cfg999["semester_start"] = "2026-08-31"
-    _cfg999["push"] = {**_cfg999.get("push", {}), "bark_enabled": True, "bark_key": "t",
-                       "reminder_enabled": True, "reminder_advance": 15}
-    save_config(_cfg999)
+    _cfg_isolated = load_config()
+    _cfg_isolated["semester_start"] = "2026-08-31"
+    _cfg_isolated["push"] = {**_cfg_isolated.get("push", {}), "bark_enabled": True, "bark_key": "t",
+                             "reminder_enabled": True, "reminder_advance": 15}
+    save_config(_cfg_isolated)
     db.save_snapshot([Course("周五隔离课", day=5, start=1, end=2,
                              weeks=[11]).to_dict()], "test")
     _push_calls.clear()
@@ -956,7 +963,7 @@ try:
     check("提醒.去重记录落当前用户",
           db.reminder_sent("2026-11-13", "course:周五隔离课:1:"))
 finally:
-    current_user_id.reset(_ctx999)
+    current_user_id.reset(_ctx_isolated)
 _push_calls.clear()
 asyncio.run(run_reminders(now=_at("2026-11-13T07:50:00")))
 check("提醒.用户间互不串扰", not _push_calls
@@ -1056,8 +1063,8 @@ _dc["push"] = {**_dc.get("push", {}), "daily_time": "21:30",
                "daily_courses": True, "daily_events": True, "daily_weather": False}
 save_config(_dc)
 _push_calls.clear()
-asyncio.run(_sched.push_next_day_summary(now=_at(_today.isoformat() + "T22:00:00")))
-check("每日推送.非配置时间不推", not _push_calls, str(_push_calls))
+asyncio.run(_sched.push_next_day_summary(now=_at(_today.isoformat() + "T21:29:00")))
+check("每日推送.配置时间前不推", not _push_calls, str(_push_calls))
 _push_calls.clear()
 asyncio.run(_sched.push_next_day_summary(now=_at(_today.isoformat() + "T21:30:00")))
 check("每日推送.命中配置时间推送", len(_push_calls) == 1
@@ -1127,7 +1134,7 @@ check("提醒.Bark 关闭不推", not _push_calls, str(_push_calls))
 
 # 还原现场：快照 / 考试 / 配置 / 推送函数，清理提醒测试数据
 db.delete_event(_rem_ev["id"])
-db.delete_user(999)   # 清掉隔离用户的配置 / 快照 / 提醒记录
+db.delete_user(_uid_isolated)   # 清掉隔离用户的配置 / 快照 / 提醒记录
 with db.get_conn() as conn:
     conn.execute("DELETE FROM reminders WHERE user_id = 1")
 _sched.push_all = _orig_push
@@ -1194,32 +1201,26 @@ check("天气.关闭后逐节映射为空",
 _wcfg["weather"]["enabled"] = True
 _weather.fetch_hourly = _orig_fetch3
 
-# 企业微信 / 钉钉群机器人：本地 mock webhook（负载 / 失败 / 日志）
-import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+# 企业微信 / 钉钉群机器人：离线 mock 传输（负载 / 失败 / 日志）
+import app.push as _pushmod
 _wecom_hits: list[tuple[str, dict]] = []
 
 
-class _WecomMock(BaseHTTPRequestHandler):
-    def do_POST(self):
-        raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
-        _wecom_hits.append((self.path, json.loads(raw or b"{}")))
-        data = ({"errcode": 93000, "errmsg": "invalid webhook url"} if "fail" in self.path
-                else {"errcode": 0, "errmsg": "ok"})
-        body = json.dumps(data).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def log_message(self, *a):
-        pass
+def _wecom_mock(request):
+    _wecom_hits.append((str(request.url), json.loads(request.content or b"{}")))
+    data = ({"errcode": 93000, "errmsg": "invalid webhook url"}
+            if "deadbeef" in str(request.url)
+            else {"errcode": 0, "errmsg": "ok"})
+    return httpx.Response(200, headers={"Content-Type": "application/json"}, json=data)
 
 
-_wecom_srv = ThreadingHTTPServer(("127.0.0.1", 0), _WecomMock)
-threading.Thread(target=_wecom_srv.serve_forever, daemon=True).start()
-WECOM_OK = f"http://127.0.0.1:{_wecom_srv.server_address[1]}/wecom"
-WECOM_FAIL = f"http://127.0.0.1:{_wecom_srv.server_address[1]}/fail"
+_wecom_transport = httpx.MockTransport(_wecom_mock)
+_orig_wecom_guard = _pushmod.assert_safe_outbound_url
+_orig_wecom_transport = _pushmod.SafeAsyncHTTPTransport
+_pushmod.assert_safe_outbound_url = lambda url: url
+_pushmod.SafeAsyncHTTPTransport = lambda: _wecom_transport
+WECOM_OK = WECOM_API + "242cbb53-1ae9-a13e-a360-4a2819a0af87"
+WECOM_FAIL = WECOM_API + "deadbeef-1ae9-a13e-a360-4a2819a0af87"
 
 
 async def main():
@@ -1289,6 +1290,9 @@ async def main():
     _sr = await send_selected(_scfg, "t", "b", ["sms"])
     check("推送.未知通道拒绝",
           _sr[0]["ok"] is False and "不支持" in _sr[0]["error"], str(_sr))
+
+    _pushmod.assert_safe_outbound_url = _orig_wecom_guard
+    _pushmod.SafeAsyncHTTPTransport = _orig_wecom_transport
 
     # 7. 日志落库
     logs = db.get_logs(10)
@@ -1429,7 +1433,8 @@ h = _headers_for_config(cand, "SESSION=fallback")
 check("一键登录.保留 Cookie 去掉 host", h.get("cookie") == "SESSION=abc"
       and "host" not in {k.lower() for k in h}, str(h))
 check("一键登录.无 Cookie 时补齐", _headers_for_config(
-    {"headers": {}}, "A=1").get("Cookie") == "A=1")
+    {"url": "https://portal.qut.edu.cn/portal/api/kb", "headers": {}},
+    "A=1").get("Cookie") == "A=1")
 check("一键登录.POST body 解析", _parse_body('{"week":9}') == {"week": 9})
 check("一键登录.状态不泄露 Cookie", "SESSION" not in str(_public_candidates([cand])))
 masked = _mask_url("https://portal.qut.edu.cn/api/kb?token=abc123&week=9")
@@ -1486,27 +1491,63 @@ def _free_port() -> int:
     return port
 
 
+def _stop_process(proc) -> None:
+    """终止临时子进程，超时后强制结束。"""
+    if proc is None:
+        return
+    if proc.poll() is None:
+        try:
+            proc.terminate()
+        except ProcessLookupError:
+            pass
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            pass
+
+
+_http_data_dir = None
+
+
 def _start_temp_server():
+    global _http_data_dir
     import httpx as _hx
     port = _free_port()
+    _http_data_dir = tempfile.mkdtemp(prefix="qut_verify_http_")
     server_log = open("/tmp/qut_verify_server.log", "w")
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "app.main:app",
-         "--host", "127.0.0.1", "--port", str(port), "--log-level", "info"],
-        cwd=str(Path(__file__).resolve().parent),
-        stdout=server_log, stderr=subprocess.STDOUT,
-    )
-    with _hx.Client(trust_env=False) as probe:
-        for _ in range(40):
-            if proc.poll() is not None:
-                raise RuntimeError("临时服务进程已退出（可用 --log-level error 手动排查）")
-            try:
-                if probe.get(f"http://127.0.0.1:{port}/api/health", timeout=1).status_code == 200:
-                    print(f"（端到端用例自启临时服务 127.0.0.1:{port}，验证结束自动关闭）")
-                    return proc, port
-            except Exception:  # noqa: BLE001
-                time.sleep(0.25)
-    raise RuntimeError("临时服务 10 秒内未就绪")
+    proc = None
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "uvicorn", "app.main:app",
+             "--host", "127.0.0.1", "--port", str(port), "--log-level", "info"],
+            cwd=str(Path(__file__).resolve().parent),
+            env={**os.environ, "CAMPUS_DATA_DIR": _http_data_dir,
+                 "REDIS_URL": "", "AGENDA_SKIP_REGISTER_SYNC": "1"},
+            stdout=server_log, stderr=subprocess.STDOUT,
+        )
+        with _hx.Client(trust_env=False) as probe:
+            for _ in range(40):
+                if proc.poll() is not None:
+                    raise RuntimeError("临时服务进程已退出（可用 --log-level error 手动排查）")
+                try:
+                    if probe.get(f"http://127.0.0.1:{port}/api/health", timeout=1).status_code == 200:
+                        print(f"（端到端用例自启临时服务 127.0.0.1:{port}，验证结束自动关闭）")
+                        return proc, port
+                except Exception:  # noqa: BLE001
+                    time.sleep(0.25)
+        raise RuntimeError("临时服务 10 秒内未就绪")
+    except BaseException:
+        _stop_process(proc)
+        raise
+    finally:
+        server_log.close()
 
 
 async def http_tests(port: int):
@@ -1514,6 +1555,17 @@ async def http_tests(port: int):
     import httpx as _hx
 
     base = f"http://127.0.0.1:{port}"
+    today = date.today()
+    subscription_exam_date = (today + timedelta(days=30)).isoformat()
+    manual_exam_date = (today + timedelta(days=45)).isoformat()
+    manual_exam_updated_date = (today + timedelta(days=46)).isoformat()
+    reg_counter = 0
+
+    def reg_headers():
+        nonlocal reg_counter
+        reg_counter += 1
+        return {"X-Forwarded-For": f"198.51.100.{reg_counter}"}
+
     anon = _hx.AsyncClient(timeout=30, trust_env=False)
     check("鉴权.未登录访问被拒",
           (await anon.get(f"{base}/api/status")).status_code == 401)
@@ -1538,7 +1590,8 @@ async def http_tests(port: int):
     check("注册.首次需初始化", st.get("needs_setup") is True
           and st.get("invite_required") is False, str(st))
     r = await anon.post(f"{base}/api/auth/register", json={
-        "username": "admin", "password": "AdminPass123", "display_name": "管理员"})
+        "username": "admin", "password": "AdminPass123", "display_name": "管理员"},
+        headers=reg_headers())
     check("注册.首个账号为管理员", r.status_code == 200
           and r.json().get("user", {}).get("role") == "admin", str(r.text)[:200])
     token_a = r.cookies.get("qut_session")
@@ -1550,10 +1603,9 @@ async def http_tests(port: int):
         r = await ca.post(f"{base}/api/provider/import-curl", json={
             "curl": f"curl '{base}/api/timetable' -H 'cookie: qut_session={token_a}'"})
         d = r.json()
-        check("import-curl 端到端", r.status_code == 200 and d.get("ok")
-              and d.get("course_count", 0) > 0, str(d)[:300])
-        check("import.自动 list_path", d.get("list_path") == "courses",
-              str(d.get("list_path")))
+        check("import-curl.本地地址被 SSRF 拦截", d.get("ok") is False
+              and "不允许访问本机/内网地址" in (d.get("detail", "") + d.get("error", "")),
+              str(d)[:300])
 
         tt = (await ca.get(f"{base}/api/timetable")).json()
         await ca.post(f"{base}/api/settings", json={"weather": {"enabled": False}})
@@ -1572,13 +1624,15 @@ async def http_tests(port: int):
         cleared = await ca.post(f"{base}/api/settings", json={"rooms": {
             "default_campus": "", "default_campus_name": ""}})
         check("默认教学楼.清空校区同步清空教学楼", cleared.json()["rooms"]["default_building"] == "")
-        # 推送：企业微信单通道测试（免启用开关）
+        # 推送：企业微信单通道测试（离线子进程不发送真实网络请求）
+        wecom_http_fixture = "http://127.0.0.1:9/webhook"
         await ca.post(f"{base}/api/settings", json={"push": {
             "bark_enabled": False, "bark_key": "",
-            "wecom_enabled": False, "wecom_webhook": WECOM_OK}})
+            "wecom_enabled": False, "wecom_webhook": wecom_http_fixture}})
         r = (await ca.post(f"{base}/api/push/test", json={"channel": "wecom"})).json()
         check("推送.企业微信单通道测试", r["results"][0]["channel"] == "wecom"
-              and r["results"][0]["ok"] is True, str(r)[:200])
+              and r["results"][0]["ok"] is False
+              and "不安全" in r["results"][0]["error"], str(r)[:200])
         await ca.post(f"{base}/api/settings", json={"push": {"wecom_enabled": True}})
         st_push = (await ca.get(f"{base}/api/status")).json()
         check("推送.状态列出企业微信通道",
@@ -1600,7 +1654,7 @@ async def http_tests(port: int):
         # webhook 现在按密钥脱敏回传（MASK），只要求仍是原值或掩码、且没被非法输入覆盖
         _keep_hook = keep.get("wecom_webhook")
         check("推送.被拒后配置未被覆盖",
-              _keep_hook in (WECOM_OK, MASK) and "work.weixin" not in str(_keep_hook),
+              _keep_hook in (wecom_http_fixture, MASK) and "work.weixin" not in str(_keep_hook),
               str(_keep_hook)[:80])
         await ca.post(f"{base}/api/settings", json={"push": {
             "wecom_enabled": False, "wecom_webhook": ""}})
@@ -1622,20 +1676,22 @@ async def http_tests(port: int):
         code = inv.get("code")
         check("邀请码.管理员可生成", bool(code), str(inv)[:160])
         rb = await ca.post(f"{base}/api/auth/register", json={
-            "username": "bob", "password": "BobPass123"})
+            "username": "bob", "password": "BobPass123"}, headers=reg_headers())
         check("注册.无邀请码被拒", rb.status_code == 400, str(rb.status_code))
         rb = await ca.post(f"{base}/api/auth/register", json={
-            "username": "bob", "password": "BobPass123", "invite": code})
+            "username": "bob", "password": "BobPass123", "invite": code},
+            headers=reg_headers())
         check("注册.凭邀请码成功", rb.status_code == 200, str(rb.text)[:200])
         token_b = rb.cookies.get("qut_session")
 
         # 注册正方凭据使用 auto，后续门户接入可以自动优先；
-        # 验证脚本已置 AGENDA_SKIP_REGISTER_SYNC，不会触发真实网络同步。
+        # 临时服务子进程已显式设置 AGENDA_SKIP_REGISTER_SYNC=1，不会触发真实网络同步。
         inv_zf = (await ca.post(f"{base}/api/auth/invites")).json().get("code")
         rz = await _hx.AsyncClient(timeout=30, trust_env=False).post(
             f"{base}/api/auth/register", json={
                 "username": "zfnew", "password": "ZfnewPass123", "invite": inv_zf,
-                "student_id": "20239999", "zhengfang_password": "secret-pwd"})
+                "student_id": "20239999", "zhengfang_password": "secret-pwd"},
+            headers=reg_headers())
         check("注册.带正方凭证成功", rz.status_code == 200, str(rz.text)[:200])
         token_zf = rz.cookies.get("qut_session")
         async with _hx.AsyncClient(timeout=30, trust_env=False,
@@ -1658,7 +1714,8 @@ async def http_tests(port: int):
 
         # 一次性码用过即废
         again = await ca.post(f"{base}/api/auth/register", json={
-            "username": "bob2", "password": "BobPass123", "invite": code})
+            "username": "bob2", "password": "BobPass123", "invite": code},
+            headers=reg_headers())
         check("邀请码.一次性码用后失效", again.status_code == 400, str(again.status_code))
 
         # 邀请码可复用次数：max_uses=2 的码可以被两个人用
@@ -1668,13 +1725,16 @@ async def http_tests(port: int):
         check("邀请码.可指定复用次数", bool(mcode) and multi.get("max_uses") == 2,
               str(multi)[:160])
         rr = await ca.post(f"{base}/api/auth/register", json={
-            "username": "dave", "password": "DavePass123", "invite": mcode})
+            "username": "dave", "password": "DavePass123", "invite": mcode},
+            headers=reg_headers())
         check("邀请码.多次码第 1 次可用", rr.status_code == 200, str(rr.status_code))
         rr = await ca.post(f"{base}/api/auth/register", json={
-            "username": "erin", "password": "ErinPass123", "invite": mcode})
+            "username": "erin", "password": "ErinPass123", "invite": mcode},
+            headers=reg_headers())
         check("邀请码.多次码第 2 次可用", rr.status_code == 200, str(rr.status_code))
         rr = await ca.post(f"{base}/api/auth/register", json={
-            "username": "frank", "password": "FrankPass123", "invite": mcode})
+            "username": "frank", "password": "FrankPass123", "invite": mcode},
+            headers=reg_headers())
         check("邀请码.次数用尽后被拒", rr.status_code == 400, str(rr.status_code))
         invites = (await ca.get(f"{base}/api/auth/invites")).json().get("invites", [])
         row = next((x for x in invites if x["code"] == mcode), {})
@@ -1727,10 +1787,12 @@ async def http_tests(port: int):
         emo = await ca.post(f"{base}/api/auth/invites", json={"code": "开学啦🎉🎉"})
         check("邀请码.表情被拒", emo.status_code == 400, str(emo.status_code))
         rcn = await ca.post(f"{base}/api/auth/register", json={
-            "username": "hana", "password": "HanaPass123", "invite": "计科2301班级群"})
+            "username": "hana", "password": "HanaPass123", "invite": "计科2301班级群"},
+            headers=reg_headers())
         check("邀请码.中文码可注册", rcn.status_code == 200, str(rcn.text)[:160])
         rfw = await ca.post(f"{base}/api/auth/register", json={
-            "username": "iris", "password": "IrisPass123", "invite": "测试２０２６"})
+            "username": "iris", "password": "IrisPass123", "invite": "测试２０２６"},
+            headers=reg_headers())
         check("邀请码.注册时全角自动归一化", rfw.status_code == 200,
               str(rfw.text)[:160])
         users_now = (await ca.get(f"{base}/api/auth/users")).json().get("users", [])
@@ -1741,7 +1803,8 @@ async def http_tests(port: int):
                             json={"count": 3, "code": "batch-code"})
         check("邀请码.批量不支持自定义", bad.status_code == 400, str(bad.status_code))
         rc = await ca.post(f"{base}/api/auth/register", json={
-            "username": "gina", "password": "GinaPass123", "invite": "QUT2026-class"})
+            "username": "gina", "password": "GinaPass123", "invite": "QUT2026-class"},
+            headers=reg_headers())
         check("邀请码.自定义码可用于注册", rc.status_code == 200, str(rc.status_code))
         users_now = (await ca.get(f"{base}/api/auth/users")).json().get("users", [])
         for u in users_now:
@@ -1796,7 +1859,7 @@ async def http_tests(port: int):
             # 考试也进订阅日历：手动添加一场考试，凭 token 拉取应包含该考试事件
             await ca.post(f"{base}/api/exams", json={
                 "action": "add",
-                "exam": {"name": "订阅测试考试", "date": "2026-11-20",
+                "exam": {"name": "订阅测试考试", "date": subscription_exam_date,
                          "start": "14:00", "end": "16:00", "room": "3-101",
                          "seat": "8"}})
             async with _hx.AsyncClient(timeout=30, trust_env=False) as anon_exam:
@@ -1846,6 +1909,7 @@ async def http_tests(port: int):
             "type": "mock", "portal": {"url": "", "headers": ""},
             "zhengfang": {"username": "", "password": "", "cookie": ""}}})
         sr = (await ca.post(f"{base}/api/sync")).json()
+        gr = (await ca.get(f"{base}/api/grades")).json()
         check("考试.同步带考试数据", sr.get("ok") is True
               and "考试" in sr.get("message", ""), str(sr)[:220])
         ex = (await ca.get(f"{base}/api/exams")).json()
@@ -1859,7 +1923,7 @@ async def http_tests(port: int):
               and st_ex.get("upcoming_exam_count", 0) >= 2
               and bool(st_ex.get("next_exam")), str(st_ex.get("next_exam"))[:160])
         # 今日页合并日程：今日/明日考试随课表接口返回，供时间线展示
-        _today_d = date.today()
+        _today_d = today
         _tmr_d = _today_d + timedelta(days=1)
         await ca.post(f"{base}/api/exams", json={"action": "add", "exam": {
             "name": "今日日程考试", "date": _today_d.isoformat(),
@@ -1877,9 +1941,8 @@ async def http_tests(port: int):
                   for e in tt_d.get("tomorrow_exams", [])),
               str(tt_d.get("tomorrow_exams"))[:200])
         await ca.post(f"{base}/api/exams", json={"action": "reset"})
-        # 演示源不产生成绩：成绩页应为空，绝不能用假数据填充
-        gr = (await ca.get(f"{base}/api/grades")).json()
-        check("成绩.演示模式无假成绩", not gr.get("scores")
+        # 演示源不产生成绩：直接检查同步后的成绩接口，绝不能用假数据填充。
+        check("成绩.演示同步不产生成绩", not gr.get("scores")
               and not gr.get("supported"), str(gr)[:260])
         # 兼容旧版遗留的演示快照：库里即使有 mock 成绩也必须返回空
         db.save_score_snapshot([_s1.to_dict()], "mock")
@@ -1920,7 +1983,6 @@ async def http_tests(port: int):
               str(gr_err.get("error")))
         with db.get_conn() as _c:
             _c.execute("DELETE FROM sync_log WHERE message LIKE '%测试用接口错误%'")
-        check("成绩.演示同步不产生成绩", "门成绩" not in sr.get("message", ""), str(sr)[:220])
         # 手动改课表：添加 → 修改 → 隐藏 → 恢复 → 修改同步课 → 重置
         base_list = (await ca.get(f"{base}/api/courses")).json()
         check("课表.列表带稳定标识", base_list.get("count", 0) > 0
@@ -2004,7 +2066,7 @@ async def http_tests(port: int):
                                        "start": "10:00", "end": "09:00"}})
         check("考试.结束早于开始被拒", bad.status_code == 400, str(bad.status_code))
         add = (await ca.post(f"{base}/api/exams", json={
-            "action": "add", "exam": {"name": "英语四级", "date": "2026-12-14",
+            "action": "add", "exam": {"name": "英语四级", "date": manual_exam_date,
                                        "start": "09:00", "end": "11:20",
                                        "room": "3-101", "seat": "8"}})).json()
         lst = (await ca.get(f"{base}/api/exams")).json()
@@ -2013,15 +2075,15 @@ async def http_tests(port: int):
         check("考试.手动添加生效", add.get("ok") and manual_ex is not None
               and manual_ex["manual"] and len(lst["exams"]) == ex_base + 1
               and st_e.get("exam_count") == ex_base + 1
-              and manual_ex["display_time"] == "2026-12-14 09:00-11:20",
+              and manual_ex["display_time"] == f"{manual_exam_date} 09:00-11:20",
               str(manual_ex)[:200])
         upd = (await ca.post(f"{base}/api/exams", json={
             "action": "update", "uid": manual_ex["uid"],
-            "exam": {"name": "英语四级（改）", "date": "2026-12-15",
+            "exam": {"name": "英语四级（改）", "date": manual_exam_updated_date,
                      "start": "14:00", "end": "16:00", "room": "3-102"}})).json()
         lst = (await ca.get(f"{base}/api/exams")).json()
         check("考试.修改手动考试", upd.get("ok") and any(
-            e["name"] == "英语四级（改）" and e["date"] == "2026-12-15"
+            e["name"] == "英语四级（改）" and e["date"] == manual_exam_updated_date
             and e["room"] == "3-102" for e in lst["exams"]),
             str(lst.get("exams"))[:200])
         await ca.post(f"{base}/api/exams", json={
@@ -2056,7 +2118,7 @@ async def http_tests(port: int):
               str(fin)[:200])
 
         # 个人日程：校验 → 增改查 → 今日汇总 → 状态计数 → 多用户隔离 → 删除
-        today_iso = date.today().isoformat()
+        today_iso = today.isoformat()
         bad = await ca.post(f"{base}/api/events", json={
             "action": "add", "event": {"title": "  ", "date": today_iso}})
         check("日程.空标题被拒", bad.status_code == 400, str(bad.status_code))
@@ -2222,7 +2284,7 @@ async def http_tests(port: int):
         with db.get_conn() as conn:
             conn.execute(
                 "INSERT OR IGNORE INTO reminders (user_id, day, item_key, sent_at) VALUES (?, ?, ?, ?)",
-                (bob_id, "2026-11-09", "course:注销清理课:1:", db.now_str()))
+                (bob_id, today_iso, "course:注销清理课:1:", db.now_str()))
         ok = await cb2.post(f"{base}/api/auth/delete-account",
                             json={"username": "bob", "password": "BobPass123"})
         check("注销.确认后删除账号",
@@ -2242,7 +2304,8 @@ async def http_tests(port: int):
         # 管理员注销时把权限交给最早注册的其他账号
         code2 = (await ca2.post(f"{base}/api/auth/invites")).json().get("code")
         r = await ca2.post(f"{base}/api/auth/register", json={
-            "username": "carol", "password": "CarolPass123", "invite": code2})
+            "username": "carol", "password": "CarolPass123", "invite": code2},
+            headers=reg_headers())
         check("注销.新账号可继续注册", r.status_code == 200, str(r.status_code))
         token_c = r.cookies.get("qut_session")
         ok = await ca2.post(f"{base}/api/auth/delete-account",
@@ -2260,22 +2323,18 @@ async def http_tests(port: int):
 
 
 server_proc = None
+_main_db_path = db.DB_PATH
 try:
     server_proc, port = _start_temp_server()
+    db.DB_PATH = Path(_http_data_dir) / "campus.db"
     asyncio.run(http_tests(port))
 except Exception as e:  # noqa: BLE001
     check("端到端用例", False, f"临时服务或用例异常：{e}")
 finally:
-    if server_proc is not None:
-        server_proc.terminate()
-        try:
-            server_proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            server_proc.kill()
-            try:
-                server_proc.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                pass
+    _stop_process(server_proc)
+    db.DB_PATH = _main_db_path
+    if _http_data_dir:
+        shutil.rmtree(_http_data_dir, ignore_errors=True)
 
 
 # 会话原子性：放在 E2E（首个用户=admin 已注册）之后跑，避免抢占演示所挂的 id=1。
@@ -2492,6 +2551,8 @@ async def _verify_shared_rooms():
                       and mb.get("default_campus_name") == "user-2" and "default_campus_name" not in shared_meta)
 
                 async def personal(uid, extra):
+                    rc._on_demand_user_last.clear()
+                    rc._on_demand_key_last.clear()
                     return await client.get("/api/rooms/free", params={**params, **extra},
                                             headers={"Cookie": f"qut_session={uid}"})
 

@@ -7,8 +7,10 @@ provider.primary 决定课表主数据源：auto = 门户优先（配了门户�
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import os
+import tempfile
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -301,18 +303,20 @@ def load_config() -> dict:
     return cfg
 
 
-def save_config(cfg: dict) -> dict:
-    """保存配置；掩码值保留原密钥。按当前用户写入 DB，否则写全局模板文件。"""
-    from .user_context import current_user_id
-
-    current = load_config()
-    merged = _deep_merge(current, cfg)
-    # 掩码占位 → 沿用已保存的原值
+def _merge_config_patch(current: dict, patch: dict) -> dict:
+    merged = _deep_merge(current, patch)
     for path in MASK_PATHS:
         if _get_path(merged, path) == MASK:
             old = _get_path(current, path)
             if old:
                 _set_path(merged, path, old)
+    return merged
+
+
+def save_config(cfg: dict) -> dict:
+    """保存配置；掩码值保留原密钥。按当前用户写入 DB，否则写全局模板文件。"""
+    from .user_context import current_user_id
+
     uid = current_user_id.get()
     if uid is not None:
         from . import db
@@ -335,13 +339,21 @@ def save_config(cfg: dict) -> dict:
         saved = db.patch_user_config(uid, patch)
         return _deep_merge(DEFAULT_CONFIG, saved)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = CONFIG_PATH.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(CONFIG_PATH)
-    try:
-        os.chmod(CONFIG_PATH, 0o600)
-    except OSError:
-        pass
+    lock_path = CONFIG_PATH.with_suffix(".lock")
+    with open(lock_path, "a+", encoding="utf-8") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        merged = _merge_config_patch(load_config(), cfg)
+        fd, tmp_name = tempfile.mkstemp(prefix=".config-", suffix=".tmp", dir=DATA_DIR)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as tmp:
+                os.fchmod(tmp.fileno(), 0o600)
+                json.dump(merged, tmp, ensure_ascii=False, indent=2)
+                tmp.flush()
+                os.fsync(tmp.fileno())
+            os.replace(tmp_name, CONFIG_PATH)
+        finally:
+            if os.path.exists(tmp_name):
+                os.unlink(tmp_name)
     return merged
 
 

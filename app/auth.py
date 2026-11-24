@@ -10,30 +10,39 @@ import threading
 import time
 from collections import defaultdict
 
-PBKDF2_ITERATIONS = 200_000
+PBKDF2_ITERATIONS = 600_000
 SESSION_COOKIE = "qut_session"
 SESSION_TTL_SECONDS = 7 * 24 * 3600
 INVITE_TTL_SECONDS = 7 * 24 * 3600
 MIN_PASSWORD_LENGTH = 8
+MAX_PASSWORD_LENGTH = 256
 
 _attempt_lock = threading.Lock()
 _attempts: dict[str, list[float]] = defaultdict(list)
 MAX_ATTEMPTS_PER_MINUTE = 5
+MAX_IP_ATTEMPTS_PER_MINUTE = 30
+_DUMMY_HASH = (f"pbkdf2_sha256${PBKDF2_ITERATIONS}$"
+               f"{'00' * 16}${'00' * 32}")
 
 
 def hash_password(password: str) -> str:
+    if not isinstance(password, str) or len(password) > MAX_PASSWORD_LENGTH:
+        raise ValueError(f"密码不能超过 {MAX_PASSWORD_LENGTH} 位")
     salt = secrets.token_bytes(16)
     dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PBKDF2_ITERATIONS)
     return f"pbkdf2_sha256${PBKDF2_ITERATIONS}${salt.hex()}${dk.hex()}"
 
 
 def verify_password(password: str, stored: str) -> bool:
+    if not isinstance(password, str) or len(password) > MAX_PASSWORD_LENGTH:
+        return False
     try:
-        algo, iterations, salt_hex, digest = (stored or "").split("$")
-        if algo != "pbkdf2_sha256":
+        algo, iterations, salt_hex, digest = (stored or _DUMMY_HASH).split("$")
+        iterations = int(iterations)
+        if algo != "pbkdf2_sha256" or not 1 <= iterations <= 10_000_000:
             return False
         dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"),
-                                 bytes.fromhex(salt_hex), int(iterations))
+                                 bytes.fromhex(salt_hex), iterations)
         return secrets.compare_digest(dk.hex(), digest)
     except (ValueError, TypeError):
         return False
@@ -46,19 +55,33 @@ def validate_credentials(username: str, password: str) -> str | None:
         return "用户名需 3-32 位，只能含字母、数字、_ - ."
     if len(password or "") < MIN_PASSWORD_LENGTH:
         return f"密码至少 {MIN_PASSWORD_LENGTH} 位"
+    if len(password or "") > MAX_PASSWORD_LENGTH:
+        return f"密码不能超过 {MAX_PASSWORD_LENGTH} 位"
     return None
 
 
-def check_rate_limit(key: str) -> bool:
-    """每分钟最多 5 次失败尝试；返回 False 表示已被限流。"""
+def rate_limit_allowed(key: str, limit: int = MAX_ATTEMPTS_PER_MINUTE) -> bool:
     now = time.time()
     with _attempt_lock:
-        hits = [t for t in _attempts[key] if now - t < 60]
+        hits = [t for t in _attempts.get(key, []) if now - t < 60]
         _attempts[key] = hits
-        if len(hits) >= MAX_ATTEMPTS_PER_MINUTE:
-            return False
-        hits.append(now)
-        return True
+        return len(hits) < limit
+
+
+def record_auth_failure(key: str, limit: int = MAX_ATTEMPTS_PER_MINUTE) -> None:
+    now = time.time()
+    with _attempt_lock:
+        hits = [t for t in _attempts.get(key, []) if now - t < 60]
+        if len(hits) < limit:
+            hits.append(now)
+        _attempts[key] = hits
+
+
+def consume_rate_limit(key: str, limit: int = MAX_ATTEMPTS_PER_MINUTE) -> bool:
+    if not rate_limit_allowed(key, limit):
+        return False
+    record_auth_failure(key, limit)
+    return True
 
 
 def clear_rate_limit(key: str):
