@@ -17,7 +17,7 @@ from .models import (Course, Event, Exam, Score, apply_course_overrides, apply_e
                      diff_courses, diff_scores, event_line, score_uid,
                      DEFAULT_SECTION_TIMES, DEFAULT_SECTION_ENDS)
 from .providers import get_provider
-from .providers.base import AuthExpiredError
+from .providers.base import AuthExpiredError, PortalResponseError
 from .push import push_all
 from .study import review_message
 from .user_context import get_current_user
@@ -305,6 +305,37 @@ async def run_sync(push: bool = True) -> dict:
         lock.release()
 
 
+class PortalRefreshError(RuntimeError):
+    """自动恢复未完成，不能据此认定保存的学校登录状态已经失效。"""
+
+    _MESSAGES = {
+        "no-user": "门户自动恢复缺少用户信息，请重新登录本应用后同步",
+        "no-profile": "尚未保存门户浏览器登录状态，请到「课表来源」扫码登录一次",
+        "profile-unavailable": "无法读取已保存的门户浏览器状态，请管理员检查数据目录权限",
+        "low-memory": "服务器可用内存不足，门户自动恢复暂未启动，稍后将重试",
+        "busy": "门户自动恢复正在处理其他同步，稍后将重试",
+        "interactive-login-running": "正在扫码登录门户，请完成登录后再同步",
+        "no-playwright": "服务器缺少浏览器运行组件，请管理员检查安装",
+        "browser-launch-failed": "门户自动恢复无法启动浏览器，请管理员检查运行环境",
+        "navigation-failed": "暂时无法打开学校门户，自动恢复尚未完成，稍后将重试",
+        "login-timeout": "门户登录跳转尚未完成，自动恢复稍后将重试",
+        "no-cookie": "门户尚未提供可用的登录信息，自动恢复稍后将重试",
+        "configuration-changed": "门户来源设置已变更，本次自动恢复已停止，请重新同步",
+        "no-cookie-header": "当前门户来源未使用 Cookie 登录，无法自动替换登录信息，请检查课表来源",
+        "unsupported-source": "当前课表接口无法使用学校门户浏览器状态恢复，请检查课表来源",
+        "not-saved": "门户恢复结果尚未保存，请重新同步",
+        "retry-rejected": "已尝试恢复门户登录，但课表接口仍未接受登录信息，请检查课表来源或稍后重试",
+        "refresh-failed": "门户自动恢复暂未完成，请稍后重试或请管理员检查浏览器运行环境",
+    }
+
+    def __init__(self, reason: str):
+        # 只记录已知原因；浏览器底层异常可能含 URL 或票据，不回传原始文本。
+        if isinstance(reason, str) and reason.startswith("low-memory("):
+            reason = "low-memory"
+        self.reason = reason if reason in self._MESSAGES else "refresh-failed"
+        super().__init__(self._MESSAGES[self.reason])
+
+
 async def _fetch_bundle_with_cookie_refresh(cfg: dict):
     """门户取数失败且是登录态过期时，用持久 profile 静默续期并重试一次。
 
@@ -314,20 +345,27 @@ async def _fetch_bundle_with_cookie_refresh(cfg: dict):
     provider = get_provider(cfg)
     try:
         return provider, await provider.fetch_bundle()
-    except AuthExpiredError:
+    except (AuthExpiredError, PortalResponseError) as original_error:
         if resolve_course_source(cfg) != "portal":
             raise
         from .browser_login import silent_refresh_cookie
         try:
             res = await asyncio.to_thread(silent_refresh_cookie)
         except Exception:  # noqa: BLE001
-            res = {}
+            raise PortalRefreshError("refresh-failed") from None
+        if res.get("expired") is True:
+            raise AuthExpiredError(
+                "已尝试使用保存的浏览器状态恢复门户，但学校仍要求登录，请到「课表来源」重新扫码"
+            ) from original_error
         if not res.get("refreshed"):
-            raise
+            raise PortalRefreshError(res.get("reason", "refresh-failed")) from original_error
         cfg = load_config()
         provider = get_provider(cfg)
-        bundle = await provider.fetch_bundle()
-        db.add_sync_log("ok", "门户登录态过期，已用本机浏览器登录态静默续期并重试成功")
+        try:
+            bundle = await provider.fetch_bundle()
+        except (AuthExpiredError, PortalResponseError):
+            raise PortalRefreshError("retry-rejected") from None
+        db.add_sync_log("ok", "已用保存的浏览器状态恢复门户，并成功重试课表接口")
         return provider, bundle
 
 
@@ -489,9 +527,7 @@ def _finish_reminder(token: tuple[int, str, str], key: str, ok: bool, now: datet
                     "VALUES (?, ?, ?, ?)",
                     (user_id, day, retry_key, now.isoformat(timespec="seconds")),
                 )
-                cutoff = (now.astimezone(TZ) - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
-                conn.execute("DELETE FROM reminders WHERE user_id=? AND sent_at<?",
-                             (user_id, cutoff))
+                db.prune_reminders(conn, user_id, now.astimezone(TZ))
         finally:
             _reminder_inflight.discard(token)
 
@@ -524,30 +560,37 @@ async def _alert_auth_expired(cfg: dict, source: str, err,
                               alert_failure: bool = False) -> list[dict]:
     """登录态过期时主动推一条提醒，按数据源每天去重，修复后不再打扰。
 
-    err 可以是异常或错误文本；只有真正的登录失效（AuthExpiredError 或含过期 /
-    Cookie / 登录失败等关键词）才发登录告警；alert_failure 用于门户取数失败告警。
+    门户仅在确认学校要求重新登录时发登录告警；自动恢复的技术失败单独提示。
+    正方的附加查询保留错误文本，因此只对它兼容明确的登录失败信息。
     """
     if not cfg.get("alert_on_fail", True):
         return []
-    text = str(err)
-    expired = isinstance(err, AuthExpiredError) or any(
-        w in text for w in ("过期", "Cookie", "cURL", "登录失败", "未登录", "登录失效"))
+    if isinstance(err, PortalRefreshError) and err.reason in (
+            "busy", "interactive-login-running", "configuration-changed"):
+        return []  # 等待已有任务或配置变更完成，不用手机通知打断用户。
+    expired = isinstance(err, AuthExpiredError) or (
+        source == "zhengfang" and isinstance(err, str) and any(
+            word in err for word in ("会话已过期", "登录失败", "未登录", "登录失效")))
     if not (expired or alert_failure) or not _push_ready(cfg):
         return []
     now = datetime.now(TZ)
     day_s = now.date().isoformat()
     key = f"auth_alert:{source}" if expired else f"sync_alert:{source}"
     if not expired:
-        title = "门户课表同步失败"
-        body = "融合门户课表暂时无法更新，已保留原有课表。请检查门户数据源配置或稍后重试。"
+        if isinstance(err, PortalRefreshError):
+            title = "门户自动恢复暂未完成"
+            body = f"{err}。\n已保留原有课表。"
+        else:
+            title = "门户课表同步失败"
+            body = "融合门户课表暂时无法更新，已保留原有课表。请检查门户数据源配置或稍后重试。"
     elif source == "zhengfang":
         title = "正方教务登录失效"
         body = ("正方教务登录已失效，考试与空教室暂时无法同步 / 查询。\n"
                 "请到「课表来源 → 正方教务」重新填写学号密码或更新 Cookie。")
     else:
         title = "门户登录已过期"
-        body = ("融合门户登录已过期，课表暂停自动更新。\n"
-                "请到「课表来源」重新扫码登录，或导入新的 cURL / 更新 Cookie。")
+        body = ("已尝试自动恢复门户，学校仍要求重新登录，已保留原有课表。\n"
+                "请到「课表来源」重新扫码登录。")
     pushed = await _push_reminder(cfg, day_s, key, title, body, now)
     return [pushed] if pushed else []
 

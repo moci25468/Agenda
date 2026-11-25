@@ -1,11 +1,11 @@
-"""一键登录门户：用本机 Chrome 打开官方登录窗口，自动发现课表接口并写回配置。
+"""一键登录门户与持久 profile 自动续期：发现课表接口并按用户写回配置。
 
 设计要点：
 - 不接触用户密码。登录在官方页面由用户本人完成，扫码 / 短信 / 验证码 / MFA
   全部由浏览器与学校页面自己处理，本模块只监听登录成功后的 JSON 响应。
-- playwright 是可选依赖，通过 channel="chrome" 调用本机已安装的 Chrome，
-  不需要另下载 Chromium；浏览器 profile 持久化，多数情况下无需反复登录。
-- 只适用于有图形界面的本机环境。VPS / Docker 无桌面时请改用 cURL 导入。
+- playwright 是可选依赖，优先使用本机 Chrome，未安装时回退自带 Chromium。
+- 支持无界面运行并回传扫码二维码；profile 仅能复用浏览器保存的状态，
+  是否仍可免交互登录由学校会话有效期决定，续期候选最终必须由 API 验证。
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ import sys
 import threading
 import time
 from datetime import datetime
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
 
 from .config import DATA_DIR, load_config, save_config
 from .curl_import import collect_arrays, diagnose_url, guess_mapping
@@ -209,21 +209,30 @@ def pick_best(candidates: list[dict]) -> dict | None:
     return sorted(by_url.values(), key=lambda c: quality(c), reverse=True)[0]
 
 
+def _login_route(parts) -> bool:
+    route = unquote(parts.path + "#" + parts.fragment).lower()
+    return any(marker in route for marker in ("login", "/sso", "oauth", "/cas", "/auth"))
+
+
 def _looks_logged_in(url: str) -> bool:
-    """判断某个页面 URL 是否已经进入门户（而不是还停在统一身份认证）。"""
+    """只把门户本身的非登录路由作为候选，最终由课表 API 验证登录态。"""
     try:
         parts = urlsplit(url or "")
-    except Exception:  # noqa: BLE001
+        host = (parts.hostname or "").lower().rstrip(".")
+    except ValueError:
         return False
-    host = (parts.hostname or "").lower()
-    if not _is_qut_host(host):
+    return (parts.scheme == "https" and host == "portal.qut.edu.cn"
+            and not _login_route(parts))
+
+
+def _is_school_login_url(url: str) -> bool:
+    try:
+        parts = urlsplit(url or "")
+        host = (parts.hostname or "").lower().rstrip(".")
+    except ValueError:
         return False
-    if not host.startswith("portal") and host.split(".")[0] in _AUTH_HOSTS:
-        return False
-    path = parts.path.lower()
-    if "/sso/" in path or "login" in path or "oauth" in path:
-        return False
-    return True
+    return (parts.scheme == "https" and _is_qut_host(host)
+            and (host.split(".")[0] in _AUTH_HOSTS or _login_route(parts)))
 
 
 def _page_urls(ctx) -> list[str]:
@@ -646,6 +655,8 @@ def start() -> dict:
         return {"ok": False, "message": "缺少可选依赖 playwright，请在项目目录执行：.venv/bin/pip install playwright"}
     # 判定与置位必须同锁，否则两个并发 start() 会同时通过 is_alive() 各起一个浏览器线程
     with _lock:
+        if _SILENT_LOCK.locked():
+            return {"ok": False, "message": "正在自动恢复门户登录态，请稍后再试"}
         if _thread is not None and _thread.is_alive():
             return {"ok": False, "message": "已有一个登录窗口在进行中，请先等待或取消"}
         _stop_event = threading.Event()
@@ -682,6 +693,10 @@ def stop() -> dict:
 # 常态由 httpjson 顺手抓 Set-Cookie 续期，只有真正被踢回登录页才走到这里。
 _SILENT_LOCK = threading.Lock()
 MIN_AVAILABLE_MB = 600
+SILENT_WAIT_SECONDS = 30
+SILENT_STABLE_SECONDS = 2
+SILENT_LOGIN_STABLE_SECONDS = 5
+SILENT_POLL_MS = 500
 
 
 def _available_mb() -> int | None:
@@ -696,59 +711,61 @@ def _available_mb() -> int | None:
     return None
 
 
-def _configured_portal_host() -> str:
-    cfg = load_config()
-    url = cfg.get("provider", {}).get("portal", {}).get("url") or PORTAL_ENTRY
-    try:
-        host = (urlsplit(url).hostname or "").lower()
-    except ValueError:
-        return ""
-    return host if _is_qut_host(host) else ""
+def _save_portal_cookie(cookie_str: str, expected_provider: dict, uid: int) -> bool:
+    """仅当来源和凭据仍与启动浏览器时一致时，原子替换门户 Cookie。"""
+    from . import db
+    from .config import normalize_provider
 
-
-def _save_portal_cookie(cookie_str: str) -> bool:
-    """把续期得到的 Cookie 写回当前用户的门户配置；返回是否真的发生变化。"""
-    cfg = load_config()
-    portal = cfg.setdefault("provider", {}).setdefault("portal", {})
+    provider = (normalize_provider(expected_provider)
+                if any(key.startswith(("http_", "zf_")) for key in expected_provider)
+                else json.loads(json.dumps(expected_provider)))
+    portal = provider.setdefault("portal", {})
     headers = portal.get("headers") or {}
     if isinstance(headers, str):
         headers = json.loads(headers)
     headers = dict(headers)
     key = next((k for k in headers if str(k).lower() == "cookie"), None)
-    if key is None:
-        return False  # cURL 导入但没带登录态头的配置，不擅自造一个
-    if headers.get(key) == cookie_str:
+    if key is None or not cookie_str:
         return False
     headers[key] = cookie_str
-    save_config({"provider": {"portal": {"headers": headers}}})
-    return True
+    portal["headers"] = headers
+    # 此函数以短事务比较完整 provider，避免覆盖浏览器等待期间切换的账号或来源。
+    return db.restore_provider_config(uid, expected_provider, provider)
+
+
+def _refresh_result(reason: str, *, ok: bool = False, refreshed: bool = False,
+                    expired: bool = False) -> dict:
+    return {"ok": ok, "refreshed": refreshed, "expired": expired, "reason": reason}
 
 
 def silent_refresh_cookie(save: bool = True) -> dict:
     """用持久 profile 无头打开门户，尝试静默续期登录态。
 
     返回 {ok, refreshed, expired, reason}：
-      refreshed=True  → 已拿到有效登录态（并写回配置），调用方可重试取数
-      expired=True    → 确认被踢回统一身份认证，需要用户重新扫码
+      refreshed=True  → 候选 Cookie 已与配置一致，调用方必须重试 API 验证
+      expired=True    → 本次页面稳定停在学校登录表单，需要用户重新扫码
     """
     uid = get_current_user()
     if uid is None:
-        return {"ok": False, "refreshed": False, "expired": False, "reason": "no-user"}
-    with _lock:
-        if _thread is not None and _thread.is_alive():
-            return {"ok": False, "refreshed": False, "expired": False,
-                    "reason": "interactive-login-running"}
+        return _refresh_result("no-user")
     profile_dir = _profile_dir(uid)
-    if not profile_dir.is_dir() or not any(profile_dir.iterdir()):
-        return {"ok": False, "refreshed": False, "expired": False, "reason": "no-profile"}
+    try:
+        if not profile_dir.is_dir() or not any(profile_dir.iterdir()):
+            return _refresh_result("no-profile")
+    except OSError:
+        return _refresh_result("profile-unavailable")
     avail = _available_mb()
     if avail is not None and avail < MIN_AVAILABLE_MB:
-        return {"ok": False, "refreshed": False, "expired": False,
-                "reason": f"low-memory({avail}MB)"}
-    if not _SILENT_LOCK.acquire(blocking=False):
-        return {"ok": False, "refreshed": False, "expired": False, "reason": "busy"}
+        return _refresh_result("low-memory")
+    with _lock:
+        if _thread is not None and _thread.is_alive():
+            return _refresh_result("interactive-login-running")
+        if not _SILENT_LOCK.acquire(blocking=False):
+            return _refresh_result("busy")
     try:
         return _silent_refresh_inner(profile_dir, save)
+    except Exception:
+        return _refresh_result("refresh-failed")
     finally:
         _SILENT_LOCK.release()
 
@@ -757,11 +774,30 @@ def _silent_refresh_inner(profile_dir, save: bool) -> dict:
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        return {"ok": False, "refreshed": False, "expired": False, "reason": "no-playwright"}
+        return _refresh_result("no-playwright")
     args = ["--no-sandbox", "--disable-dev-shm-usage",
             "--disable-gpu", "--no-first-run"]
-    ctx = None
     try:
+        from . import db
+        from .config import normalize_provider
+
+        uid = get_current_user()
+        if uid is None:
+            return _refresh_result("no-user")
+        expected_provider = db.get_user_config(uid).get("provider")
+        if not isinstance(expected_provider, dict):
+            return _refresh_result("unsupported-source")
+        portal = normalize_provider(expected_provider)["portal"]
+        target_url = portal.get("url") or ""
+        if not _candidate_url_allowed(target_url):
+            return _refresh_result("unsupported-source")
+        headers = portal.get("headers") or {}
+        if isinstance(headers, str):
+            headers = json.loads(headers)
+        original_cookie = next((v for k, v in headers.items()
+                                if str(k).lower() == "cookie"), None)
+        if original_cookie is None:
+            return _refresh_result("no-cookie-header")
         with sync_playwright() as pw:
             try:
                 ctx = pw.chromium.launch_persistent_context(
@@ -769,34 +805,83 @@ def _silent_refresh_inner(profile_dir, save: bool) -> dict:
                     args=args, viewport={"width": 1180, "height": 820})
             except Exception:  # noqa: BLE001
                 # Docker 镜像只装了 chromium headless shell，没有本机 Chrome
-                ctx = pw.chromium.launch_persistent_context(
-                    str(profile_dir), headless=True,
-                    args=args, viewport={"width": 1180, "height": 820})
-            page = ctx.pages[0] if ctx.pages else ctx.new_page()
+                try:
+                    ctx = pw.chromium.launch_persistent_context(
+                        str(profile_dir), headless=True,
+                        args=args, viewport={"width": 1180, "height": 820})
+                except Exception:
+                    return _refresh_result("browser-launch-failed")
             try:
-                page.goto(PORTAL_ENTRY, wait_until="domcontentloaded", timeout=45000)
-            except Exception as e:  # noqa: BLE001
-                return {"ok": False, "refreshed": False, "expired": False,
-                        "reason": "goto: " + str(e).splitlines()[0][:80]}
-            time.sleep(1.5)  # 等 SPA 落定 + 网关回写 Cookie
-            if not any(_looks_logged_in(u) for u in _page_urls(ctx)):
-                return {"ok": True, "refreshed": False, "expired": True,
-                        "reason": "redirected-to-login"}
-            cookies = ctx.cookies()
-            cookie_str = _cookie_from_context(cookies, _configured_portal_host())
-            if not cookie_str:
-                return {"ok": True, "refreshed": False, "expired": True,
-                        "reason": "no-cookie"}
-            if save:
-                _save_portal_cookie(cookie_str)
-            return {"ok": True, "refreshed": True, "expired": False,
-                    "cookie_count": len(cookies)}
-    except Exception as e:  # noqa: BLE001
-        return {"ok": False, "refreshed": False, "expired": False,
-                "reason": str(e).splitlines()[0][:120]}
-    finally:
-        if ctx is not None:
-            try:
+                # 历史 tab 可能是公开页面或旧会话，只观察本次新开的门户页。
+                page = ctx.new_page()
+                try:
+                    page.goto(PORTAL_ENTRY, wait_until="domcontentloaded", timeout=45000)
+                except Exception:
+                    return _refresh_result("navigation-failed")
+                return _wait_for_refreshed_cookie(
+                    ctx, page, target_url, original_cookie, expected_provider, uid, save)
+            finally:
+                # 必须先正常关闭 context，再退出 Playwright driver，才有机会持久化状态。
                 ctx.close()
-            except Exception:  # noqa: BLE001
-                pass
+    except Exception:  # noqa: BLE001
+        return _refresh_result("refresh-failed")
+
+
+def _wait_for_refreshed_cookie(ctx, page, target_url: str, original_cookie: str,
+                               expected_provider: dict, uid: int, save: bool) -> dict:
+    deadline = time.monotonic() + SILENT_WAIT_SECONDS
+    candidate = None
+    candidate_since = None
+    login_url = None
+    login_since = None
+    saw_portal = False
+    host = urlsplit(target_url).hostname or ""
+    while True:
+        now = time.monotonic()
+        try:
+            state = page.evaluate("""() => {
+                const visible = el => {
+                    const r = el.getBoundingClientRect();
+                    const s = getComputedStyle(el);
+                    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden'
+                        && s.display !== 'none';
+                };
+                const login = [...document.querySelectorAll(
+                    'input[type="password"], form[action*="login"], '
+                    + '[id*="qrcode"], [class*="qrcode"], img[src*="qr"], canvas')]
+                    .some(visible);
+                return {url: location.href, ready: document.readyState, login};
+            }""")
+        except Exception:  # 导航过程中上下文会暂时消失；继续有界等待。
+            state = {}
+        url = state.get("url", "")
+        ready = state.get("ready") in ("interactive", "complete")
+        if ready and _is_school_login_url(url) and state.get("login"):
+            if login_url != url:
+                login_url, login_since = url, now
+        else:
+            login_url, login_since = None, None
+        if ready and _looks_logged_in(url):
+            saw_portal = True
+            # 由浏览器按目标接口 URL 处理域、路径和有效期，避免导出无关 Cookie。
+            cookie_str = _cookie_from_context(ctx.cookies(target_url), host)
+            current = (url, cookie_str) if cookie_str else None
+            if current is not None and current == candidate:
+                if now - candidate_since >= SILENT_STABLE_SECONDS:
+                    if not save:
+                        return _refresh_result("not-saved", ok=True)
+                    if not _save_portal_cookie(cookie_str, expected_provider, uid):
+                        return _refresh_result("configuration-changed")
+                    reason = "cookie-unchanged" if cookie_str == original_cookie else "cookie-refreshed"
+                    return _refresh_result(reason, ok=True, refreshed=True)
+            else:
+                candidate, candidate_since = current, now if current else None
+        else:
+            candidate, candidate_since = None, None
+        if now >= deadline:
+            if login_since is not None and now - login_since >= SILENT_LOGIN_STABLE_SECONDS:
+                return _refresh_result("redirected-to-login", ok=True, expired=True)
+            return _refresh_result("no-cookie" if saw_portal and candidate is None
+                                   else "login-timeout")
+        # Playwright 的等待会处理 SPA/SSO 的浏览器事件，不阻塞它的同步事件泵。
+        page.wait_for_timeout(min(SILENT_POLL_MS, max(1, int((deadline - now) * 1000))))

@@ -136,11 +136,14 @@ class SafeAsyncHTTPTransport(httpx.AsyncBaseTransport):
             method=request.method, url=str(request.url), headers=request.headers.raw,
             content=await request.aread(), extensions=request.extensions)
         response = await self._pool.handle_async_request(core_request)
-        content = await response.aread()
-        extensions = {"http_version": response.extensions.get("http_version", b"HTTP/1.1")}
-        return httpx.Response(
-            response.status_code, headers=response.headers, content=content,
-            extensions=extensions, request=request)
+        try:
+            content = await response.aread()
+            extensions = {"http_version": response.extensions.get("http_version", b"HTTP/1.1")}
+            return httpx.Response(
+                response.status, headers=response.headers, content=content,
+                extensions=extensions, request=request)
+        finally:
+            await response.aclose()
 
     async def aclose(self):
         await self._pool.aclose()

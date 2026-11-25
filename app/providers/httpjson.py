@@ -12,10 +12,11 @@ from http.cookies import SimpleCookie
 from urllib.parse import urljoin, urlsplit
 
 import httpx
+from bs4 import BeautifulSoup
 
 from ..models import Course, parse_weeks
 from ..netguard import SafeAsyncHTTPTransport, assert_safe_outbound_url
-from .base import AuthExpiredError, TimetableProvider
+from .base import AuthExpiredError, PortalResponseError, TimetableProvider
 
 WEEKDAY_MAP = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "日": 7, "天": 7}
 
@@ -128,16 +129,42 @@ def _to_int(v, default: int) -> int:
     return int(m.group(1))
 
 
+def _is_login_page(response: httpx.Response, body: str) -> bool:
+    """只识别登录端点、认证页标题或实际登录表单，不把普通登录链接当作登录页。"""
+    parts = urlsplit(str(response.url))
+    auth_host = (parts.hostname or "").lower().split(".")[0] in {
+        "sso", "cas", "auth", "authserver", "login", "passport",
+    }
+    if auth_host and re.search(r"/(?:login|signin)(?:[./;]|$)", parts.path, re.I):
+        return True
+    ctype = response.headers.get("content-type", "").lower()
+    if "html" not in ctype and not body.lstrip().startswith("<"):
+        return False
+    page = BeautifulSoup(body, "html.parser")
+    title = page.title.get_text(" ", strip=True) if page.title else ""
+    if (re.search(r"统一身份认证|统一认证|单点登录", title)
+            and not re.search(r"维护|错误|异常|故障|不可用|失败|error|unavailable|maintenance", title, re.I)):
+        return True
+    for form in page.find_all("form"):
+        if form.find("input", attrs={"type": re.compile(r"^password$", re.I)}) is None:
+            continue
+        identity = " ".join(str(form.get(key) or "") for key in ("id", "name", "action"))
+        if re.search(r"login|signin|sign-in|/cas/|/sso/", identity, re.I):
+            return True
+    return False
+
+
 def check_auth_expired(response: httpx.Response):
-    """响应被踢回 SSO / 登录页、或接口返回未登录时抛出 AuthExpiredError。"""
-    final_url = str(response.url)
-    ctype = response.headers.get("content-type", "")
-    body_head = response.text[:3000]
-    msg = "门户登录已过期（请求被重定向回统一身份认证），请重新登录门户并导入新的 cURL / 更新 Cookie"
-    if ("sso." in final_url and "login" in final_url) or \
-       ("text/html" in ctype and ("统一身份认证" in body_head or "login" in body_head.lower())):
+    """只有明确的登录页、401 或 JSON 未登录证据才确认登录态失效。"""
+    msg = "门户登录已过期，请重新登录门户并更新登录信息"
+    if response.status_code == 401:
         raise AuthExpiredError(msg)
-    if response.status_code in (401, 403):
+    # 服务端错误保留原 HTTP 状态，不能因为错误页带认证标题而误报登录过期。
+    if response.status_code >= 500:
+        return
+    ctype = response.headers.get("content-type", "").lower()
+    body_head = response.text[:3000]
+    if _is_login_page(response, body_head):
         raise AuthExpiredError(msg)
     # 部分门户不跳转，只返回 {"code":401,"msg":"未登录"} 之类的 JSON
     if "json" in ctype or body_head.lstrip().startswith(("{", "[")):
@@ -147,8 +174,8 @@ def check_auth_expired(response: httpx.Response):
             payload = None
         if isinstance(payload, dict):
             code = str(payload.get("code") or payload.get("status") or "")
-            text = str(payload.get("msg") or payload.get("message") or "")
-            if code in ("401", "403") or any(
+            text = str(payload.get("msg") or payload.get("message") or "").lower()
+            if code == "401" or any(
                 w in text for w in ("未登录", "登录失效", "登录过期", "会话过期", "请重新登录", "unauthorized")
             ):
                 raise AuthExpiredError(msg)
@@ -303,7 +330,7 @@ class HttpJsonProvider(TimetableProvider):
                         kwargs = {"content": body or ""}
                     else:
                         kwargs = {"json": body}
-                r = await client.request(url, method=method, headers=headers, **kwargs)
+                r = await client.request(method, url, headers=headers, **kwargs)
                 responses.append(r)
                 location = r.headers.get("location") if r.is_redirect else ""
                 if not location:
@@ -316,12 +343,15 @@ class HttpJsonProvider(TimetableProvider):
             else:
                 raise ValueError("接口重定向次数过多")
             self._remember_refreshed_cookies(responses)
+            # 401/403 仍可检查明确认证证据；其他失败先保留原 HTTP 错误。
+            if r.status_code not in (401, 403):
+                r.raise_for_status()
             check_auth_expired(r)
             r.raise_for_status()
             try:
                 return r.json()
             except ValueError:
-                raise ValueError("接口未返回 JSON（可能登录态失效或接口地址不对），请重新导入 cURL")
+                raise PortalResponseError("门户接口未返回有效 JSON，暂时无法读取课表，请稍后重试") from None
 
     async def fetch(self) -> list[Course]:
         return courses_from_payload(await self.fetch_raw(), self.list_path, self.mapping)

@@ -429,19 +429,27 @@ def reminder_sent(day: str, item_key: str) -> bool:
     return row is not None
 
 
-def mark_reminder(day: str, item_key: str):
-    """标记已推送；顺手清掉 7 天前发送过的记录，表不会无限膨胀。
+def prune_reminders(conn: sqlite3.Connection, user_id: int,
+                    now: datetime | None = None):
+    """只清理已过事项日期、且发送超过七天的记录。
 
-    清理按 sent_at（实际发送时间）而不是 day（事项所属日期）：
-    若按 day 清理，补推较早日期的事项时会把刚写入的去重记录当场删掉，
-    导致同一事项每分钟重复推送。
+    未来考试的复习提醒需保留到考试结束；补推过往事项的新记录仍保留七天。
     """
+    now = now or datetime.now()
+    cutoff = (now - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute(
+        "DELETE FROM reminders WHERE user_id=? AND sent_at<? AND day<?",
+        (user_id, cutoff, now.date().isoformat()),
+    )
+
+
+def mark_reminder(day: str, item_key: str):
+    """标记已推送，并清理已过期的历史去重记录。"""
     with get_conn() as conn:
         conn.execute(
             "INSERT OR IGNORE INTO reminders (user_id, day, item_key, sent_at) VALUES (?, ?, ?, ?)",
             (_uid(), day, item_key, now_str()))
-        cutoff = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
-        conn.execute("DELETE FROM reminders WHERE user_id = ? AND sent_at < ?", (_uid(), cutoff))
+        prune_reminders(conn, _uid())
 
 
 def get_logs(limit: int = 50) -> dict:

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import asyncio
 import json
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -41,6 +44,133 @@ class PasswordSecurityTests(unittest.TestCase):
             self.assertFalse(auth.rate_limit_allowed("account:b"))
         finally:
             auth._attempts.clear()
+
+
+class LoginRateLimitTests(unittest.TestCase):
+    def setUp(self):
+        auth._attempts.clear()
+        auth._pending_attempts.clear()
+
+    def tearDown(self):
+        auth._attempts.clear()
+        auth._pending_attempts.clear()
+
+    def test_reservation_is_atomic_across_threads(self):
+        barrier = threading.Barrier(40)
+
+        def reserve(_):
+            barrier.wait(timeout=5)
+            return auth.reserve_login_attempt("account", "ip")
+
+        with ThreadPoolExecutor(max_workers=40) as pool:
+            attempts = list(pool.map(reserve, range(40)))
+        self.assertEqual(sum(attempt is not None for attempt in attempts), 5)
+
+    def test_account_rejection_does_not_consume_ip_quota(self):
+        for _ in range(5):
+            self.assertIsNotNone(auth.reserve_login_attempt("limited", "ip"))
+        for _ in range(20):
+            self.assertIsNone(auth.reserve_login_attempt("limited", "ip"))
+        for i in range(25):
+            self.assertIsNotNone(auth.reserve_login_attempt(f"other:{i}", "ip"))
+        self.assertIsNone(auth.reserve_login_attempt("last", "ip"))
+
+    def test_ip_rejection_does_not_consume_account_quota(self):
+        for i in range(30):
+            self.assertIsNotNone(auth.reserve_login_attempt(f"other:{i}", "limited-ip"))
+        for _ in range(20):
+            self.assertIsNone(auth.reserve_login_attempt("account", "limited-ip"))
+        for _ in range(5):
+            self.assertIsNotNone(auth.reserve_login_attempt("account", "other-ip"))
+        self.assertIsNone(auth.reserve_login_attempt("account", "other-ip"))
+
+    def test_success_preserves_inflight_attempts_and_other_accounts_ip_failures(self):
+        failure = auth.reserve_login_attempt("account", "ip")
+        auth.complete_login_attempt(failure, success=False)
+        other_failure = auth.reserve_login_attempt("other", "ip")
+        auth.complete_login_attempt(other_failure, success=False)
+        pending = auth.reserve_login_attempt("account", "ip")
+        success = auth.reserve_login_attempt("account", "ip")
+        auth.complete_login_attempt(success, success=True)
+        # 成功清除了旧账号失败记录，但仍在验证的请求继续占用一个名额。
+        for _ in range(4):
+            self.assertIsNotNone(auth.reserve_login_attempt("account", "ip"))
+        self.assertIsNone(auth.reserve_login_attempt("account", "ip"))
+        # IP 保留两个历史失败与五个验证占位，还剩 23 个名额。
+        for i in range(23):
+            self.assertIsNotNone(auth.reserve_login_attempt(f"fresh:{i}", "ip"))
+        self.assertIsNone(auth.reserve_login_attempt("last", "ip"))
+        auth.complete_login_attempt(pending, success=False)
+
+    def test_single_key_consumption_is_atomic_across_threads(self):
+        barrier = threading.Barrier(40)
+
+        def consume(_):
+            barrier.wait(timeout=5)
+            return auth.consume_rate_limit("register:ip")
+
+        with ThreadPoolExecutor(max_workers=40) as pool:
+            allowed = list(pool.map(consume, range(40)))
+        self.assertEqual(sum(allowed), 5)
+
+
+class ConcurrentLoginTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        auth._attempts.clear()
+        auth._pending_attempts.clear()
+
+    def tearDown(self):
+        auth._attempts.clear()
+        auth._pending_attempts.clear()
+
+    async def assert_concurrent_limit(self, usernames, expected_verifications):
+        from app import main
+
+        release = asyncio.Event()
+        started = asyncio.Event()
+        verification_count = 0
+
+        async def verify(*args):
+            nonlocal verification_count
+            verification_count += 1
+            if verification_count == expected_verifications:
+                started.set()
+            await release.wait()
+            return False
+
+        request = Request({
+            "type": "http", "method": "POST", "path": "/api/auth/login",
+            "headers": [], "client": ("203.0.113.5", 1234),
+            "scheme": "http", "server": ("test", 80),
+        })
+
+        async def login(username):
+            try:
+                await main.auth_login(
+                    main.LoginRequest(username=username, password="wrong-password"), request)
+            except HTTPException as exc:
+                return exc.status_code
+
+        with (patch.object(main.db, "get_user_by_username", return_value=None) as lookup,
+              patch.object(main, "run_in_threadpool", side_effect=verify)):
+            tasks = [asyncio.create_task(login(username)) for username in usernames]
+            try:
+                await asyncio.wait_for(started.wait(), timeout=2)
+                self.assertEqual(verification_count, expected_verifications)
+                self.assertEqual(lookup.call_count, expected_verifications)
+            finally:
+                release.set()
+                statuses = await asyncio.gather(*tasks)
+        self.assertEqual(statuses.count(400), expected_verifications)
+        self.assertEqual(statuses.count(429), len(usernames) - expected_verifications)
+        self.assertFalse(auth._pending_attempts)
+        self.assertEqual(len(auth._attempts["login-ip:203.0.113.5"]), expected_verifications)
+
+    async def test_same_account_only_verifies_five_concurrent_attempts(self):
+        await self.assert_concurrent_limit(["victim"] * 50, 5)
+
+    async def test_same_ip_only_verifies_thirty_concurrent_accounts(self):
+        await self.assert_concurrent_limit([f"user{i}" for i in range(50)], 30)
 
 
 class ConfigSecurityTests(unittest.TestCase):

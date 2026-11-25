@@ -10,6 +10,10 @@ class AuthExpiredError(ValueError):
     """登录态过期（被重定向回 SSO / 返回登录页），需要用户更新凭证。"""
 
 
+class PortalResponseError(ValueError):
+    """门户返回非预期页面，需要尝试恢复浏览器状态，尚不能确认登录失效。"""
+
+
 class TimetableProvider(ABC):
     name = "base"
     is_demo = False

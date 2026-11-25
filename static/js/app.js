@@ -1294,9 +1294,10 @@
             roomPopMessage("这一天都有课", "课表显示当天没有空闲时段，换个日期试试。");
             return;
           }
-          const exact = freeBlocks.find(
-            (x) => x.start === wantStart && x.end === wantEnd,
-          );
+          // 连续空闲段可能从偶数节开始；只要完整覆盖用户点选区间，就保留原时段。
+          const exact = wantEnd <= roomMaxJc() && free.spans.some(
+            (x) => x.start <= wantStart && x.end >= wantEnd,
+          ) ? { start: wantStart, end: wantEnd } : null;
           const block =
             exact ||
             freeBlocks.reduce(
@@ -1588,7 +1589,7 @@
       function setCourseActionBusy(busy) {
         courseActionBusy = busy;
         $("#saveCourseBtn").disabled = busy;
-        $("#courseEditor [data-edit], #courseEditor [data-del], #restoreHiddenBtn")
+        $$("#courseEditor [data-edit], #courseEditor [data-del], #restoreHiddenBtn")
           .forEach((b) => (b.disabled = busy));
         $("#resetCoursesBtn").disabled = busy || !courseData?.has_overrides;
       }
@@ -1753,7 +1754,7 @@
       function setExamActionBusy(busy) {
         examActionBusy = busy;
         $("#saveExamAdjustBtn").disabled = busy;
-        $("#examEditor [data-edit-exam], #examEditor [data-del-exam], #restoreHiddenExamsBtn")
+        $$("#examEditor [data-edit-exam], #examEditor [data-del-exam], #restoreHiddenExamsBtn")
           .forEach((b) => (b.disabled = busy));
         $("#resetExamsBtn").disabled = busy || !examAdjustData?.has_overrides;
       }

@@ -3,10 +3,11 @@ from __future__ import annotations
 import tempfile
 import threading
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from app import db, push, room_cache
+from app import db, push, room_cache, scheduler
 from app.user_context import current_user_id
 
 
@@ -114,6 +115,75 @@ class PushReliabilityTests(unittest.IsolatedAsyncioTestCase):
             ok, error = await push.send_bark(self.cfg, "title", "body")
         self.assertFalse(ok)
         self.assertNotIn("secret-key", error)
+
+
+class ReminderRetentionTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        root = Path(self.directory.name)
+        for name, value in (("DATA_DIR", root), ("DB_PATH", root / "campus.db")):
+            patcher = patch.object(db, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        db.init_db()
+        self.user_id = db.create_user("reminder-test", "synthetic-hash")
+        token = current_user_id.set(self.user_id)
+        self.addCleanup(current_user_id.reset, token)
+        self.now = datetime(2026, 11, 1, 9, tzinfo=scheduler.TZ)
+        clock = patch.object(db, "datetime", wraps=datetime)
+        self.clock = clock.start()
+        self.addCleanup(clock.stop)
+        self.clock.now.return_value = self.now.replace(tzinfo=None)
+
+    async def assert_review_stays_deduplicated(self, cleanup):
+        exam_day = (self.now + timedelta(days=15)).date().isoformat()
+        db.save_exam_snapshot([{"name": "数学", "date": exam_day, "start": "09:00"}], "test")
+        cfg = {"push": {"bark_enabled": True, "exam_review_days": 15}}
+        send = AsyncMock(return_value=[{"channel": "bark", "ok": True}])
+        with patch.object(scheduler, "push_all", send):
+            await scheduler.push_exam_reviews(cfg, self.now)
+            self.assertEqual(send.await_count, 1)
+            later = self.now + timedelta(days=8)
+            self.clock.now.return_value = later.replace(tzinfo=None)
+            cleanup(later)
+            await scheduler.push_exam_reviews(cfg, later)
+            self.assertEqual(send.await_count, 1)
+
+    async def test_daily_sync_cleanup_preserves_future_exam_deduplication(self):
+        await self.assert_review_stays_deduplicated(
+            lambda now: db.mark_reminder(now.date().isoformat(), "daily_sync"))
+
+    async def test_failed_reminder_cleanup_preserves_future_exam_deduplication(self):
+        def cleanup(now):
+            key = "unrelated-course"
+            token = scheduler._claim_reminder(now.date().isoformat(), key, now)
+            self.assertIsNotNone(token)
+            scheduler._finish_reminder(token, key, False, now)
+
+        await self.assert_review_stays_deduplicated(cleanup)
+
+    async def test_cleanup_removes_only_old_past_items_for_current_user(self):
+        today = self.now.date().isoformat()
+        past = (self.now - timedelta(days=9)).date().isoformat()
+        future = (self.now + timedelta(days=60)).date().isoformat()
+        old_sent_at = (self.now - timedelta(days=8)).strftime("%Y-%m-%d %H:%M:%S")
+        with db.get_conn() as conn:
+            conn.executemany(
+                "INSERT INTO reminders (user_id, day, item_key, sent_at) VALUES (?, ?, ?, ?)",
+                [(self.user_id, day, key, old_sent_at) for day, key in (
+                    (past, "old-past"), (today, "old-today"), (future, "old-future"))]
+                + [(self.user_id + 1, past, "other-user", old_sent_at)],
+            )
+        db.mark_reminder(past, "recently-sent-past")
+        self.assertFalse(db.reminder_sent(past, "old-past"))
+        self.assertTrue(db.reminder_sent(today, "old-today"))
+        self.assertTrue(db.reminder_sent(future, "old-future"))
+        self.assertTrue(db.reminder_sent(past, "recently-sent-past"))
+        with db.get_conn() as conn:
+            self.assertEqual(conn.execute(
+                "SELECT COUNT(*) FROM reminders WHERE user_id=?", (self.user_id + 1,),
+            ).fetchone()[0], 1)
 
 
 class RoomSingleflightTests(unittest.IsolatedAsyncioTestCase):

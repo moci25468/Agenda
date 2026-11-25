@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import socket
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
+import httpcore
 import httpx
 
 from app.browser_login import (
@@ -12,7 +13,8 @@ from app.browser_login import (
     _headers_for_config,
     pick_best,
 )
-from app.netguard import UnsafeURLError, _SafeNetworkBackend, assert_safe_outbound_url
+from app.netguard import (SafeAsyncHTTPTransport, UnsafeURLError, _SafeNetworkBackend,
+                          assert_safe_outbound_url)
 from app.providers.httpjson import _cookie_updates, _redirect_headers
 from app.providers.zhengfang import _check_zhengfang_request
 
@@ -46,6 +48,73 @@ class OutboundSecurityTests(unittest.IsolatedAsyncioTestCase):
         await _check_zhengfang_request(
             request, ("https", "portal.qut.edu.cn", 443))
         self.assertNotIn("cookie", request.headers)
+
+
+class TrackedCoreStream:
+    def __init__(self, content: bytes, *, error: Exception | None = None):
+        self.content = content
+        self.error = error
+        self.closed = False
+
+    async def __aiter__(self):
+        if self.error is not None:
+            raise self.error
+        yield self.content
+
+    async def aclose(self):
+        self.closed = True
+
+
+class OutboundTransportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_real_httpcore_response_becomes_httpx_response_and_releases_stream(self):
+        stream = TrackedCoreStream(b'{"ok":true}')
+        core_response = httpcore.Response(
+            200, headers=[(b"Content-Type", b"application/json")], content=stream,
+            extensions={"http_version": b"HTTP/2"})
+        pool = AsyncMock()
+        pool.handle_async_request.return_value = core_response
+        with patch("app.netguard.httpcore.AsyncConnectionPool", return_value=pool):
+            async with httpx.AsyncClient(transport=SafeAsyncHTTPTransport(), trust_env=False) as client:
+                response = await client.post("https://school.example/login", data={"name": "test"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"ok": True})
+        self.assertEqual(response.http_version, "HTTP/2")
+        self.assertTrue(stream.closed)
+        request = pool.handle_async_request.call_args.args[0]
+        self.assertIsInstance(request, httpcore.Request)
+        self.assertEqual(request.method, b"POST")
+        self.assertEqual(b"".join([part async for part in request.stream]), b"name=test")
+        pool.aclose.assert_awaited_once()
+
+    async def test_read_failure_also_releases_core_response(self):
+        stream = TrackedCoreStream(b"", error=httpcore.ReadError("synthetic read failure"))
+        pool = AsyncMock()
+        pool.handle_async_request.return_value = httpcore.Response(200, content=stream)
+        with patch("app.netguard.httpcore.AsyncConnectionPool", return_value=pool):
+            async with httpx.AsyncClient(transport=SafeAsyncHTTPTransport(), trust_env=False) as client:
+                with self.assertRaises(httpcore.ReadError):
+                    await client.get("https://school.example/login")
+        self.assertTrue(stream.closed)
+
+    async def test_httpx_redirect_follows_core_response_and_keeps_session_cookie(self):
+        streams = [TrackedCoreStream(b""), TrackedCoreStream(b"ready")]
+        pool = AsyncMock()
+        pool.handle_async_request.side_effect = [
+            httpcore.Response(302, headers=[
+                (b"Location", b"/menu"), (b"Set-Cookie", b"sid=synthetic; Path=/")],
+                content=streams[0]),
+            httpcore.Response(200, content=streams[1]),
+        ]
+        with patch("app.netguard.httpcore.AsyncConnectionPool", return_value=pool):
+            async with httpx.AsyncClient(transport=SafeAsyncHTTPTransport(), trust_env=False,
+                                         follow_redirects=True) as client:
+                response = await client.get("https://school.example/login")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.text, "ready")
+        self.assertEqual(str(response.url), "https://school.example/menu")
+        second = pool.handle_async_request.call_args_list[1].args[0]
+        self.assertIn((b"Cookie", b"sid=synthetic"), second.headers)
+        self.assertTrue(all(stream.closed for stream in streams))
 
 
 class CredentialIsolationTests(unittest.TestCase):

@@ -2002,28 +2002,27 @@ async def auth_login(req: LoginRequest, request: Request):
     username = (req.username or "").strip()
     account_key = f"login:{client_ip}:{username.lower()}"
     ip_key = f"login-ip:{client_ip}"
-    if (not auth.rate_limit_allowed(account_key)
-            or not auth.rate_limit_allowed(ip_key, auth.MAX_IP_ATTEMPTS_PER_MINUTE)):
+    attempt = auth.reserve_login_attempt(account_key, ip_key)
+    if attempt is None:
         raise HTTPException(429, "尝试过于频繁，请一分钟后再试")
-    user = db.get_user_by_username(username)
-    stored_hash = user["password_hash"] if user else ""
-    pw_ok = await run_in_threadpool(auth.verify_password, req.password, stored_hash)
-    if not user or not user["is_active"] or not pw_ok:
-        auth.record_auth_failure(account_key)
-        auth.record_auth_failure(ip_key, auth.MAX_IP_ATTEMPTS_PER_MINUTE)
-        raise HTTPException(400, "用户名或密码错误")
-    token = auth.new_token()
-    if not db.checked_create_session(user["id"], token, auth.SESSION_TTL_SECONDS,
-                                     user["password_hash"]):
-        auth.record_auth_failure(account_key)
-        auth.record_auth_failure(ip_key, auth.MAX_IP_ATTEMPTS_PER_MINUTE)
-        raise HTTPException(400, "账号状态或密码已变更，请重新登录")
-    auth.clear_rate_limit(account_key)
-    auth.clear_rate_limit(ip_key)
-    db.set_last_login(user["id"])
-    resp = JSONResponse({"ok": True, "user": _public_user(user)})
-    _session_cookie(resp, request, token)
-    return resp
+    success = False
+    try:
+        user = db.get_user_by_username(username)
+        stored_hash = user["password_hash"] if user else ""
+        pw_ok = await run_in_threadpool(auth.verify_password, req.password, stored_hash)
+        if not user or not user["is_active"] or not pw_ok:
+            raise HTTPException(400, "用户名或密码错误")
+        token = auth.new_token()
+        if not db.checked_create_session(user["id"], token, auth.SESSION_TTL_SECONDS,
+                                         user["password_hash"]):
+            raise HTTPException(400, "账号状态或密码已变更，请重新登录")
+        db.set_last_login(user["id"])
+        resp = JSONResponse({"ok": True, "user": _public_user(user)})
+        _session_cookie(resp, request, token)
+        success = True
+        return resp
+    finally:
+        auth.complete_login_attempt(attempt, success=success)
 
 
 @app.post("/api/auth/logout")
@@ -2543,7 +2542,7 @@ async def save_zhengfang(req: ZhengfangSaveRequest):
         # 课表主源就是正方：直接写入这次拉到的数据，页面无需等下一次定时同步
         try:
             await apply_snapshot(cfg, courses, "zhengfang", False,
-                                 exams=exams or None,
+                                 exams=None if exam_error else exams,
                                  exam_source="zhengfang" if not exam_error else None)
         except Exception as e:  # noqa: BLE001
             message += f"；课表已保存但写入失败：{e}"

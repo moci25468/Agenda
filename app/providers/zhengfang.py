@@ -20,9 +20,10 @@ import re
 import time
 from contextlib import asynccontextmanager
 from datetime import date
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import httpx
+from bs4 import BeautifulSoup
 
 from ..models import Course, Exam, Score, parse_weeks
 from ..netguard import SafeAsyncHTTPTransport, check_outbound_request
@@ -39,6 +40,20 @@ async def _check_zhengfang_request(request, expected_origin: tuple[str, str, int
     await check_outbound_request(request)
     if _origin(str(request.url)) != expected_origin:
         request.headers.pop("cookie", None)
+
+
+async def _check_zhengfang_response(response, expected_origin: tuple[str, str, int]) -> None:
+    """修正教务反向代理生成的同站 HTTP 跳转，继续使用 HTTPS 会话。"""
+    location = response.headers.get("location")
+    if not response.is_redirect or not location or expected_origin[0] != "https":
+        return
+    if _origin(str(response.url)) != expected_origin:
+        return
+    target = httpx.URL(urljoin(str(response.url), location))
+    # 只修正同主机的标准端口降级；其他来源继续由请求校验隔离 Cookie。
+    if (expected_origin[2] == 443 and
+            _origin(str(target)) == ("http", expected_origin[1], 80)):
+        response.headers["location"] = str(target.copy_with(scheme="https", port=None))
 
 
 UA = ("Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 "
@@ -138,6 +153,36 @@ def _page_message(html: str) -> str:
         if text:
             return text[:120]
     return ""
+
+
+def _login_form_fields(html: str, username: str, password: str) -> tuple[dict, str | None]:
+    """按学校表单的 name 提交，保留同名密码框及隐藏字段。"""
+    soup = BeautifulSoup(html, "html.parser")
+    account = soup.find("input", attrs={"name": "yhm"})
+    form = account.find_parent("form") if account else None
+    if form is None or not form.find("input", attrs={"name": "mm"}):
+        raise ValueError("教务登录页面格式已变化，未找到账号密码表单，请稍后重试或改用 Cookie 模式")
+    fields: dict[str, str | list[str]] = {}
+    for item in form.find_all("input"):
+        name = item.get("name")
+        kind = (item.get("type") or "text").lower()
+        if (not name or item.has_attr("disabled") or
+                kind in {"button", "submit", "reset", "file", "image"} or
+                (kind in {"checkbox", "radio"} and not item.has_attr("checked"))):
+            continue
+        value = (username if name == "yhm" else password if name in {"mm", "hidMm"}
+                 else item.get("value", "on" if kind in {"checkbox", "radio"} else ""))
+        if name in fields:
+            previous = fields[name]
+            fields[name] = [*previous, value] if isinstance(previous, list) else [previous, value]
+        else:
+            fields[name] = value
+    # 当前正方页面在提交前先结束旧会话；双 mm 输入框是这版登录页的特征。
+    logout = soup.find("input", id="csrfTokenLogout") or soup.find(
+        "input", attrs={"name": "csrfTokenLogout"})
+    logout_token = (logout.get("value", "") if logout else "") if (
+        logout is not None or isinstance(fields.get("mm"), list)) else None
+    return fields, logout_token
 
 
 def _response_items(payload, keys: tuple[str, ...], label: str) -> list:
@@ -246,8 +291,10 @@ class ZhengfangProvider(TimetableProvider):
         async with httpx.AsyncClient(
             follow_redirects=not self._shared_rooms, trust_env=False, headers=headers, timeout=30,
             transport=SafeAsyncHTTPTransport(),
-            event_hooks={"request": [
-                lambda request: _check_zhengfang_request(request, expected_origin)]},
+            event_hooks={
+                "request": [lambda request: _check_zhengfang_request(request, expected_origin)],
+                "response": [lambda response: _check_zhengfang_response(response, expected_origin)],
+            },
         ) as client:
             if not self.cookie:
                 await self._login(client)
@@ -261,7 +308,6 @@ class ZhengfangProvider(TimetableProvider):
         r = await client.get(login_url, timeout=20)
         r.raise_for_status()
         html = r.text
-        csrf = _hidden_value(html, "csrftoken")
         mmsfjm = _hidden_value(html, "mmsfjm") or "1"
 
         password_field = self.password
@@ -284,7 +330,19 @@ class ZhengfangProvider(TimetableProvider):
             except ValueError as e:
                 raise ValueError(f"教务登录加密失败：{e}")
 
-        origin = "{0.scheme}://{0.netloc}".format(httpx.URL(self.base))
+        base_url = urlsplit(self.base)
+        origin = f"{base_url.scheme}://{base_url.netloc}"
+        fields, logout_token = _login_form_fields(html, self.username, password_field)
+        if logout_token is not None:
+            logout = await client.post(
+                f"{self.base}/xtgl/login_logoutAccount.html",
+                headers={"Referer": login_url, "Origin": origin,
+                         "X-Requested-With": "XMLHttpRequest"},
+                data={"csrfTokenLogout": logout_token},
+                follow_redirects=False, timeout=20,
+            )
+            if logout.status_code != 404:
+                logout.raise_for_status()
         r = await client.post(
             f"{login_url}?time={int(time.time() * 1000)}",
             headers={
@@ -292,49 +350,31 @@ class ZhengfangProvider(TimetableProvider):
                 "Origin": origin,
                 "Content-Type": "application/x-www-form-urlencoded",
             },
-            data={
-                "csrftoken": csrf,
-                "language": "zh_CN",
-                "yhm": self.username,
-                "mm": password_field,
-                "hidMm": "",
-                "ydType": "",
-                "yzm": "",
-            },
+            data=fields,
             follow_redirects=False, timeout=20,
         )
+        if r.status_code >= 400:
+            r.raise_for_status()
 
         location = r.headers.get("location", "")
-        final_url = ""
         if 300 <= r.status_code < 400 and location:
-            if location.startswith("http"):
-                target = location
-            elif location.startswith("/"):
-                target = f"{origin}{location}"
-            else:
-                target = f"{self.base}/{location.lstrip('/')}"
+            target = urljoin(str(r.url), location)
             # 正方登录成功时可能先 302 回登录页，再凭已建立的会话跳到主菜单
             try:
                 r = await client.get(target, timeout=20)
-                final_url = str(r.url)
+                r.raise_for_status()
             except httpx.HTTPError:
-                raise AuthExpiredError(f"教务登录后跳转失败（HTTP {r.status_code}），请稍后重试")
-            if "login_slogin" in final_url or 'name="yhm"' in r.text:
-                detail = _page_message(r.text)
-                if not detail and re.search(r'name=["\']yzm["\']', r.text):
-                    detail = ("教务要求输入验证码（连续登录失败会触发），"
-                              "请稍后重试或改用 Cookie 模式")
-                raise AuthExpiredError(f"教务登录失败：{detail or '账号或密码错误'}")
-        elif "index_initMenu" in r.text or "initMenu" in r.text:
-            pass  # 直接返回了主菜单页
-        else:
-            detail = _page_message(r.text)
-            if not detail and re.search(r'name=["\']yzm["\']', r.text):
-                detail = ("教务要求输入验证码（连续登录失败会触发），"
-                          "请稍后重试或改用 Cookie 模式")
-            if not detail:
-                detail = f"账号或密码错误（HTTP {r.status_code}）"
+                raise ValueError("教务登录后跳转失败，请稍后重试") from None
+        login_form = re.search(r'name\s*=\s*["\']yhm["\']', r.text, re.I)
+        if not login_form and ("index_initMenu" in r.url.path or "initMenu" in r.text):
+            return
+        detail = _page_message(r.text)
+        if not detail and re.search(r'name\s*=\s*["\']yzm["\']', r.text, re.I):
+            detail = ("教务要求输入验证码（连续登录失败会触发），"
+                      "请稍后重试或改用 Cookie 模式")
+        if detail:
             raise AuthExpiredError(f"教务登录失败：{detail}")
+        raise ValueError("教务登录未完成：学校未返回明确错误信息，请稍后重试或改用 Cookie 模式")
 
     async def _fetch_courses(self, client: httpx.AsyncClient) -> list[Course]:
         r = await client.post(

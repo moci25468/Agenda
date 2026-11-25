@@ -9,6 +9,7 @@ import secrets
 import threading
 import time
 from collections import defaultdict
+from dataclasses import dataclass, field
 
 PBKDF2_ITERATIONS = 600_000
 SESSION_COOKIE = "qut_session"
@@ -19,6 +20,7 @@ MAX_PASSWORD_LENGTH = 256
 
 _attempt_lock = threading.Lock()
 _attempts: dict[str, list[float]] = defaultdict(list)
+_pending_attempts: dict[str, dict[object, float]] = {}
 MAX_ATTEMPTS_PER_MINUTE = 5
 MAX_IP_ATTEMPTS_PER_MINUTE = 30
 _DUMMY_HASH = (f"pbkdf2_sha256${PBKDF2_ITERATIONS}$"
@@ -78,10 +80,66 @@ def record_auth_failure(key: str, limit: int = MAX_ATTEMPTS_PER_MINUTE) -> None:
 
 
 def consume_rate_limit(key: str, limit: int = MAX_ATTEMPTS_PER_MINUTE) -> bool:
-    if not rate_limit_allowed(key, limit):
-        return False
-    record_auth_failure(key, limit)
-    return True
+    now = time.time()
+    with _attempt_lock:
+        hits = [t for t in _attempts.get(key, []) if now - t < 60]
+        _attempts[key] = hits
+        if len(hits) >= limit:
+            return False
+        hits.append(now)
+        return True
+
+
+@dataclass(frozen=True)
+class LoginAttempt:
+    account_key: str
+    ip_key: str
+    started_at: float
+    token: object = field(default_factory=object)
+
+
+def reserve_login_attempt(account_key: str, ip_key: str) -> LoginAttempt | None:
+    """在验证密码前同时占用账号和 IP 额度，拒绝时不占用任意一组。"""
+    now = time.time()
+    limits = ((account_key, MAX_ATTEMPTS_PER_MINUTE),
+              (ip_key, MAX_IP_ATTEMPTS_PER_MINUTE))
+    with _attempt_lock:
+        for key, _ in limits:
+            hits = [t for t in _attempts.get(key, []) if now - t < 60]
+            if hits:
+                _attempts[key] = hits
+            else:
+                _attempts.pop(key, None)
+            pending = {
+                token: t for token, t in _pending_attempts.get(key, {}).items()
+                if now - t < 60
+            }
+            if pending:
+                _pending_attempts[key] = pending
+            else:
+                _pending_attempts.pop(key, None)
+        if any(len(_attempts.get(key, [])) + len(_pending_attempts.get(key, {})) >= limit
+               for key, limit in limits):
+            return None
+        attempt = LoginAttempt(account_key, ip_key, now)
+        for key, _ in limits:
+            _pending_attempts.setdefault(key, {})[attempt.token] = now
+        return attempt
+
+
+def complete_login_attempt(attempt: LoginAttempt, *, success: bool) -> None:
+    """释放验证占位；成功重置账号失败记录，保留其他请求的 IP 额度。"""
+    now = time.time()
+    with _attempt_lock:
+        for key in (attempt.account_key, attempt.ip_key):
+            pending = _pending_attempts.get(key, {})
+            existed = pending.pop(attempt.token, None) is not None
+            if not pending:
+                _pending_attempts.pop(key, None)
+            if not success and existed and now - attempt.started_at < 60:
+                _attempts.setdefault(key, []).append(attempt.started_at)
+        if success:
+            _attempts.pop(attempt.account_key, None)
 
 
 def clear_rate_limit(key: str):
